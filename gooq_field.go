@@ -75,10 +75,23 @@ func (f Field[T]) render(rc *renderContext) (string, []any) {
 	return sql, nil
 }
 
-// OrderClause 是排序子句（字段 + 方向）。
+// OrderClause 是排序子句（字段 + 方向 + NULLS 位置）。
 type OrderClause struct {
 	field Field[any]
 	desc  bool
+	nulls string // "FIRST" / "LAST"（PG/Oracle 渲染，MySQL 忽略）。
+}
+
+// NullsFirst 返回 NULLS FIRST 排序子句（PG/Oracle）。
+func (o OrderClause) NullsFirst() OrderClause {
+	o.nulls = "FIRST"
+	return o
+}
+
+// NullsLast 返回 NULLS LAST 排序子句（PG/Oracle）。
+func (o OrderClause) NullsLast() OrderClause {
+	o.nulls = "LAST"
+	return o
 }
 
 func (o OrderClause) render(rc *renderContext) (string, []any) {
@@ -87,6 +100,9 @@ func (o OrderClause) render(rc *renderContext) (string, []any) {
 		sql += " DESC"
 	} else {
 		sql += " ASC"
+	}
+	if o.nulls != "" && rc.dialect != DialectMySQL && rc.dialect != DialectSQLite {
+		sql += " NULLS " + o.nulls
 	}
 	return sql, nil
 }

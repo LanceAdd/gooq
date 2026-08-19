@@ -184,3 +184,29 @@ func Mul(left, right any) Expression {
 func Div(left, right any) Expression {
 	return &arithExpr{op: arithDiv, left: left, right: right}
 }
+
+// Str 返回 SQL 字符串字面量表达式（渲染为 'value'）。
+// 用于格式字符串、SQL 内联常量等需要字面量而非占位符的场景。
+func Str(s string) Expression {
+	return &rawExpr{sql: "'" + s + "'"}
+}
+
+// distinctExpr 是 DISTINCT 包装表达式（渲染 DISTINCT expr）。
+type distinctExpr struct {
+	expr Expression
+}
+
+// Condition 实现 Expression 接口。
+func (d *distinctExpr) Condition() (string, []any) {
+	return d.render(newRenderContext(context.Background(), DialectMySQL))
+}
+
+func (d *distinctExpr) render(rc *renderContext) (string, []any) {
+	sql, args := rc.render(d.expr)
+	return "DISTINCT " + sql, args
+}
+
+// Distinct 包装表达式为 DISTINCT（如 COUNT(DISTINCT field)）。
+func Distinct(e Expression) Expression {
+	return &distinctExpr{expr: e}
+}

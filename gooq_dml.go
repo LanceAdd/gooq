@@ -32,6 +32,7 @@ const (
 type upsertClause struct {
 	conflictCols []string
 	updateMap    map[string]any
+	doNothing    bool // 冲突时不做任何操作。
 }
 
 // DMLBuilder 是写操作构建器：Insert/Update/Delete。
@@ -164,6 +165,15 @@ func (b *DMLBuilder) OnConflictKey(fields ...interface{ ColumnName() string }) *
 	return b
 }
 
+// DoNothing 设置 Upsert 冲突时不做任何操作（PG: ON CONFLICT DO NOTHING；MySQL: INSERT IGNORE）。
+func (b *DMLBuilder) DoNothing() *DMLBuilder {
+	if b.upsert == nil {
+		b.upsert = &upsertClause{updateMap: make(map[string]any)}
+	}
+	b.upsert.doNothing = true
+	return b
+}
+
 // DoUpdate 设置 Upsert 冲突后的更新列。
 func (b *DMLBuilder) DoUpdate(field interface{ ColumnName() string }, v any) *DMLBuilder {
 	if b.upsert == nil {
@@ -245,13 +255,18 @@ func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
 		values[i] = rc.addArg(b.data[col])
 		args[i] = b.data[col]
 	}
+	insertKeyword := "INSERT"
+	if b.upsert != nil && b.upsert.doNothing && rc.dialect == DialectMySQL {
+		insertKeyword = "INSERT IGNORE"
+	}
 	var sqlStr = fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES (%s)",
+		"%s INTO %s (%s) VALUES (%s)",
+		insertKeyword,
 		b.table.TableName(),
 		strings.Join(columns, ", "),
 		strings.Join(values, ", "),
 	)
-	if b.upsert != nil {
+	if b.upsert != nil && !(b.upsert.doNothing && rc.dialect == DialectMySQL) {
 		sqlStr += renderUpsertClause(rc, b.upsert, rc.dialect)
 	}
 	return sqlStr, args, nil
@@ -290,13 +305,18 @@ func (b *DMLBuilder) renderInsertBatch(rc *renderContext) (string, []any, error)
 		}
 		rows = append(rows, "("+strings.Join(placeholders, ", ")+")")
 	}
+	insertKeyword := "INSERT"
+	if b.upsert != nil && b.upsert.doNothing && rc.dialect == DialectMySQL {
+		insertKeyword = "INSERT IGNORE"
+	}
 	var sqlStr = fmt.Sprintf(
-		"INSERT INTO %s (%s) VALUES %s",
+		"%s INTO %s (%s) VALUES %s",
+		insertKeyword,
 		b.table.TableName(),
 		strings.Join(columns, ", "),
 		strings.Join(rows, ", "),
 	)
-	if b.upsert != nil {
+	if b.upsert != nil && !(b.upsert.doNothing && rc.dialect == DialectMySQL) {
 		sqlStr += renderUpsertClause(rc, b.upsert, rc.dialect)
 	}
 	return sqlStr, args, nil
@@ -385,6 +405,12 @@ func autoIncrementColumn(t Table) string {
 func renderUpsertClause(rc *renderContext, clause *upsertClause, dialect Dialect) string {
 	switch dialect {
 	case DialectPgsql:
+		if clause.doNothing {
+			return fmt.Sprintf(
+				" ON CONFLICT (%s) DO NOTHING",
+				strings.Join(clause.conflictCols, ", "),
+			)
+		}
 		var sets []string
 		for col, val := range clause.updateMap {
 			sets = append(sets, fmt.Sprintf(`%s = %s`, col, rc.addArg(val)))

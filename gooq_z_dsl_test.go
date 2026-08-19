@@ -181,8 +181,8 @@ func TestDsl_OperatorFunc(t *testing.T) {
 			DateFormatFunc(User.CreatedAt, "%Y-%m").As("month"),
 			CountFunc(User.ID).As("cnt"),
 		).From(User))
-		t.Assert(sql, "SELECT DATE_FORMAT(created_at, ?) AS month, COUNT(id) AS cnt FROM user WHERE deleted_at IS NULL")
-		t.Assert(args, []any{"%Y-%m"})
+		t.Assert(sql, "SELECT DATE_FORMAT(created_at, '%Y-%m') AS month, COUNT(id) AS cnt FROM user WHERE deleted_at IS NULL")
+		t.Assert(len(args), 0)
 	})
 }
 
@@ -465,5 +465,117 @@ func TestDsl_MoreDialects(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT * FROM user WHERE age > ? AND deleted_at IS NULL FETCH FIRST 10 ROWS ONLY")
 		t.Assert(args, []any{18})
+	})
+}
+
+// TestDsl_FuncLib 验证扩展函数库渲染（字符串/数学/日期/窗口/聚合变体）。
+func TestDsl_FuncLib(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, args := mustToSql(t, Select(
+			ConcatFunc(User.Name, "-", User.Status).As("tag"),
+			UpperFunc(User.Name).As("upper"),
+			LengthFunc(User.Name).As("len"),
+			AbsFunc(User.Age).As("abs"),
+			RoundFunc(User.Age, 2).As("round"),
+			CountDistinctFunc(User.Status).As("distinct_status"),
+		).From(User))
+		t.Assert(
+			sql,
+			"SELECT CONCAT(name, ?, status) AS tag, UPPER(name) AS upper, LENGTH(name) AS len, ABS(age) AS abs, ROUND(age, ?) AS round, COUNT(DISTINCT status) AS distinct_status FROM user WHERE deleted_at IS NULL",
+		)
+		t.Assert(args, []any{"-", 2})
+
+		// 日期函数。
+		sql, _ = mustToSql(t, Select(CurDateFunc().As("today"), DateDiffFunc(User.CreatedAt, CurDateFunc())).From(User))
+		t.Assert(sql, "SELECT CURDATE() AS today, DATEDIFF(created_at, CURDATE()) FROM user WHERE deleted_at IS NULL")
+	})
+}
+
+// TestDsl_WindowFrame 验证窗口框架（ROWS/RANGE BETWEEN）渲染。
+func TestDsl_WindowFrame(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, _ := mustToSql(t, Select(
+			SumFunc(User.Age).OverFrame(
+				nil,
+				[]OrderClause{User.ID.Asc()},
+				RowsFrame("UNBOUNDED PRECEDING", "CURRENT ROW"),
+			).As("running"),
+		).From(User))
+		t.Assert(
+			sql,
+			"SELECT SUM(age) OVER (ORDER BY id ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running FROM user WHERE deleted_at IS NULL",
+		)
+
+		// RANGE + PARTITION BY + 窗口函数。
+		sql, _ = mustToSql(t, Select(
+			RowNumberFunc().Over(
+				[]Expression{User.Status},
+				[]OrderClause{User.Age.Desc()},
+			).As("rn"),
+			LagFunc(User.Age, 1, 0).Over(nil, []OrderClause{User.ID.Asc()}).As("prev_age"),
+		).From(User))
+		t.Assert(
+			sql,
+			"SELECT ROW_NUMBER() OVER (PARTITION BY status ORDER BY age DESC) AS rn, LAG(age, ?, ?) OVER (ORDER BY id ASC) AS prev_age FROM user WHERE deleted_at IS NULL",
+		)
+	})
+}
+
+// TestDsl_NullsOrder 验证 NULLS FIRST/LAST（PG 渲染，MySQL 忽略）。
+func TestDsl_NullsOrder(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, _, err := SelectFrom(User).
+			Order(User.Age.Desc().NullsFirst()).
+			ToSql(DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT * FROM user WHERE deleted_at IS NULL ORDER BY age DESC NULLS FIRST")
+
+		sql, _, err = SelectFrom(User).
+			Order(User.Name.Asc().NullsLast()).
+			ToSql(DialectOracle)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT * FROM user WHERE deleted_at IS NULL ORDER BY name ASC NULLS LAST")
+
+		// MySQL 忽略 NULLS 子句。
+		sql, _ = mustToSql(t, SelectFrom(User).Order(User.Age.Desc().NullsFirst()))
+		t.Assert(sql, "SELECT * FROM user WHERE deleted_at IS NULL ORDER BY age DESC")
+	})
+}
+
+// TestDml_DoNothing 验证 Upsert DoNothing（PG DO NOTHING / MySQL INSERT IGNORE）。
+func TestDml_DoNothing(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, _, err := Insert(User, map[string]any{"id": 1, "name": "john"}).
+			OnConflictKey(User.ID).
+			DoNothing().
+			ToSql(DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, "INSERT INTO user (name) VALUES ($1) ON CONFLICT (id) DO NOTHING")
+
+		sql, _, err = Insert(User, map[string]any{"id": 1, "name": "john"}).
+			OnConflictKey(User.ID).
+			DoNothing().
+			ToSql(DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "INSERT IGNORE INTO user (name) VALUES (?)")
+	})
+}
+
+// TestDsl_DateFormatDialects 验证 DATE_FORMAT 三方言内置实现。
+func TestDsl_DateFormatDialects(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, _, err := Select(DateFormatFunc(User.CreatedAt, "%Y-%m").As("month")).From(User).ToSql(DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT DATE_FORMAT(created_at, '%Y-%m') AS month FROM user WHERE deleted_at IS NULL")
+
+		// PG：内置 TO_CHAR + 格式转换（%Y-%m → YYYY-MM）。
+		sql, _, err = Select(DateFormatFunc(User.CreatedAt, "%Y-%m").As("month")).From(User).ToSql(DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT TO_CHAR(created_at, 'YYYY-MM') AS month FROM user WHERE deleted_at IS NULL")
+
+		// SQLite：内置 strftime（格式兼容）。
+		sql, _, err = Select(DateFormatFunc(User.CreatedAt, "%Y-%m").As("month")).From(User).ToSql(DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT strftime('%Y-%m', created_at) AS month FROM user WHERE deleted_at IS NULL")
 	})
 }

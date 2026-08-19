@@ -85,23 +85,26 @@ func TestDml_Upsert(t *testing.T) {
 	})
 }
 
-// TestOperatorFunc_Dialect 验证操作符按方言覆盖（DATE_FORMAT → TO_CHAR）。
+// TestOperatorFunc_Dialect 验证操作符按方言覆盖（自定义操作符名，避免污染内置实现）。
 func TestOperatorFunc_Dialect(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		// pgsql 驱动注册覆盖实现。
-		OperatorFunc("DATE_FORMAT", func(ctx context.Context, args ...any) (string, []any, error) {
-			return "TO_CHAR(" + args[0].(string) + ", " + args[1].(string) + ")", nil, nil
+		// 默认实现 + pgsql 驱动覆盖实现。
+		OperatorFunc("MY_FORMAT", func(ctx context.Context, args ...any) (string, []any, error) {
+			return "MY_FORMAT(" + args[0].(string) + ", " + args[1].(string) + ")", nil, nil
+		})
+		OperatorFunc("MY_FORMAT", func(ctx context.Context, args ...any) (string, []any, error) {
+			return "PG_FORMAT(" + args[0].(string) + ", " + args[1].(string) + ")", nil, nil
 		}, "pgsql")
 
 		// MySQL 方言：默认实现。
-		sql, args, err := Select(DateFormatFunc(User.CreatedAt, "%Y-%m").As("month")).From(User).ToSql(DialectMySQL)
+		sql, args, err := Select(Func("MY_FORMAT", User.CreatedAt, Str("%Y-%m")).As("month")).From(User).ToSql(DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT DATE_FORMAT(created_at, ?) AS month FROM user WHERE deleted_at IS NULL")
-		t.Assert(args, []any{"%Y-%m"})
+		t.Assert(sql, "SELECT MY_FORMAT(created_at, '%Y-%m') AS month FROM user WHERE deleted_at IS NULL")
+		t.Assert(len(args), 0)
 
 		// PG 方言：驱动覆盖实现（离线渲染按方言推断驱动名）。
-		sql, _, err = Select(DateFormatFunc(User.CreatedAt, "YYYY-MM").As("month")).From(User).ToSql(DialectPgsql)
+		sql, _, err = Select(Func("MY_FORMAT", User.CreatedAt, Str("%Y-%m")).As("month")).From(User).ToSql(DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `SELECT TO_CHAR(created_at, $1) AS month FROM user WHERE deleted_at IS NULL`)
+		t.Assert(sql, `SELECT PG_FORMAT(created_at, '%Y-%m') AS month FROM user WHERE deleted_at IS NULL`)
 	})
 }
