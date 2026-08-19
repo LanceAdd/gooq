@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/test/gtest"
 )
 
@@ -163,71 +162,6 @@ func TestHashCacheAdapter_Basic(t *testing.T) {
 		_, ok, err = adapter.HGet(ctx, "page:user", "data:1:10")
 		t.AssertNil(err)
 		t.Assert(ok, true)
-	})
-}
-
-// TestDsl_CacheHit 验证单查询缓存命中（无需数据库实例）。
-func TestDsl_CacheHit(t *testing.T) {
-	gtest.C(t, func(t *gtest.T) {
-		ctx := context.Background()
-		adapter := &mapCacheAdapter{m: make(map[string][]byte)}
-		SetCacheAdapter(adapter)
-		defer SetCacheAdapter(nil)
-
-		b := SelectFrom(User).Where(User.Age.Gt(18)).Cache(CacheOption{Name: "users:adults"})
-		// 预写缓存（模拟上次查询结果）。
-		cached := Result{
-			Record{"id": gvar.New(1), "name": gvar.New("john")},
-		}
-		value, err := marshalResult(cached)
-		t.AssertNil(err)
-		t.AssertNil(adapter.Set(ctx, "users:adults", value, time.Minute))
-
-		// 命中缓存直接返回（不触碰数据库）。
-		result, err := b.All()
-		t.AssertNil(err)
-		t.Assert(len(result), 1)
-		t.Assert(result[0]["name"].String(), "john")
-
-		// 缓存键为自定义 Name。
-		_, ok, err := adapter.Get(ctx, "users:adults")
-		t.AssertNil(err)
-		t.Assert(ok, true)
-	})
-}
-
-// TestDsl_PageCacheHit 验证分页缓存命中（count 与 data 同 key 同生命周期）。
-func TestDsl_PageCacheHit(t *testing.T) {
-	gtest.C(t, func(t *gtest.T) {
-		ctx := context.Background()
-		adapter := &mapHashCacheAdapter{m: make(map[string]map[string][]byte)}
-		SetHashCacheAdapter(adapter)
-		defer SetHashCacheAdapter(nil)
-
-		b := SelectFrom(User).Where(User.Age.Gt(18)).
-			PageCache(CacheOption{Duration: time.Minute}).
-			Page(1, 10)
-
-		// 预写分页缓存（count + 第 1 页 data，同 key）。
-		key, err := b.pageCacheKey()
-		t.AssertNil(err)
-		t.AssertNil(adapter.HSet(ctx, key, "count", []byte("42"), time.Minute))
-		cached := Result{
-			Record{"id": gvar.New(1), "name": gvar.New("john")},
-		}
-		dataValue, err := marshalResult(cached)
-		t.AssertNil(err)
-		t.AssertNil(adapter.HSet(ctx, key, "data:1:10", dataValue, time.Minute))
-
-		// Count 与 All 均命中缓存。
-		count, err := b.Count()
-		t.AssertNil(err)
-		t.Assert(count, 42)
-
-		result, err := b.All()
-		t.AssertNil(err)
-		t.Assert(len(result), 1)
-		t.Assert(result[0]["id"].Int64(), int64(1))
 	})
 }
 

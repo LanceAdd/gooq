@@ -72,7 +72,7 @@ func (e *caseExpr) As(alias string) Expression {
 
 // Condition 实现 Expression 接口。
 func (e *caseExpr) Condition() (string, []any) {
-	return e.render(newRenderContext(context.Background(), nil, DialectMySQL))
+	return e.render(newRenderContext(context.Background(), DialectMySQL))
 }
 
 func (e *caseExpr) render(rc *renderContext) (string, []any) {
@@ -133,7 +133,7 @@ type arithExpr struct {
 
 // Condition 实现 Expression 接口。
 func (a *arithExpr) Condition() (string, []any) {
-	return a.render(newRenderContext(context.Background(), nil, DialectMySQL))
+	return a.render(newRenderContext(context.Background(), DialectMySQL))
 }
 
 func (a *arithExpr) render(rc *renderContext) (string, []any) {
@@ -157,7 +157,7 @@ type negateExpr struct {
 
 // Condition 实现 Expression 接口。
 func (n *negateExpr) Condition() (string, []any) {
-	return n.render(newRenderContext(context.Background(), nil, DialectMySQL))
+	return n.render(newRenderContext(context.Background(), DialectMySQL))
 }
 
 func (n *negateExpr) render(rc *renderContext) (string, []any) {

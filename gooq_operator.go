@@ -11,12 +11,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/gogf/gf/v2/database/gdb"
 )
 
 // OperatorFn 是操作符实现：给定上下文、实例与参数，产出 SQL 片段与参数。
-type OperatorFn func(ctx context.Context, db gdb.DB, args ...any) (sql string, argsOut []any, err error)
+type OperatorFn func(ctx context.Context, args ...any) (sql string, argsOut []any, err error)
 
 // operatorRegistry 是操作符注册表：name → driver → impl。
 var operatorRegistry = make(map[string]map[string]OperatorFn)
@@ -78,7 +76,7 @@ func (f Fn) Over(partitionBy []Expression, orderBy []OrderClause) Fn {
 
 // Condition 实现 Expression 接口。
 func (f Fn) Condition() (string, []any) {
-	return f.render(newRenderContext(context.Background(), nil, DialectMySQL))
+	return f.render(newRenderContext(context.Background(), DialectMySQL))
 }
 
 func (f Fn) render(rc *renderContext) (string, []any) {
@@ -106,7 +104,7 @@ func (f Fn) render(rc *renderContext) (string, []any) {
 		opArgs[i] = argsSQL[i]
 	}
 	if impl != nil {
-		implSQL, implArgs, err := impl(rc.ctx, rc.db, opArgs...)
+		implSQL, implArgs, err := impl(rc.ctx, opArgs...)
 		if err == nil {
 			sql = implSQL
 			argsAll = append(argsAll, implArgs...)
@@ -145,17 +143,6 @@ func (f Fn) render(rc *renderContext) (string, []any) {
 // genericOperatorRender 是未注册操作符的通用渲染：NAME(a1, a2, ...)。
 func genericOperatorRender(name string, argsSQL []string) string {
 	return name + "(" + strings.Join(argsSQL, ", ") + ")"
-}
-
-// operatorDriverName 返回实例的驱动名（无实例时为空串，走默认实现）。
-func operatorDriverName(db gdb.DB) string {
-	if db == nil {
-		return ""
-	}
-	if core, ok := db.(interface{ GetConfig() *gdb.ConfigNode }); ok {
-		return core.GetConfig().Type
-	}
-	return ""
 }
 
 // Fn 系列别名函数（无字符串硬编码的开发入口）。
@@ -212,28 +199,28 @@ func NowFunc() Fn {
 
 // init 注册内置操作符的默认实现（MySQL 系）。
 func init() {
-	OperatorFunc("DATE_FORMAT", func(ctx context.Context, db gdb.DB, args ...any) (string, []any, error) {
+	OperatorFunc("DATE_FORMAT", func(ctx context.Context, args ...any) (string, []any, error) {
 		if len(args) != 2 {
 			return "", nil, fmt.Errorf("DATE_FORMAT expects 2 arguments")
 		}
 		return fmt.Sprintf(`DATE_FORMAT(%s, %s)`, args[0], args[1]), nil, nil
 	})
-	OperatorFunc("COUNT", func(ctx context.Context, db gdb.DB, args ...any) (string, []any, error) {
+	OperatorFunc("COUNT", func(ctx context.Context, args ...any) (string, []any, error) {
 		return fmt.Sprintf(`COUNT(%s)`, args[0]), nil, nil
 	})
-	OperatorFunc("SUM", func(ctx context.Context, db gdb.DB, args ...any) (string, []any, error) {
+	OperatorFunc("SUM", func(ctx context.Context, args ...any) (string, []any, error) {
 		return fmt.Sprintf(`SUM(%s)`, args[0]), nil, nil
 	})
-	OperatorFunc("COALESCE", func(ctx context.Context, db gdb.DB, args ...any) (string, []any, error) {
+	OperatorFunc("COALESCE", func(ctx context.Context, args ...any) (string, []any, error) {
 		return "COALESCE(" + strings.Join(toStrings(args), ", ") + ")", nil, nil
 	})
-	OperatorFunc("IFNULL", func(ctx context.Context, db gdb.DB, args ...any) (string, []any, error) {
+	OperatorFunc("IFNULL", func(ctx context.Context, args ...any) (string, []any, error) {
 		return fmt.Sprintf(`IFNULL(%s, %s)`, args[0], args[1]), nil, nil
 	})
-	OperatorFunc("RANK", func(ctx context.Context, db gdb.DB, args ...any) (string, []any, error) {
+	OperatorFunc("RANK", func(ctx context.Context, args ...any) (string, []any, error) {
 		return "RANK()", nil, nil
 	})
-	OperatorFunc("NOW", func(ctx context.Context, db gdb.DB, args ...any) (string, []any, error) {
+	OperatorFunc("NOW", func(ctx context.Context, args ...any) (string, []any, error) {
 		return "NOW()", nil, nil
 	})
 }

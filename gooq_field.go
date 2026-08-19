@@ -59,7 +59,7 @@ func (f Field[T]) Asc() OrderClause {
 
 // Condition 实现 Expression 接口：渲染为列引用。
 func (f Field[T]) Condition() (string, []any) {
-	return f.render(newRenderContext(context.Background(), nil, DialectMySQL))
+	return f.render(newRenderContext(context.Background(), DialectMySQL))
 }
 
 func (f Field[T]) render(rc *renderContext) (string, []any) {
@@ -122,7 +122,7 @@ type fieldCondition struct {
 
 // Condition 实现 Expression 接口。
 func (c *fieldCondition) Condition() (string, []any) {
-	return c.render(newRenderContext(context.Background(), nil, DialectMySQL))
+	return c.render(newRenderContext(context.Background(), DialectMySQL))
 }
 
 func (c *fieldCondition) render(rc *renderContext) (string, []any) {

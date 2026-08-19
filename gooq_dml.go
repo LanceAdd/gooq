@@ -9,14 +9,12 @@ package gooq
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"reflect"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
@@ -38,7 +36,6 @@ type upsertClause struct {
 
 // DMLBuilder 是写操作构建器：Insert/Update/Delete。
 type DMLBuilder struct {
-	db            gdb.DB
 	ctx           context.Context
 	table         Table
 	kind          dmlKind
@@ -124,12 +121,6 @@ func Delete(t Table) *DMLBuilder {
 	}
 }
 
-// DB 绑定显式实例。
-func (b *DMLBuilder) DB(db gdb.DB) *DMLBuilder {
-	b.db = db
-	return b
-}
-
 // Ctx 设置上下文。
 func (b *DMLBuilder) Ctx(ctx context.Context) *DMLBuilder {
 	b.ctx = ctx
@@ -182,24 +173,12 @@ func (b *DMLBuilder) DoUpdate(field interface{ ColumnName() string }, v any) *DM
 	return b
 }
 
-// resolveDB 返回执行实例。
-func (b *DMLBuilder) resolveDB() (gdb.DB, error) {
-	if b.db != nil {
-		return b.db, nil
-	}
-	db, err := gdb.Instance()
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
-}
-
 // ToSql 离线渲染写操作 SQL（不连库）。
 func (b *DMLBuilder) ToSql(dialect Dialect) (string, []any, error) {
 	if dialect == "" {
 		dialect = DialectMySQL
 	}
-	rc := newRenderContext(b.ctx, nil, dialect)
+	rc := newRenderContext(b.ctx, dialect)
 	switch b.kind {
 	case dmlInsert:
 		return b.renderInsert(rc)
@@ -371,45 +350,6 @@ func (b *DMLBuilder) renderDelete(rc *renderContext) (string, []any, error) {
 		args = whereArgs
 	}
 	return sqlStr, args, nil
-}
-
-// Insert 执行 INSERT（含 Upsert）。
-func (b *DMLBuilder) Insert() (sql.Result, error) {
-	db, err := b.resolveDB()
-	if err != nil {
-		return nil, err
-	}
-	sqlStr, args, err := b.ToSql(dialectOf(db))
-	if err != nil {
-		return nil, err
-	}
-	return db.Exec(b.ctx, sqlStr, args...)
-}
-
-// Update 执行 UPDATE（返回影响行数）。
-func (b *DMLBuilder) Update() (sql.Result, error) {
-	db, err := b.resolveDB()
-	if err != nil {
-		return nil, err
-	}
-	sqlStr, args, err := b.ToSql(dialectOf(db))
-	if err != nil {
-		return nil, err
-	}
-	return db.Exec(b.ctx, sqlStr, args...)
-}
-
-// Delete 执行删除；软删表默认转为 UPDATE deleted_at，Unscoped 时真 DELETE。
-func (b *DMLBuilder) Delete() (sql.Result, error) {
-	db, err := b.resolveDB()
-	if err != nil {
-		return nil, err
-	}
-	sqlStr, args, err := b.ToSql(dialectOf(db))
-	if err != nil {
-		return nil, err
-	}
-	return db.Exec(b.ctx, sqlStr, args...)
 }
 
 // renderWhere 渲染条件（空返回空串）。

@@ -30,7 +30,7 @@ type groupCondition struct {
 
 // Condition 实现 Expression 接口。
 func (g *groupCondition) Condition() (string, []any) {
-	return g.render(newRenderContext(context.Background(), nil, DialectMySQL))
+	return g.render(newRenderContext(context.Background(), DialectMySQL))
 }
 
 func (g *groupCondition) render(rc *renderContext) (string, []any) {
@@ -111,7 +111,7 @@ type existsCondition struct {
 
 // Condition 实现 Expression 接口。
 func (e *existsCondition) Condition() (string, []any) {
-	return e.render(newRenderContext(context.Background(), nil, DialectMySQL))
+	return e.render(newRenderContext(context.Background(), DialectMySQL))
 }
 
 func (e *existsCondition) render(rc *renderContext) (string, []any) {
@@ -141,7 +141,7 @@ type exprCondition struct {
 
 // Condition 实现 Expression 接口。
 func (c *exprCondition) Condition() (string, []any) {
-	return c.render(newRenderContext(context.Background(), nil, DialectMySQL))
+	return c.render(newRenderContext(context.Background(), DialectMySQL))
 }
 
 func (c *exprCondition) render(rc *renderContext) (string, []any) {

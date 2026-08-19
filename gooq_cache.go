@@ -10,15 +10,12 @@ package gooq
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/gogf/gf/v2/container/gvar"
 )
 
 // CacheAdapter 是缓存后端适配器（键值语义，[]byte 承载，序列化归 gooq 负责）。
@@ -105,7 +102,7 @@ func (b *SelectBuilder) cacheKey() (string, error) {
 // count 与各页 data 共用（同一 builder 两次查询的渲染要素一致）；
 // 排除 LIMIT/OFFSET（count 与 data 的固有差异，不影响结果语义归属）。
 func (b *SelectBuilder) pageCacheKey() (string, error) {
-	rc := newRenderContext(b.ctx, b.db, DialectMySQL)
+	rc := newRenderContext(b.ctx, DialectMySQL)
 	b.registerAliases(rc)
 	var sb strings.Builder
 	sb.WriteString(b.from.TableName())
@@ -149,26 +146,4 @@ func hashString(s string) string {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(s))
 	return strconv.FormatUint(uint64(h.Sum32()), 16)
-}
-
-// marshalResult 序列化查询结果（JSON，[]byte 承载）。
-func marshalResult(result Result) ([]byte, error) {
-	return json.Marshal(result)
-}
-
-// unmarshalResult 反序列化查询结果（数字类型统一还原为 float64，原型可接受）。
-func unmarshalResult(value []byte) (Result, error) {
-	var list []map[string]any
-	if err := json.Unmarshal(value, &list); err != nil {
-		return nil, err
-	}
-	result := make(Result, len(list))
-	for i, m := range list {
-		record := make(Record, len(m))
-		for k, v := range m {
-			record[k] = gvar.New(v)
-		}
-		result[i] = record
-	}
-	return result, nil
 }

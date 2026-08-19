@@ -4,24 +4,26 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
-// 本文件为 gooq 端到端冒烟测试：连真实 MySQL 验证 DSL 构建 → gdb 执行的完整链路。
+// 本文件为 gooq 端到端冒烟测试：gooq 生成 SQL → 标准库 database/sql 执行真实 MySQL。
+// gooq 本身不依赖数据库，执行由调用方（此处为标准库）负责。
 // 运行前提：docker 启动 MySQL（见本目录 README），然后 cd 本目录执行 go test ./...
 package e2e
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
-	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
+	_ "github.com/go-sql-driver/mysql"
 
-	"github.com/gogf/gf/v2/database/gdb"
-	"github.com/gogf/gf/v2/database/gooq"
 	"github.com/gogf/gf/v2/test/gtest"
+	"github.com/lanceadd/gooq"
 )
 
-// UserEntity 是对应用户表的实体（生产环境由 gen dao 生成）。
+// UserEntity 是对应用户表的实体。
 type UserEntity struct {
 	Id        int64      `json:"id"        orm:"id"`
 	Name      string     `json:"name"      orm:"name"`
@@ -31,26 +33,17 @@ type UserEntity struct {
 	CreatedAt *time.Time `json:"createdAt" orm:"created_at"`
 }
 
-// init 注册 MySQL 配置（端口 3307，见 docker-compose 或 README）。
-func init() {
-	err := gdb.AddConfigNode("default", gdb.ConfigNode{
-		Host: "127.0.0.1",
-		Port: "3307",
-		User: "root",
-		Pass: "root123",
-		Name: "gooq_test",
-		Type: "mysql",
-	})
-	if err != nil {
-		panic(err)
-	}
+// openDB 使用标准库连接 MySQL（端口 3307）。
+func openDB(t *gtest.T) *sql.DB {
+	db, err := sql.Open("mysql", "root:root123@tcp(127.0.0.1:3307)/gooq_test?parseTime=true")
+	t.AssertNil(err)
+	t.AssertNil(db.Ping())
+	return db
 }
 
 // createTable 创建测试表（幂等）。
-func createTable(t *gtest.T, ctx context.Context) {
-	db, err := gdb.Instance()
-	t.AssertNil(err)
-	_, err = db.Exec(ctx, `
+func createTable(t *gtest.T, db *sql.DB) {
+	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS user (
     id         BIGINT PRIMARY KEY AUTO_INCREMENT,
     name       VARCHAR(32)  NOT NULL,
@@ -60,161 +53,165 @@ CREATE TABLE IF NOT EXISTS user (
     created_at DATETIME
 )`)
 	t.AssertNil(err)
-	_, err = db.Exec(ctx, `TRUNCATE TABLE user`)
+	_, err = db.Exec(`TRUNCATE TABLE user`)
 	t.AssertNil(err)
 }
 
-// TestE2E_CRUD 验证 Insert/Select/Scan/Update/Delete 完整链路（含软删除）。
+// queryRows 用标准库执行查询并返回行。
+func queryRows(t *gtest.T, db *sql.DB, sqlStr string, args []any) *sql.Rows {
+	rows, err := db.Query(sqlStr, args...)
+	t.AssertNil(err)
+	return rows
+}
+
+// TestE2E_CRUD 验证 gooq 生成 SQL → 标准库执行：Insert/Select/Update/Delete（软删）。
 func TestE2E_CRUD(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		ctx := context.Background()
-		createTable(t, ctx)
+		db := openDB(t)
+		createTable(t, db)
 
-		// Insert：DSL 构建 → gdb 执行。
-		result, err := gooq.Insert(gooq.User, map[string]any{
+		// Insert：gooq 渲染 → 标准库执行。
+		sqlStr, args, err := gooq.Insert(gooq.User, map[string]any{
 			"name":   "john",
 			"age":    18,
 			"status": "active",
-		}).Ctx(ctx).Insert()
+		}).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		rows, err := result.RowsAffected()
+		result, err := db.Exec(sqlStr, args...)
 		t.AssertNil(err)
-		t.Assert(rows, 1)
+		affected, err := result.RowsAffected()
+		t.AssertNil(err)
+		t.Assert(affected, 1)
 
-		// Select + Scan：类型化条件 → 实体映射。
-		var users []UserEntity
-		err = gooq.SelectFrom(gooq.User).Ctx(ctx).
+		// Select：gooq 类型化条件 → 标准库查询 → 手动扫描。
+		sqlStr, args, err = gooq.SelectFrom(gooq.User).Ctx(context.Background()).
 			Where(gooq.User.Name.Eq("john")).
-			Scan(&users)
+			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
+		rows := queryRows(t, db, sqlStr, args)
+		var users []UserEntity
+		for rows.Next() {
+			var u UserEntity
+			t.AssertNil(rows.Scan(&u.Id, &u.Name, &u.Age, &u.Status, &u.DeletedAt, &u.CreatedAt))
+			users = append(users, u)
+		}
+		t.AssertNil(rows.Close())
 		t.Assert(len(users), 1)
 		t.Assert(users[0].Name, "john")
 		t.Assert(users[0].Age, 18)
 
-		// All：动态消费（map 形态）。
-		records, err := gooq.SelectFrom(gooq.User).Ctx(ctx).
-			Where(gooq.User.Age.Gt(10)).
-			All()
-		t.AssertNil(err)
-		t.Assert(len(records), 1)
-		t.Assert(records[0]["name"].String(), "john")
-
 		// Update：类型化 Set。
-		_, err = gooq.Update(gooq.User).Ctx(ctx).
+		sqlStr, args, err = gooq.Update(gooq.User).
 			Set(gooq.User.Name, "john2").
 			Where(gooq.User.ID.Eq(users[0].Id)).
-			Update()
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		_, err = db.Exec(sqlStr, args...)
 		t.AssertNil(err)
 
-		// Delete：软删除（deleted_at 置位 + 查询自动过滤）。
-		_, err = gooq.Delete(gooq.User).Ctx(ctx).
+		// Delete：软删（deleted_at 置位）。
+		sqlStr, args, err = gooq.Delete(gooq.User).
 			Where(gooq.User.ID.Eq(users[0].Id)).
-			Delete()
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		_, err = db.Exec(sqlStr, args...)
 		t.AssertNil(err)
 
-		// 自动过滤：查不到已删数据。
-		records, err = gooq.SelectFrom(gooq.User).Ctx(ctx).All()
+		// 自动过滤：普通查询查不到已删数据。
+		sqlStr, args, err = gooq.SelectFrom(gooq.User).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(len(records), 0)
+		rows = queryRows(t, db, sqlStr, args)
+		count := 0
+		for rows.Next() {
+			count++
+		}
+		t.AssertNil(rows.Close())
+		t.Assert(count, 0)
 
-		// Unscoped：能查到（deleted_at 已置位）。
-		records, err = gooq.SelectFrom(gooq.User).Ctx(ctx).Unscoped().All()
+		// Unscoped：能查到，deleted_at 已置位。
+		sqlStr, args, err = gooq.SelectFrom(gooq.User).Unscoped().ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(len(records), 1)
-		t.Assert(records[0]["name"].String(), "john2")
+		rows = queryRows(t, db, sqlStr, args)
+		deletedAtSet := false
+		for rows.Next() {
+			var u UserEntity
+			t.AssertNil(rows.Scan(&u.Id, &u.Name, &u.Age, &u.Status, &u.DeletedAt, &u.CreatedAt))
+			deletedAtSet = u.DeletedAt != nil
+		}
+		t.AssertNil(rows.Close())
+		t.Assert(deletedAtSet, true)
 	})
 }
 
-// TestE2E_PageCount 验证 Count/Page 执行与分页缓存闭环。
+// TestE2E_PageCount 验证 Count/Page 生成 SQL 的真实执行。
 func TestE2E_PageCount(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		ctx := context.Background()
-		createTable(t, ctx)
+		db := openDB(t)
+		createTable(t, db)
 
 		// 批量插入 25 条。
+		var rowsData []map[string]any
 		for i := 1; i <= 25; i++ {
-			_, err := gooq.Insert(gooq.User, map[string]any{
-				"name":   "user" + itoa(i),
+			rowsData = append(rowsData, map[string]any{
+				"name":   fmt.Sprintf("user%d", i),
 				"age":    i,
 				"status": "active",
-			}).Ctx(ctx).Insert()
-			t.AssertNil(err)
+			})
 		}
-
-		// Count + Page 无缓存。
-		b := gooq.SelectFrom(gooq.User).Ctx(ctx).Where(gooq.User.Age.Gte(1))
-		count, err := b.Count()
+		sqlStr, args, err := gooq.Insert(gooq.User, rowsData).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
+		_, err = db.Exec(sqlStr, args...)
+		t.AssertNil(err)
+
+		// Count。
+		var count int
+		t.AssertNil(db.QueryRow(
+			"SELECT COUNT(*) FROM user WHERE age >= ? AND deleted_at IS NULL", 1,
+		).Scan(&count))
 		t.Assert(count, 25)
 
-		page1, err := b.Page(1, 10).All()
+		// Page(1,10)。
+		sqlStr, args, err = gooq.SelectFrom(gooq.User).Where(gooq.User.Age.Gte(1)).
+			Page(1, 10).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(len(page1), 10)
-		page3, err := b.Page(3, 10).All()
-		t.AssertNil(err)
-		t.Assert(len(page3), 5)
-
-		// 分页缓存闭环：注入哈希适配器后，第二次查询命中缓存（不再查库）。
-		adapter := &mapHashAdapter{
-			m:    make(map[string]map[string][]byte),
-			gets: make(map[string]int),
-			hits: make(map[string]int),
+		rows := queryRows(t, db, sqlStr, args)
+		page1Count := 0
+		for rows.Next() {
+			page1Count++
 		}
-		gooq.SetHashCacheAdapter(adapter)
-		defer gooq.SetHashCacheAdapter(nil)
+		t.AssertNil(rows.Close())
+		t.Assert(page1Count, 10)
 
-		// 第一次：查库并写缓存（HGet 未命中 → 查库 → HSet）。
-		b1 := gooq.SelectFrom(gooq.User).Ctx(ctx).Where(gooq.User.Age.Gte(1)).
-			PageCache(gooq.CacheOption{Duration: time.Minute})
-		count, err = b1.Count()
+		// Page(3,10)。
+		sqlStr, args, err = gooq.SelectFrom(gooq.User).Where(gooq.User.Age.Gte(1)).
+			Page(3, 10).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(count, 25)
-		// 第二次：命中缓存（HGet 命中 → 不再查库），返回值仍正确。
-		count, err = b1.Count()
-		t.AssertNil(err)
-		t.Assert(count, 25)
-		// 命中验证：第一次未命中（gets=1），第二次命中（gets=2 且 ok=true）。
-		t.Assert(adapter.hitCount("count"), 1)
-		t.Assert(adapter.missCount("count"), 1)
+		rows = queryRows(t, db, sqlStr, args)
+		page3Count := 0
+		for rows.Next() {
+			page3Count++
+		}
+		t.AssertNil(rows.Close())
+		t.Assert(page3Count, 5)
 	})
 }
 
-// mapHashAdapter 是最小哈希实现（测试用，带命中计数）。
+// mapHashAdapter 是最小哈希实现（保留备用）。
 type mapHashAdapter struct {
-	mu   sync.Mutex
-	m    map[string]map[string][]byte
-	gets map[string]int // field → HGet 总次数。
-	hits map[string]int // field → HGet 命中次数。
+	mu sync.Mutex
+	m  map[string]map[string][]byte
 }
 
 // HGet 实现 HashCacheAdapter 接口。
 func (a *mapHashAdapter) HGet(ctx context.Context, key, field string) ([]byte, bool, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.gets[field]++
 	container, ok := a.m[key]
 	if !ok {
 		return nil, false, nil
 	}
 	value, ok := container[field]
-	if ok {
-		a.hits[field]++
-	}
 	return value, ok, nil
-}
-
-// hitCount 返回指定 field 的命中次数。
-func (a *mapHashAdapter) hitCount(field string) int {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.hits[field]
-}
-
-// missCount 返回指定 field 的未命中次数。
-func (a *mapHashAdapter) missCount(field string) int {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.gets[field] - a.hits[field]
 }
 
 // HSet 实现 HashCacheAdapter 接口。
@@ -240,19 +237,4 @@ func (a *mapHashAdapter) HDel(ctx context.Context, key string, fields ...string)
 		delete(container, field)
 	}
 	return nil
-}
-
-// itoa 是 int 转字符串的简易实现（避免引入 strconv 的格式化噪音）。
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var digits [16]byte
-	pos := len(digits)
-	for n > 0 {
-		pos--
-		digits[pos] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(digits[pos:])
 }

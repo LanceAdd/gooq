@@ -1,6 +1,6 @@
 # gooq e2e tests
 
-End-to-end smoke tests that verify the full pipeline: gooq DSL builds SQL → gdb executes it against a real MySQL.
+End-to-end smoke tests that verify the full pipeline: gooq builds SQL → standard library database/sql executes it against a real MySQL.
 
 ## Prerequisites
 

@@ -11,7 +11,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/test/gtest"
 )
 
@@ -90,7 +89,7 @@ func TestDml_Upsert(t *testing.T) {
 func TestOperatorFunc_Dialect(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		// pgsql 驱动注册覆盖实现。
-		OperatorFunc("DATE_FORMAT", func(ctx context.Context, db gdb.DB, args ...any) (string, []any, error) {
+		OperatorFunc("DATE_FORMAT", func(ctx context.Context, args ...any) (string, []any, error) {
 			return "TO_CHAR(" + args[0].(string) + ", " + args[1].(string) + ")", nil, nil
 		}, "pgsql")
 

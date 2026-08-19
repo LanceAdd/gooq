@@ -1,6 +1,6 @@
 # gooq 端到端测试
 
-验证完整链路的冒烟测试：gooq DSL 构建 SQL → gdb 对真实 MySQL 执行。
+验证完整链路的冒烟测试：gooq 构建 SQL → 标准库 database/sql 对真实 MySQL 执行。
 
 ## 前提
 

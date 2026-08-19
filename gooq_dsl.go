@@ -5,14 +5,13 @@
 // You can obtain one at https://github.com/gogf/gf.
 
 // Package gooq 的 DSL 基础文件：方言、渲染上下文与表达式接口。
-// 本文件定义 V3 类型化查询 DSL 的地基：Dialect、renderContext 与 Expression 接口。
+// 本文件定义类型化查询 DSL 的地基：Dialect、renderContext 与 Expression 接口。
+// gooq 是纯 SQL 构建器：不依赖任何数据库实例，SQL 生成后可由调用方自选执行方式。
 package gooq
 
 import (
 	"context"
 	"fmt"
-
-	"github.com/gogf/gf/v2/database/gdb"
 )
 
 // Dialect 表示 SQL 方言，决定引号、占位符与语法差异。
@@ -40,36 +39,32 @@ type expr interface {
 }
 
 // renderContext 是 DSL 渲染上下文，承载方言、参数与表别名映射。
+// gooq 不依赖任何数据库实例：方言显式传入，驱动名由方言推断。
 type renderContext struct {
 	ctx        context.Context
-	db         gdb.DB // 操作符渲染时使用的实例，可为 nil。
 	dialect    Dialect
-	driverName string // 操作符驱动名（离线渲染时从 dialect 推断，优先级高于 db）。
+	driverName string // 操作符驱动名（由方言推断）。
 	args       []any
 	aliases    map[string]string // tableName → alias。
 	argIndex   int
 }
 
-// newRenderContext 创建渲染上下文；无实例且显式方言时以方言推断驱动名。
-func newRenderContext(ctx context.Context, db gdb.DB, dialect Dialect) *renderContext {
+// newRenderContext 创建渲染上下文；驱动名由方言推断（操作符按驱动分派）。
+func newRenderContext(ctx context.Context, dialect Dialect) *renderContext {
 	rc := &renderContext{
 		ctx:     ctx,
-		db:      db,
 		dialect: dialect,
 		aliases: make(map[string]string),
 	}
-	if db == nil && dialect != "" {
+	if dialect != "" {
 		rc.driverName = string(dialect)
 	}
 	return rc
 }
 
-// driver 返回操作符解析使用的驱动名（离线方言优先，其次实例）。
+// driver 返回操作符解析使用的驱动名（由方言推断）。
 func (rc *renderContext) driver() string {
-	if rc.driverName != "" {
-		return rc.driverName
-	}
-	return operatorDriverName(rc.db)
+	return rc.driverName
 }
 
 // quote 按方言规则为标识符（表名/列名）添加引号。

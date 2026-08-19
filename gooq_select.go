@@ -9,12 +9,8 @@ package gooq
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strconv"
 	"strings"
-
-	"github.com/gogf/gf/v2/database/gdb"
 )
 
 // lockMode 是行锁模式。
@@ -54,7 +50,6 @@ type joinClause struct {
 // SelectBuilder 是类型化查询构建器：Select(字段).From(表) 链式 DSL。
 // 它同时实现 Table 接口（As 后作为派生表）与 Expression 接口（子查询/标量子查询）。
 type SelectBuilder struct {
-	db           gdb.DB // 绑定实例（nil 时执行取默认实例）。
 	ctx          context.Context
 	fields       []Expression  // SELECT 字段。
 	from         Table         // FROM 表或派生表。
@@ -110,12 +105,6 @@ func Select(fields ...any) *SelectBuilder {
 // SelectFrom 创建 SELECT * 查询构建器（jOOQ selectFrom 同款便捷入口）。
 func SelectFrom(t Table) *SelectBuilder {
 	return Select().From(t)
-}
-
-// DB 绑定显式实例（多库场景）。
-func (b *SelectBuilder) DB(db gdb.DB) *SelectBuilder {
-	b.db = db
-	return b
 }
 
 // Ctx 设置查询上下文。
@@ -300,7 +289,7 @@ func (b *SelectBuilder) As(alias string) *SelectBuilder {
 
 // Condition 实现 Expression 接口：渲染为 (SELECT ...) 子查询。
 func (b *SelectBuilder) Condition() (string, []any) {
-	return b.render(newRenderContext(b.ctx, b.db, DialectMySQL))
+	return b.render(newRenderContext(b.ctx, DialectMySQL))
 }
 
 func (b *SelectBuilder) render(rc *renderContext) (string, []any) {
@@ -318,7 +307,7 @@ func (b *SelectBuilder) ToSql(dialect Dialect) (string, []any, error) {
 	if dialect == "" {
 		dialect = DialectMySQL
 	}
-	rc := newRenderContext(b.ctx, b.db, dialect)
+	rc := newRenderContext(b.ctx, dialect)
 	sql, args := b.renderSelect(rc)
 	return sql, args, nil
 }
@@ -489,203 +478,4 @@ func walkContainsColumn(e Expression, columnName string) bool {
 		}
 	}
 	return false
-}
-
-// resolveDB 返回执行实例（显式绑定优先，否则默认实例）。
-func (b *SelectBuilder) resolveDB() (gdb.DB, error) {
-	if b.db != nil {
-		return b.db, nil
-	}
-	db, err := gdb.Instance()
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
-}
-
-// All 执行查询并返回结果集（动态消费，map 形态）；启用缓存时先查缓存。
-func (b *SelectBuilder) All() (Result, error) {
-	// 分页缓存命中（count 与各页 data 同 key 同生命周期）。
-	if b.pageCacheOpt != nil && b.pageNum > 0 {
-		if adapter := GetHashCacheAdapter(); adapter != nil {
-			key, err := b.pageCacheKey()
-			if err != nil {
-				return nil, err
-			}
-			field := fmt.Sprintf("data:%d:%d", b.pageNum, b.pageSize)
-			if value, ok, err := adapter.HGet(b.ctx, key, field); err == nil && ok {
-				if result, err := unmarshalResult(value); err == nil {
-					return result, nil
-				}
-			}
-		}
-	}
-	// 单查询缓存命中。
-	if b.cacheOption != nil {
-		if adapter := GetCacheAdapter(); adapter != nil {
-			key, err := b.cacheKey()
-			if err != nil {
-				return nil, err
-			}
-			if value, ok, err := adapter.Get(b.ctx, key); err == nil && ok {
-				if result, err := unmarshalResult(value); err == nil {
-					return result, nil
-				}
-			}
-		}
-	}
-	db, err := b.resolveDB()
-	if err != nil {
-		return nil, err
-	}
-	sql, args, err := b.ToSql(dialectOf(db))
-	if err != nil {
-		return nil, err
-	}
-	result, err := db.GetAll(b.ctx, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	converted := convertGdbResult(result)
-	// 写回缓存（分页优先，其次单查询）。
-	if b.pageCacheOpt != nil && b.pageNum > 0 {
-		if adapter := GetHashCacheAdapter(); adapter != nil {
-			if key, err := b.pageCacheKey(); err == nil {
-				if value, err := marshalResult(converted); err == nil {
-					_ = adapter.HSet(b.ctx, key, fmt.Sprintf("data:%d:%d", b.pageNum, b.pageSize), value, b.pageCacheOpt.Duration)
-				}
-			}
-		}
-	} else if b.cacheOption != nil {
-		if adapter := GetCacheAdapter(); adapter != nil {
-			if key, err := b.cacheKey(); err == nil {
-				if value, err := marshalResult(converted); err == nil {
-					_ = adapter.Set(b.ctx, key, value, b.cacheOption.Duration)
-				}
-			}
-		}
-	}
-	return converted, nil
-}
-
-// Scan 执行查询并映射到目标 struct。
-func (b *SelectBuilder) Scan(dst any) error {
-	db, err := b.resolveDB()
-	if err != nil {
-		return err
-	}
-	sql, args, err := b.ToSql(dialectOf(db))
-	if err != nil {
-		return err
-	}
-	return db.GetScan(b.ctx, dst, sql, args...)
-}
-
-// OneOrNil 执行查询返回单条；空结果返回 (nil, nil)。
-func (b *SelectBuilder) OneOrNil() (Record, error) {
-	db, err := b.resolveDB()
-	if err != nil {
-		return nil, err
-	}
-	sql, args, err := b.ToSql(dialectOf(db))
-	if err != nil {
-		return nil, err
-	}
-	all, err := db.GetAll(b.ctx, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	if len(all) == 0 {
-		return nil, nil
-	}
-	return convertGdbRecord(all[0]), nil
-}
-
-// MustOne 执行查询返回单条；空结果或多条返回明确错误。
-func (b *SelectBuilder) MustOne() (Record, error) {
-	db, err := b.resolveDB()
-	if err != nil {
-		return nil, err
-	}
-	sql, args, err := b.ToSql(dialectOf(db))
-	if err != nil {
-		return nil, err
-	}
-	all, err := db.GetAll(b.ctx, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	if len(all) == 0 {
-		return nil, errors.New("gooq: MustOne got empty result")
-	}
-	if len(all) > 1 {
-		return nil, fmt.Errorf("gooq: MustOne got %d rows, expected exactly 1", len(all))
-	}
-	return convertGdbRecord(all[0]), nil
-}
-
-// Count 执行 COUNT 查询；启用分页缓存时先查缓存。
-func (b *SelectBuilder) Count() (int, error) {
-	// 分页缓存命中。
-	if b.pageCacheOpt != nil {
-		if adapter := GetHashCacheAdapter(); adapter != nil {
-			key, err := b.pageCacheKey()
-			if err != nil {
-				return 0, err
-			}
-			if value, ok, err := adapter.HGet(b.ctx, key, "count"); err == nil && ok {
-				return strconv.Atoi(string(value))
-			}
-		}
-	}
-	db, err := b.resolveDB()
-	if err != nil {
-		return 0, err
-	}
-	rc := newRenderContext(b.ctx, db, dialectOf(db))
-	b.registerAliases(rc)
-	sql := "SELECT COUNT(*) FROM " + b.renderTable(rc, b.from)
-	if where := b.renderWhere(rc); where != "" {
-		sql += " WHERE " + where
-	}
-	count, err := db.GetCount(b.ctx, sql, rc.args...)
-	if err != nil {
-		return 0, err
-	}
-	// 写回分页缓存。
-	if b.pageCacheOpt != nil {
-		if adapter := GetHashCacheAdapter(); adapter != nil {
-			if key, err := b.pageCacheKey(); err == nil {
-				_ = adapter.HSet(b.ctx, key, "count", []byte(strconv.Itoa(count)), b.pageCacheOpt.Duration)
-			}
-		}
-	}
-	return count, nil
-}
-
-// convertGdbResult 将 gdb.Result 转换为 gooq.Result。
-func convertGdbResult(result gdb.Result) Result {
-	converted := make(Result, len(result))
-	for i, record := range result {
-		converted[i] = convertGdbRecord(record)
-	}
-	return converted
-}
-
-// convertGdbRecord 将 gdb.Record 转换为 gooq.Record。
-func convertGdbRecord(record gdb.Record) Record {
-	return Record(record)
-}
-
-// dialectOf 返回实例的方言（默认 MySQL）。
-func dialectOf(db gdb.DB) Dialect {
-	if core, ok := db.(interface{ GetConfig() *gdb.ConfigNode }); ok {
-		switch core.GetConfig().Type {
-		case "pgsql", "postgresql":
-			return DialectPgsql
-		case "sqlite", "sqlitecgo":
-			return DialectSQLite
-		}
-	}
-	return DialectMySQL
 }
