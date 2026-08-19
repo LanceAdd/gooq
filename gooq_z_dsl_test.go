@@ -369,3 +369,101 @@ func TestDsl_ConditionExternal(t *testing.T) {
 		)
 	})
 }
+
+// TestDsl_SetOps 验证集合操作（UNION ALL/UNION/INTERSECT/EXCEPT）渲染。
+func TestDsl_SetOps(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		adults := SelectFrom(User).Where(User.Age.Gt(18))
+		vips := SelectFrom(User).Where(User.Status.Eq("vip"))
+
+		sql, _ := mustToSql(t, adults.UnionAll(vips).Order(User.ID.Desc()).Limit(10))
+		t.Assert(
+			sql,
+			"SELECT * FROM user WHERE age > ? AND deleted_at IS NULL UNION ALL SELECT * FROM user WHERE status = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 10",
+		)
+
+		sql, _ = mustToSql(t, SelectFrom(User).Where(User.Age.Gt(18)).
+			Union(SelectFrom(User).Where(User.Age.Lt(10))))
+		t.Assert(
+			sql,
+			"SELECT * FROM user WHERE age > ? AND deleted_at IS NULL UNION SELECT * FROM user WHERE age < ? AND deleted_at IS NULL",
+		)
+
+		sql, _ = mustToSql(t, SelectFrom(User).Where(User.Age.Gt(18)).
+			Intersect(SelectFrom(User).Where(User.Status.Eq("vip"))))
+		t.Assert(
+			sql,
+			"SELECT * FROM user WHERE age > ? AND deleted_at IS NULL INTERSECT SELECT * FROM user WHERE status = ? AND deleted_at IS NULL",
+		)
+
+		sql, _ = mustToSql(t, SelectFrom(User).Where(User.Age.Gt(18)).
+			Except(SelectFrom(User).Where(User.Status.Eq("vip"))))
+		t.Assert(
+			sql,
+			"SELECT * FROM user WHERE age > ? AND deleted_at IS NULL EXCEPT SELECT * FROM user WHERE status = ? AND deleted_at IS NULL",
+		)
+	})
+}
+
+// TestDsl_CTE 验证 CTE（WITH / RECURSIVE）与 Cte 表引用。
+func TestDsl_CTE(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		// 普通 CTE：WITH adults AS (...) SELECT ... FROM adults。
+		adults := Cte("adults")
+		sql, _ := mustToSql(t, With("adults",
+			SelectFrom(User).Where(User.Age.Gt(18)),
+		).From(adults))
+		t.Assert(
+			sql,
+			"WITH adults AS (SELECT * FROM user WHERE age > ? AND deleted_at IS NULL) SELECT * FROM adults",
+		)
+
+		// 多 CTE。
+		activeUsers := Cte("active_users")
+		sql, _ = mustToSql(t, With("active_users",
+			SelectFrom(User).Where(User.Status.Eq("active")),
+		).With("young_users",
+			SelectFrom(User).Where(User.Age.Lt(18)),
+		).From(activeUsers))
+		t.Assert(
+			sql,
+			"WITH active_users AS (SELECT * FROM user WHERE status = ? AND deleted_at IS NULL), young_users AS (SELECT * FROM user WHERE age < ? AND deleted_at IS NULL) SELECT * FROM active_users",
+		)
+
+		// 递归 CTE。
+		sql, _ = mustToSql(t, WithRecursive("org",
+			Select(User.ID, User.Name).From(User).Where(User.ID.Eq(1)),
+		).From(Cte("org")))
+		t.Assert(
+			sql,
+			"WITH RECURSIVE org AS (SELECT id, name FROM user WHERE id = ? AND deleted_at IS NULL) SELECT * FROM org",
+		)
+	})
+}
+
+// TestDsl_MoreDialects 验证 Oracle/MSSQL 方言（占位符与分页）。
+func TestDsl_MoreDialects(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		// Oracle：:n 占位符。
+		sql, args, err := SelectFrom(User).Where(User.Age.Gt(18), User.Status.Eq("active")).ToSql(DialectOracle)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT * FROM user WHERE age > :1 AND status = :2 AND deleted_at IS NULL")
+		t.Assert(args, []any{18, "active"})
+
+		// Oracle 分页：FETCH FIRST。
+		sql, _, err = SelectFrom(User).Where(User.Age.Gt(18)).Limit(10).ToSql(DialectOracle)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT * FROM user WHERE age > :1 AND deleted_at IS NULL FETCH FIRST 10 ROWS ONLY")
+
+		// Oracle 分页带偏移：OFFSET FETCH。
+		sql, _, err = SelectFrom(User).Where(User.Age.Gt(18)).Limit(10).Offset(20).ToSql(DialectOracle)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT * FROM user WHERE age > :1 AND deleted_at IS NULL OFFSET 20 ROWS FETCH NEXT 10 ROWS ONLY")
+
+		// MSSQL：? 占位符 + FETCH 分页。
+		sql, args, err = SelectFrom(User).Where(User.Age.Gt(18)).Limit(10).ToSql(DialectMssql)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT * FROM user WHERE age > ? AND deleted_at IS NULL FETCH FIRST 10 ROWS ONLY")
+		t.Assert(args, []any{18})
+	})
+}

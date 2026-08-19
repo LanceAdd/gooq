@@ -24,6 +24,10 @@ const (
 	DialectPgsql Dialect = "pgsql"
 	// DialectSQLite 是 SQLite 方言。
 	DialectSQLite Dialect = "sqlite"
+	// DialectOracle 是 Oracle 方言（占位符 :n，分页 FETCH 语法）。
+	DialectOracle Dialect = "oracle"
+	// DialectMssql 是 Microsoft SQL Server 方言（分页 FETCH 语法）。
+	DialectMssql Dialect = "mssql"
 )
 
 // Expression 是 DSL 中所有可渲染节点的接口：字段、条件、函数、Raw、子查询等。
@@ -84,6 +88,8 @@ func (rc *renderContext) addArg(v any) string {
 	switch rc.dialect {
 	case DialectPgsql:
 		return fmt.Sprintf(`$%d`, rc.argIndex)
+	case DialectOracle:
+		return fmt.Sprintf(`:%d`, rc.argIndex)
 	default:
 		return "?"
 	}

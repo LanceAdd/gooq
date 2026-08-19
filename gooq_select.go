@@ -47,6 +47,36 @@ type joinClause struct {
 	on       []Expression
 }
 
+// setOp 是集合操作类型。
+type setOp int
+
+const (
+	setUnionAll setOp = iota
+	setUnion
+	setIntersect
+	setExcept
+)
+
+// setOpKeyword 是集合操作对应的 SQL 关键字。
+var setOpKeyword = map[setOp]string{
+	setUnionAll:  "UNION ALL",
+	setUnion:     "UNION",
+	setIntersect: "INTERSECT",
+	setExcept:    "EXCEPT",
+}
+
+// setOpClause 是集合操作子句（操作符 + 另一查询）。
+type setOpClause struct {
+	op    setOp
+	query *SelectBuilder
+}
+
+// cteClause 是 CTE 子句（WITH name AS (query)）。
+type cteClause struct {
+	name  string
+	query *SelectBuilder
+}
+
 // SelectBuilder 是类型化查询构建器：Select(字段).From(表) 链式 DSL。
 // 它同时实现 Table 接口（As 后作为派生表）与 Expression 接口（子查询/标量子查询）。
 type SelectBuilder struct {
@@ -68,6 +98,9 @@ type SelectBuilder struct {
 	pageNum      int           // 分页页码（Page 设置，供分页缓存 field 使用）。
 	pageSize     int           // 分页条数（Page 设置，供分页缓存 field 使用）。
 	lock         lockMode      // 行锁模式（默认无锁）。
+	setOps       []setOpClause // 集合操作（UNION/INTERSECT/EXCEPT）。
+	ctes         []cteClause   // CTE（WITH name AS (query)）。
+	recursive    bool          // CTE 是否递归（WITH RECURSIVE）。
 }
 
 // TableName 实现 Table 接口（子查询无表名，From 渲染走专门逻辑）。
@@ -287,6 +320,82 @@ func (b *SelectBuilder) As(alias string) *SelectBuilder {
 	return b
 }
 
+// UnionAll 追加 UNION ALL 集合操作。
+func (b *SelectBuilder) UnionAll(other *SelectBuilder) *SelectBuilder {
+	b.setOps = append(b.setOps, setOpClause{op: setUnionAll, query: other})
+	return b
+}
+
+// Union 追加 UNION 集合操作。
+func (b *SelectBuilder) Union(other *SelectBuilder) *SelectBuilder {
+	b.setOps = append(b.setOps, setOpClause{op: setUnion, query: other})
+	return b
+}
+
+// Intersect 追加 INTERSECT 集合操作。
+func (b *SelectBuilder) Intersect(other *SelectBuilder) *SelectBuilder {
+	b.setOps = append(b.setOps, setOpClause{op: setIntersect, query: other})
+	return b
+}
+
+// Except 追加 EXCEPT 集合操作。
+func (b *SelectBuilder) Except(other *SelectBuilder) *SelectBuilder {
+	b.setOps = append(b.setOps, setOpClause{op: setExcept, query: other})
+	return b
+}
+
+// With 追加普通 CTE（WITH name AS (query)），主查询继续链式构建。
+func (b *SelectBuilder) With(name string, query *SelectBuilder) *SelectBuilder {
+	b.ctes = append(b.ctes, cteClause{name: name, query: query})
+	return b
+}
+
+// WithRecursive 追加递归 CTE（WITH RECURSIVE name AS (query)）。
+func (b *SelectBuilder) WithRecursive(name string, query *SelectBuilder) *SelectBuilder {
+	b.recursive = true
+	return b.With(name, query)
+}
+
+// With 创建以普通 CTE 开头的查询（主查询继续链式构建）。
+func With(name string, query *SelectBuilder) *SelectBuilder {
+	return Select().With(name, query)
+}
+
+// WithRecursive 创建以递归 CTE 开头的查询（主查询继续链式构建）。
+func WithRecursive(name string, query *SelectBuilder) *SelectBuilder {
+	return Select().WithRecursive(name, query)
+}
+
+// Cte 返回 CTE 名称的表引用（主查询 FROM 使用）。
+func Cte(name string) Table {
+	return &cteTable{name: name}
+}
+
+// cteTable 是 CTE 名称的表引用。
+type cteTable struct {
+	name string
+}
+
+// TableName 实现 Table 接口。
+func (c *cteTable) TableName() string {
+	return c.name
+}
+
+// Alias 实现 Table 接口。
+func (c *cteTable) Alias() string {
+	return ""
+}
+
+// Meta 实现 Table 接口（CTE 无表元数据，软删自动条件不生效）。
+func (c *cteTable) Meta() *TableMeta {
+	return nil
+}
+
+// AllColumns 实现 Table 接口（CTE 列未知）。
+func (c *cteTable) AllColumns() []string {
+	return nil
+}
+
 // Condition 实现 Expression 接口：渲染为 (SELECT ...) 子查询。
 func (b *SelectBuilder) Condition() (string, []any) {
 	return b.render(newRenderContext(b.ctx, DialectMySQL))
@@ -319,6 +428,19 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 		sql     strings.Builder
 		selects []string
 	)
+	if len(b.ctes) > 0 {
+		var cteParts []string
+		for _, cte := range b.ctes {
+			cteSQL, _ := cte.query.renderSelect(rc)
+			cteParts = append(cteParts, cte.name+" AS ("+cteSQL+")")
+		}
+		sql.WriteString("WITH ")
+		if b.recursive {
+			sql.WriteString("RECURSIVE ")
+		}
+		sql.WriteString(strings.Join(cteParts, ", "))
+		sql.WriteString(" ")
+	}
 	sql.WriteString("SELECT ")
 	if b.distinct {
 		sql.WriteString("DISTINCT ")
@@ -381,6 +503,14 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 			sql.WriteString(strings.Join(haves, " AND "))
 		}
 	}
+	// 集合操作：整体 ORDER BY / LIMIT 作用于组合结果。
+	for _, so := range b.setOps {
+		subSQL, _ := so.query.renderSelect(rc)
+		sql.WriteString(" ")
+		sql.WriteString(setOpKeyword[so.op])
+		sql.WriteString(" ")
+		sql.WriteString(subSQL)
+	}
 	if len(b.orderBy) > 0 {
 		var orders []string
 		for _, o := range b.orderBy {
@@ -391,11 +521,21 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 		sql.WriteString(strings.Join(orders, ", "))
 	}
 	if b.limit > 0 {
-		sql.WriteString(" LIMIT ")
-		fmt.Fprintf(&sql, "%d", b.limit)
-		if b.offset > 0 {
-			sql.WriteString(" OFFSET ")
-			fmt.Fprintf(&sql, "%d", b.offset)
+		switch rc.dialect {
+		case DialectOracle, DialectMssql:
+			// SQL:2008 FETCH 语法（Oracle 12c+ / MSSQL 2012+ 支持）。
+			if b.offset > 0 {
+				fmt.Fprintf(&sql, " OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", b.offset, b.limit)
+			} else {
+				fmt.Fprintf(&sql, " FETCH FIRST %d ROWS ONLY", b.limit)
+			}
+		default:
+			sql.WriteString(" LIMIT ")
+			fmt.Fprintf(&sql, "%d", b.limit)
+			if b.offset > 0 {
+				sql.WriteString(" OFFSET ")
+				fmt.Fprintf(&sql, "%d", b.offset)
+			}
 		}
 	}
 	if b.lock != lockNone && rc.dialect != DialectSQLite {
