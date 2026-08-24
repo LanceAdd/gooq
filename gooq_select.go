@@ -126,8 +126,8 @@ type JoinBuilder[T any] struct {
 	clause *joinClause
 }
 
-func (j *JoinBuilder[T]) On(conds ...Expression) T {
-	j.clause.on = append(j.clause.on, conds...)
+func (j *JoinBuilder[T]) On(conditions ...Expression) T {
+	j.clause.on = append(j.clause.on, conditions...)
 	return j.parent
 }
 
@@ -195,18 +195,18 @@ func (b *SelectBuilder) Distinct() *SelectBuilder {
 	return b
 }
 
-func (b *SelectBuilder) Where(conds ...Expression) *SelectBuilder {
-	b.conditions = append(b.conditions, conds...)
+func (b *SelectBuilder) Where(conditions ...Expression) *SelectBuilder {
+	b.conditions = append(b.conditions, conditions...)
 	return b
 }
 
-func (b *SelectBuilder) And(cond Expression) *SelectBuilder {
-	b.conditions = append(b.conditions, cond)
+func (b *SelectBuilder) And(condition Expression) *SelectBuilder {
+	b.conditions = append(b.conditions, condition)
 	return b
 }
 
-func (b *SelectBuilder) Or(cond Expression) *SelectBuilder {
-	b.conditions = append(b.conditions, OR(cond))
+func (b *SelectBuilder) Or(condition Expression) *SelectBuilder {
+	b.conditions = append(b.conditions, OR(condition))
 	return b
 }
 
@@ -248,8 +248,8 @@ func toExpressions(fields []any) []Expression {
 	return exprs
 }
 
-func (b *SelectBuilder) Having(conds ...Expression) *SelectBuilder {
-	b.having = append(b.having, conds...)
+func (b *SelectBuilder) Having(conditions ...Expression) *SelectBuilder {
+	b.having = append(b.having, conditions...)
 	return b
 }
 
@@ -750,14 +750,14 @@ func renderTableName(rc *renderContext, t Table) string {
 
 // renderWhere 渲染 WHERE 条件（含软删除自动条件）。
 func (b *SelectBuilder) renderWhere(rc *renderContext) string {
-	conds := b.conditions
+	conditions := b.conditions
 	if !b.unscoped && b.from != nil && b.from.Meta() != nil {
 		if softField := b.from.Meta().SoftDeleteField(); softField != nil && !containsColumn(b.conditions, softField.ColumnName) {
-			conds = append(conds, NewField[any](b.from.TableName(), softField.ColumnName).IsNull())
+			conditions = append(conditions, NewField[any](b.from.TableName(), softField.ColumnName).IsNull())
 		}
 	}
 	var parts []string
-	for _, c := range conds {
+	for _, c := range conditions {
 		condSQL, _ := rc.render(c)
 		if condSQL != "" {
 			parts = append(parts, condSQL)
@@ -767,8 +767,8 @@ func (b *SelectBuilder) renderWhere(rc *renderContext) string {
 }
 
 // containsColumn 判断条件树中是否显式引用了指定列（软删除显式接管）。
-func containsColumn(conds []Expression, columnName string) bool {
-	for _, c := range conds {
+func containsColumn(conditions []Expression, columnName string) bool {
+	for _, c := range conditions {
 		if walkContainsColumn(c, columnName) {
 			return true
 		}
@@ -781,7 +781,7 @@ func walkContainsColumn(e Expression, columnName string) bool {
 	case *fieldCondition:
 		return v.columnName == columnName
 	case *groupCondition:
-		for _, c := range v.conds {
+		for _, c := range v.conditions {
 			if walkContainsColumn(c, columnName) {
 				return true
 			}

@@ -16,8 +16,8 @@ const (
 )
 
 type groupCondition struct {
-	op    groupOp
-	conds []Expression
+	op         groupOp
+	conditions []Expression
 }
 
 func (g *groupCondition) Condition() (string, []any) {
@@ -26,14 +26,14 @@ func (g *groupCondition) Condition() (string, []any) {
 
 func (g *groupCondition) render(rc *renderContext) (string, []any) {
 	var (
-		parts   = make([]string, 0, len(g.conds))
+		parts   = make([]string, 0, len(g.conditions))
 		allArgs = make([]any, 0)
 	)
-	for _, cond := range g.conds {
-		if cond == nil {
+	for _, condition := range g.conditions {
+		if condition == nil {
 			continue
 		}
-		sql, args := rc.render(cond)
+		sql, args := rc.render(condition)
 		if sql == "" {
 			continue
 		}
@@ -55,16 +55,16 @@ func (g *groupCondition) render(rc *renderContext) (string, []any) {
 	}
 }
 
-func AND(conds ...Expression) Expression {
-	return &groupCondition{op: groupAnd, conds: conds}
+func AND(conditions ...Expression) Expression {
+	return &groupCondition{op: groupAnd, conditions: conditions}
 }
 
-func OR(conds ...Expression) Expression {
-	return &groupCondition{op: groupOr, conds: conds}
+func OR(conditions ...Expression) Expression {
+	return &groupCondition{op: groupOr, conditions: conditions}
 }
 
-func NOT(cond Expression) Expression {
-	return &groupCondition{op: groupNot, conds: []Expression{cond}}
+func NOT(condition Expression) Expression {
+	return &groupCondition{op: groupNot, conditions: []Expression{condition}}
 }
 
 type rawExpr struct {
@@ -112,9 +112,9 @@ func NotExists(subquery *SelectBuilder) Expression {
 }
 
 type exprCondition struct {
-	left Expression
-	op   opType
-	val  any
+	left  Expression
+	op    opType
+	value any
 }
 
 func (c *exprCondition) Condition() (string, []any) {
@@ -130,41 +130,41 @@ func (c *exprCondition) render(rc *renderContext) (string, []any) {
 		return leftSQL + " IS NOT NULL", leftArgs
 	default:
 		operator := opStrings[c.op]
-		if expr, ok := c.val.(Expression); ok {
+		if expr, ok := c.value.(Expression); ok {
 			valSQL, valArgs := rc.render(expr)
 			return fmt.Sprintf(`%s %s %s`, leftSQL, operator, valSQL), append(leftArgs, valArgs...)
 		}
-		placeholder := rc.addArg(c.val)
-		return fmt.Sprintf(`%s %s %s`, leftSQL, operator, placeholder), append(leftArgs, c.val)
+		placeholder := rc.addArg(c.value)
+		return fmt.Sprintf(`%s %s %s`, leftSQL, operator, placeholder), append(leftArgs, c.value)
 	}
 }
 
 func Eq(e Expression, v any) Expression {
-	return &exprCondition{left: e, op: opEq, val: v}
+	return &exprCondition{left: e, op: opEq, value: v}
 }
 
 func Ne(e Expression, v any) Expression {
-	return &exprCondition{left: e, op: opNe, val: v}
+	return &exprCondition{left: e, op: opNe, value: v}
 }
 
 func Gt(e Expression, v any) Expression {
-	return &exprCondition{left: e, op: opGt, val: v}
+	return &exprCondition{left: e, op: opGt, value: v}
 }
 
 func Gte(e Expression, v any) Expression {
-	return &exprCondition{left: e, op: opGte, val: v}
+	return &exprCondition{left: e, op: opGte, value: v}
 }
 
 func Lt(e Expression, v any) Expression {
-	return &exprCondition{left: e, op: opLt, val: v}
+	return &exprCondition{left: e, op: opLt, value: v}
 }
 
 func Lte(e Expression, v any) Expression {
-	return &exprCondition{left: e, op: opLte, val: v}
+	return &exprCondition{left: e, op: opLte, value: v}
 }
 
 func Like(e Expression, v any) Expression {
-	return &exprCondition{left: e, op: opLike, val: v}
+	return &exprCondition{left: e, op: opLike, value: v}
 }
 
 func IsNull(e Expression) Expression {

@@ -128,8 +128,8 @@ func sortFieldKeyForDao(fieldMap map[string]*gdb.TableField) []string {
 		if len(names) == 0 {
 			break
 		}
-		if val, ok := names[i]; ok {
-			result[j] = val
+		if value, ok := names[i]; ok {
+			result[j] = value
 			j++
 			delete(names, i)
 		}

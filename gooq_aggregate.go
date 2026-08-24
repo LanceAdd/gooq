@@ -29,12 +29,12 @@ type GroupConcatOptions struct {
 // GroupConcatFunc 构造字符串聚合表达式。
 // 跨方言映射：MySQL/SQLite GROUP_CONCAT、PG STRING_AGG；
 // 分隔符参数自动转 SQL 字符串字面量。
-func GroupConcatFunc(opts GroupConcatOptions) Expression {
+func GroupConcatFunc(options GroupConcatOptions) Expression {
 	return &groupConcatExpr{
-		field:     opts.Field,
-		separator: opts.Separator,
-		distinct:  opts.Distinct,
-		orderBy:   opts.OrderBy,
+		field:     options.Field,
+		separator: options.Separator,
+		distinct:  options.Distinct,
+		orderBy:   options.OrderBy,
 	}
 }
 
@@ -45,9 +45,9 @@ func (e *groupConcatExpr) Condition() (string, []any) {
 
 func (e *groupConcatExpr) render(rc *renderContext) (string, []any) {
 	fieldSQL, args := rc.render(e.field)
-	sep := e.separator
-	if sep == "" {
-		sep = ","
+	separator := e.separator
+	if separator == "" {
+		separator = ","
 	}
 	var orderSQL string
 	if len(e.orderBy) > 0 {
@@ -61,7 +61,7 @@ func (e *groupConcatExpr) render(rc *renderContext) (string, []any) {
 	switch rc.dialect {
 	case DialectPgsql:
 		// STRING_AGG(field, 'sep' [ORDER BY ...])；DISTINCT 不支持（validate 已拦截）。
-		sqlStr := fmt.Sprintf("STRING_AGG(%s, '%s'", fieldSQL, sep)
+		sqlStr := fmt.Sprintf("STRING_AGG(%s, '%s'", fieldSQL, separator)
 		if orderSQL != "" {
 			sqlStr += " ORDER BY " + orderSQL
 		}
@@ -72,7 +72,7 @@ func (e *groupConcatExpr) render(rc *renderContext) (string, []any) {
 		if e.distinct {
 			distinct = "DISTINCT "
 		}
-		return fmt.Sprintf("GROUP_CONCAT(%s%s, '%s')", distinct, fieldSQL, sep), args
+		return fmt.Sprintf("GROUP_CONCAT(%s%s, '%s')", distinct, fieldSQL, separator), args
 	default:
 		// MySQL：GROUP_CONCAT([DISTINCT ]field [ORDER BY ...] [SEPARATOR 'sep'])。
 		distinct := ""
@@ -95,7 +95,7 @@ func (e *groupConcatExpr) render(rc *renderContext) (string, []any) {
 func walkExpression(e Expression, dialect Dialect, visit func(e Expression) error) error {
 	switch v := e.(type) {
 	case *groupCondition:
-		for _, c := range v.conds {
+		for _, c := range v.conditions {
 			if c == nil {
 				continue
 			}
@@ -107,14 +107,14 @@ func walkExpression(e Expression, dialect Dialect, visit func(e Expression) erro
 		if err := visit(v); err != nil {
 			return err
 		}
-		if sub, ok := v.val.(Expression); ok {
-			if err := walkExpression(sub, dialect, visit); err != nil {
+		if subquery, ok := v.value.(Expression); ok {
+			if err := walkExpression(subquery, dialect, visit); err != nil {
 				return err
 			}
 		}
-		for _, val := range v.vals {
-			if sub, ok := val.(Expression); ok {
-				if err := walkExpression(sub, dialect, visit); err != nil {
+		for _, value := range v.values {
+			if subquery, ok := value.(Expression); ok {
+				if err := walkExpression(subquery, dialect, visit); err != nil {
 					return err
 				}
 			}
@@ -126,8 +126,8 @@ func walkExpression(e Expression, dialect Dialect, visit func(e Expression) erro
 		if err := walkExpression(v.left, dialect, visit); err != nil {
 			return err
 		}
-		if sub, ok := v.val.(Expression); ok {
-			if err := walkExpression(sub, dialect, visit); err != nil {
+		if subquery, ok := v.value.(Expression); ok {
+			if err := walkExpression(subquery, dialect, visit); err != nil {
 				return err
 			}
 		}

@@ -128,8 +128,8 @@ func (b *DMLBuilder) Set(field interface{ ColumnName() string }, v any) *DMLBuil
 	return b
 }
 
-func (b *DMLBuilder) Where(conds ...Expression) *DMLBuilder {
-	b.conditions = append(b.conditions, conds...)
+func (b *DMLBuilder) Where(conditions ...Expression) *DMLBuilder {
+	b.conditions = append(b.conditions, conditions...)
 	return b
 }
 
@@ -439,14 +439,14 @@ func (b *DMLBuilder) renderDelete(rc *renderContext) (string, []any, error) {
 }
 
 func (b *DMLBuilder) renderWhere(rc *renderContext) string {
-	conds := b.conditions
+	conditions := b.conditions
 	if len(b.joins) > 0 && (rc.dialect == DialectPgsql || rc.dialect == DialectSQLite) {
 		for _, j := range b.joins {
-			conds = append(conds, j.on...)
+			conditions = append(conditions, j.on...)
 		}
 	}
 	var parts []string
-	for _, c := range conds {
+	for _, c := range conditions {
 		condSQL, _ := rc.render(c)
 		if condSQL != "" {
 			parts = append(parts, condSQL)

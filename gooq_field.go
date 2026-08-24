@@ -108,8 +108,8 @@ const (
 type fieldCondition struct {
 	field      Field[any]
 	op         opType
-	val        any
-	vals       []any // IN/BETWEEN 使用。
+	value      any
+	values     []any // IN/BETWEEN 使用。
 	subquery   *SelectBuilder
 	columnName string
 }
@@ -135,31 +135,31 @@ func (c *fieldCondition) render(rc *renderContext) (string, []any) {
 			}
 			return fmt.Sprintf(`%s %s %s`, fieldSQL, keyword, subSQL), subArgs
 		}
-		if len(c.vals) == 0 {
+		if len(c.values) == 0 {
 			return "", nil
 		}
-		var placeholders = make([]string, len(c.vals))
-		for i, v := range c.vals {
+		var placeholders = make([]string, len(c.values))
+		for i, v := range c.values {
 			placeholders[i] = rc.addArg(v)
 		}
 		keyword := "IN"
 		if c.op == opNotIn {
 			keyword = "NOT IN"
 		}
-		return fmt.Sprintf(`%s %s (%s)`, fieldSQL, keyword, strings.Join(placeholders, ", ")), c.vals
+		return fmt.Sprintf(`%s %s (%s)`, fieldSQL, keyword, strings.Join(placeholders, ", ")), c.values
 	case opBetween:
-		p1SQL, p1Args := rc.renderValue(c.vals[0])
-		p2SQL, p2Args := rc.renderValue(c.vals[1])
+		p1SQL, p1Args := rc.renderValue(c.values[0])
+		p2SQL, p2Args := rc.renderValue(c.values[1])
 		return fmt.Sprintf(`%s BETWEEN %s AND %s`, fieldSQL, p1SQL, p2SQL), append(p1Args, p2Args...)
 	default:
 		operator := opStrings[c.op]
 		// 值为表达式（字段/函数/子查询）时渲染为 SQL 片段而非参数（如 u.id = o.user_id）。
-		if expr, ok := c.val.(Expression); ok {
+		if expr, ok := c.value.(Expression); ok {
 			valSQL, valArgs := rc.render(expr)
 			return fmt.Sprintf(`%s %s %s`, fieldSQL, operator, valSQL), valArgs
 		}
-		placeholder := rc.addArg(c.val)
-		return fmt.Sprintf(`%s %s %s`, fieldSQL, operator, placeholder), []any{c.val}
+		placeholder := rc.addArg(c.value)
+		return fmt.Sprintf(`%s %s %s`, fieldSQL, operator, placeholder), []any{c.value}
 	}
 }
 
@@ -174,8 +174,8 @@ var opStrings = map[opType]string{
 	opNotLike: "NOT LIKE",
 }
 
-func buildFieldCondition(field Field[any], op opType, val any) *fieldCondition {
-	return &fieldCondition{field: field, op: op, val: val, columnName: field.columnName}
+func buildFieldCondition(field Field[any], op opType, value any) *fieldCondition {
+	return &fieldCondition{field: field, op: op, value: value, columnName: field.columnName}
 }
 
 func (f Field[T]) Eq(v T) Expression {
@@ -242,39 +242,39 @@ func (f Field[T]) NotLikeExpr(e Expression) Expression {
 	return buildFieldCondition(toAnyField(f), opNotLike, e)
 }
 
-func (f Field[T]) In(vals ...T) Expression {
+func (f Field[T]) In(values ...T) Expression {
 	c := buildFieldCondition(toAnyField(f), opIn, nil)
-	c.vals = toAnySlice(vals)
+	c.values = toAnySlice(values)
 	return c
 }
 
-func (f Field[T]) InExpr(sub *SelectBuilder) Expression {
+func (f Field[T]) InExpr(subquery *SelectBuilder) Expression {
 	c := buildFieldCondition(toAnyField(f), opIn, nil)
-	c.subquery = sub
+	c.subquery = subquery
 	return c
 }
 
-func (f Field[T]) NotIn(vals ...T) Expression {
+func (f Field[T]) NotIn(values ...T) Expression {
 	c := buildFieldCondition(toAnyField(f), opNotIn, nil)
-	c.vals = toAnySlice(vals)
+	c.values = toAnySlice(values)
 	return c
 }
 
-func (f Field[T]) NotInExpr(sub *SelectBuilder) Expression {
+func (f Field[T]) NotInExpr(subquery *SelectBuilder) Expression {
 	c := buildFieldCondition(toAnyField(f), opNotIn, nil)
-	c.subquery = sub
+	c.subquery = subquery
 	return c
 }
 
 func (f Field[T]) Between(a, b T) Expression {
 	c := buildFieldCondition(toAnyField(f), opBetween, nil)
-	c.vals = []any{a, b}
+	c.values = []any{a, b}
 	return c
 }
 
 func (f Field[T]) BetweenExpr(a, b Expression) Expression {
 	c := buildFieldCondition(toAnyField(f), opBetween, nil)
-	c.vals = []any{a, b}
+	c.values = []any{a, b}
 	return c
 }
 
@@ -306,9 +306,9 @@ func toAnyField[T any](f Field[T]) Field[any] {
 	return Field[any]{tableName: f.tableName, columnName: f.columnName, alias: f.alias}
 }
 
-func toAnySlice[T any](vals []T) []any {
-	result := make([]any, len(vals))
-	for i, v := range vals {
+func toAnySlice[T any](values []T) []any {
+	result := make([]any, len(values))
+	for i, v := range values {
 		result[i] = v
 	}
 	return result
