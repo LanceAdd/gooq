@@ -233,9 +233,12 @@ func (b *DMLBuilder) dmlDialect() Dialect {
 	return DialectMySQL
 }
 
-func (b *DMLBuilder) ToSql(dialect Dialect) (string, []any, error) {
-	if dialect == "" {
-		dialect = DialectMySQL
+// ToSql renders the SQL with the given dialect, or the default MySQL dialect
+// when the parameter is omitted.
+func (b *DMLBuilder) ToSql(dialects ...Dialect) (string, []any, error) {
+	var dialect = DialectMySQL
+	if len(dialects) > 0 && dialects[0] != "" {
+		dialect = dialects[0]
 	}
 	rc := newRenderContext(b.ctx, dialect)
 	switch b.kind {

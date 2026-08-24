@@ -469,9 +469,12 @@ func (b *SelectBuilder) dialect() Dialect {
 	return DialectMySQL
 }
 
-func (b *SelectBuilder) ToSql(dialect Dialect) (string, []any, error) {
-	if dialect == "" {
-		dialect = DialectMySQL
+// ToSql renders the SQL with the given dialect, or the default MySQL dialect
+// when the parameter is omitted.
+func (b *SelectBuilder) ToSql(dialects ...Dialect) (string, []any, error) {
+	var dialect = DialectMySQL
+	if len(dialects) > 0 && dialects[0] != "" {
+		dialect = dialects[0]
 	}
 	if err := b.validate(dialect); err != nil {
 		return "", nil, err
