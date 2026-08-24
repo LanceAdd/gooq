@@ -94,6 +94,34 @@ func toSlice(v any) []any {
 	return result
 }
 
+func (b *DMLBuilder) Clone() *DMLBuilder {
+	newB := *b
+	newB.conditions = append([]Expression(nil), b.conditions...)
+	newB.joins = cloneJoins(b.joins)
+	newB.returning = append([]Expression(nil), b.returning...)
+	if b.data != nil {
+		newB.data = make(map[string]any, len(b.data))
+		for k, v := range b.data {
+			newB.data[k] = v
+		}
+	}
+	if b.dataList != nil {
+		newB.dataList = append([]map[string]any(nil), b.dataList...)
+	}
+	if b.upsert != nil {
+		newUpsert := *b.upsert
+		newUpsert.updateMap = make(map[string]any, len(b.upsert.updateMap))
+		for k, v := range b.upsert.updateMap {
+			newUpsert.updateMap[k] = v
+		}
+		newB.upsert = &newUpsert
+	}
+	if b.selectBuilder != nil {
+		newB.selectBuilder = b.selectBuilder.Clone()
+	}
+	return &newB
+}
+
 func Update(t Table) *DMLBuilder {
 	return &DMLBuilder{
 		ctx:   context.Background(),

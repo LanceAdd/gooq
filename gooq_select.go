@@ -131,6 +131,49 @@ func (j *JoinBuilder[T]) On(conditions ...Expression) T {
 	return j.parent
 }
 
+func cloneJoins(joins []*joinClause) []*joinClause {
+	result := make([]*joinClause, len(joins))
+	for i, j := range joins {
+		newJ := *j
+		newJ.on = append([]Expression(nil), j.on...)
+		result[i] = &newJ
+	}
+	return result
+}
+
+func (b *SelectBuilder) Clone() *SelectBuilder {
+	newB := *b
+	newB.fields = append([]Expression(nil), b.fields...)
+	newB.conditions = append([]Expression(nil), b.conditions...)
+	newB.groupBy = append([]Expression(nil), b.groupBy...)
+	newB.having = append([]Expression(nil), b.having...)
+	newB.orderBy = append([]OrderClause(nil), b.orderBy...)
+	newB.columns = append([]string(nil), b.columns...)
+	newB.joins = cloneJoins(b.joins)
+	if b.groupExtSets != nil {
+		newB.groupExtSets = make([][]Expression, len(b.groupExtSets))
+		for i, set := range b.groupExtSets {
+			newB.groupExtSets[i] = append([]Expression(nil), set...)
+		}
+	}
+	newB.setOps = append([]setOpClause(nil), b.setOps...)
+	for i := range newB.setOps {
+		if newB.setOps[i].query != nil {
+			newB.setOps[i].query = newB.setOps[i].query.Clone()
+		}
+	}
+	newB.ctes = append([]cteClause(nil), b.ctes...)
+	for i := range newB.ctes {
+		if newB.ctes[i].query != nil {
+			newB.ctes[i].query = newB.ctes[i].query.Clone()
+		}
+	}
+	if sub, ok := b.from.(*SelectBuilder); ok {
+		newB.from = sub.Clone()
+	}
+	return &newB
+}
+
 func Select(fields ...any) *SelectBuilder {
 	b := &SelectBuilder{ctx: context.Background()}
 	return b.Fields(fields...)
