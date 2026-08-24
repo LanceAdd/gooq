@@ -61,7 +61,7 @@ func (f Field[T]) render(rc *renderContext) (string, []any) {
 type OrderClause struct {
 	field Field[any]
 	desc  bool
-	nulls string // "FIRST" / "LAST"（PG/Oracle 渲染，MySQL 忽略）。
+	nulls string // "FIRST" / "LAST"（PG 渲染，MySQL/SQLite 忽略）。
 }
 
 func (o OrderClause) NullsFirst() OrderClause {

@@ -9,7 +9,7 @@
 - **纯 SQL 构建器**：渲染不连库，`ToSql(dialect)` 离线产出 SQL + 参数。
 - **类型化字段**：`Field[T]` 在编译期携带列类型，比较方法（`Eq(v T)`、`Gt(v T)` 等）编译期拦截类型不匹配；表达式操作数（子查询、列比较、`Raw`）走显式 `EqExpr`/`InExpr` 方法。
 - **条件一等对象**：条件可独立构建、复用、动态组装，配合 `AND(...)`/`OR(...)`/`NOT(...)`。
-- **方言注册表**：内置 MySQL/PG/SQLite/Oracle/MSSQL；驱动通过 `RegisterDialect` 注册方言以覆盖渲染细节。
+- **方言注册表**：内置 MySQL/PG/SQLite；驱动通过 `RegisterDialect` 注册方言以覆盖渲染细节。
 - **离线设计**：软删除自动条件、自增列跳过、`AllFields()` 全列派生全部来自 `TableMeta`——生成期静态化的元数据，运行时零猜测。
 
 ## 快速开始
@@ -102,7 +102,7 @@ var User = &UserTable{
 - **条件表达式**：`Case().When(条件).Then(v).Else(v).End().As("别名")`。
 - **函数库（30+）**：字符串（`Concat/Substring/Upper/Lower/Trim/Replace/Length`）、数学（`Abs/Round/Ceil/Floor/Mod`）、日期（`CurDate/DateAdd/DateDiff`）、聚合（`Count/Sum/Avg/Min/Max/CountDistinct`）、通用（`Coalesce/IfNull/Now`）。
 - **窗口函数**：`Rank/RowNumber/DenseRank/Ntile/Lag/Lead` + `Over(partitionBy, orderBy)` + `OverFrame`。
-- **字符串聚合**：`GroupConcatFunc`（按方言渲染 GROUP_CONCAT / STRING_AGG / LISTAGG）。
+- **字符串聚合**：`GroupConcatFunc`（按方言渲染 GROUP_CONCAT / STRING_AGG）。
 - **自定义操作符**：`OperatorFunc(name, impl, drivers...)` 注册 + `Func(name, args...)` 调用。
 - **Raw**：`Raw(sql, args...)` 结构化 SQL，支持参数绑定。
 
@@ -113,9 +113,9 @@ var User = &UserTable{
 | `Insert(t, data)` | 单行 / 批量（`[]map`/`[]struct`），自动跳过自增列 |
 | `InsertFrom(t, 子查询)` | INSERT ... SELECT |
 | `Update(t)` | `Set(字段, 值)` / `Data(do)` 部分更新 |
-| `Update ... Join` | 多表 UPDATE（MySQL `JOIN`、PG/SQLite `FROM`、MSSQL `FROM`；Oracle 渲染报错） |
+| `Update ... Join` | 多表 UPDATE（MySQL `JOIN`、PG/SQLite `FROM`） |
 | `Delete(t)` | 软删表自动转 `UPDATE deleted_at`；`Unscoped()` 真 DELETE |
-| `Returning(字段...)` | PG/SQLite `RETURNING`、MSSQL `OUTPUT`（MySQL/Oracle 渲染报错） |
+| `Returning(字段...)` | PG/SQLite `RETURNING`（MySQL 渲染报错） |
 | Upsert | `OnConflictKey(...)` + `DoUpdate(...)` / `DoNothing()`（MySQL `INSERT IGNORE`/`ON DUPLICATE KEY UPDATE`，PG `ON CONFLICT`） |
 | 软删除 | 自动 `deleted_at IS NULL`；显式引用列名接管；`Unscoped()` 绕过 |
 
@@ -126,8 +126,6 @@ var User = &UserTable{
 | mysql | `?` | `` ` `` | LIMIT | LOCK IN SHARE MODE |
 | pgsql | `$n` | `"` | LIMIT | FOR SHARE |
 | sqlite | `?` | `"` | LIMIT | — |
-| oracle | `:n` | `"` | FETCH FIRST / OFFSET-FETCH | FOR SHARE |
-| mssql | `?` | `"` | FETCH FIRST / OFFSET-FETCH | FOR SHARE |
 
 未注册方言回退默认渲染；驱动可 `RegisterDialect` 增量覆盖内置方言。
 

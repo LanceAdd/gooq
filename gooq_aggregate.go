@@ -20,14 +20,14 @@ type GroupConcatOptions struct {
 	Field Expression
 	// Separator 是分隔符（默认 ","）。
 	Separator string
-	// Distinct 是否去重（MySQL/SQLite 支持；PG/Oracle/MSSQL 不支持，ToSql 渲染报错）。
+	// Distinct 是否去重（MySQL/SQLite 支持；PG 不支持，ToSql 渲染报错）。
 	Distinct bool
-	// OrderBy 是组内排序（SQLite 忽略；MySQL/PG/Oracle/MSSQL 支持）。
+	// OrderBy 是组内排序（SQLite 忽略；MySQL/PG 支持）。
 	OrderBy []OrderClause
 }
 
 // GroupConcatFunc 构造字符串聚合表达式。
-// 跨方言映射：MySQL/SQLite GROUP_CONCAT、PG/MSSQL STRING_AGG、Oracle LISTAGG；
+// 跨方言映射：MySQL/SQLite GROUP_CONCAT、PG STRING_AGG；
 // 分隔符参数自动转 SQL 字符串字面量。
 func GroupConcatFunc(opts GroupConcatOptions) Expression {
 	return &groupConcatExpr{
@@ -73,20 +73,6 @@ func (e *groupConcatExpr) render(rc *renderContext) (string, []any) {
 			distinct = "DISTINCT "
 		}
 		return fmt.Sprintf("GROUP_CONCAT(%s%s, '%s')", distinct, fieldSQL, sep), args
-	case DialectOracle:
-		// LISTAGG(field, 'sep') [WITHIN GROUP (ORDER BY ...)]；DISTINCT 不支持（validate 已拦截）。
-		sqlStr := fmt.Sprintf("LISTAGG(%s, '%s')", fieldSQL, sep)
-		if orderSQL != "" {
-			sqlStr += " WITHIN GROUP (ORDER BY " + orderSQL + ")"
-		}
-		return sqlStr, args
-	case DialectMssql:
-		// STRING_AGG(field, 'sep') [WITHIN GROUP (ORDER BY ...)]；DISTINCT 不支持（validate 已拦截）。
-		sqlStr := fmt.Sprintf("STRING_AGG(%s, '%s')", fieldSQL, sep)
-		if orderSQL != "" {
-			sqlStr += " WITHIN GROUP (ORDER BY " + orderSQL + ")"
-		}
-		return sqlStr, args
 	default:
 		// MySQL：GROUP_CONCAT([DISTINCT ]field [ORDER BY ...] [SEPARATOR 'sep'])。
 		distinct := ""

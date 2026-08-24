@@ -6,17 +6,9 @@ import (
 	"sync"
 )
 
-type PaginationStyle int
-
-const (
-	PaginationLimit PaginationStyle = iota
-	PaginationFetch
-)
-
 type DialectInfo struct {
 	Placeholder string
 	QuoteChar   string
-	Pagination  PaginationStyle
 	ShareLock   string
 	Returning   string
 	RenderLimit func(rc *renderContext, limit, offset int) string
@@ -42,32 +34,18 @@ func init() {
 	RegisterDialect("mysql", DialectInfo{
 		Placeholder: "?",
 		QuoteChar:   "`",
-		Pagination:  PaginationLimit,
 		ShareLock:   "LOCK IN SHARE MODE",
 	})
 	RegisterDialect("pgsql", DialectInfo{
 		Placeholder: "$%d",
 		QuoteChar:   `"`,
-		Pagination:  PaginationLimit,
 		ShareLock:   "FOR SHARE",
 		Returning:   "RETURNING",
 	})
 	RegisterDialect("sqlite", DialectInfo{
 		Placeholder: "?",
 		QuoteChar:   `"`,
-		Pagination:  PaginationLimit,
 		Returning:   "RETURNING",
-	})
-	RegisterDialect("oracle", DialectInfo{
-		Placeholder: ":%d",
-		QuoteChar:   `"`,
-		Pagination:  PaginationFetch,
-	})
-	RegisterDialect("mssql", DialectInfo{
-		Placeholder: "?",
-		QuoteChar:   `"`,
-		Pagination:  PaginationFetch,
-		Returning:   "OUTPUT",
 	})
 }
 

@@ -491,7 +491,7 @@ func (b *SelectBuilder) validate(dialect Dialect) error {
 	visit := func(e Expression) error {
 		if g, ok := e.(*groupConcatExpr); ok && g.distinct {
 			switch dialect {
-			case DialectPgsql, DialectOracle, DialectMssql:
+			case DialectPgsql:
 				return fmt.Errorf("gooq: GROUP_CONCAT DISTINCT is not supported by dialect %s", dialect)
 			}
 		}
@@ -685,18 +685,10 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 		sql.WriteString(strings.Join(orders, ", "))
 	}
 	if b.limit > 0 {
-		switch {
-		case rc.dialectInfo != nil && rc.dialectInfo.RenderLimit != nil:
+		if rc.dialectInfo != nil && rc.dialectInfo.RenderLimit != nil {
 			// 驱动注册的自定义分页渲染（扩展点）。
 			sql.WriteString(rc.dialectInfo.RenderLimit(rc, b.limit, b.offset))
-		case rc.dialectInfo != nil && rc.dialectInfo.Pagination == PaginationFetch:
-			// SQL:2008 FETCH 语法（Oracle 12c+ / MSSQL 2012+ 支持）。
-			if b.offset > 0 {
-				fmt.Fprintf(&sql, " OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", b.offset, b.limit)
-			} else {
-				fmt.Fprintf(&sql, " FETCH FIRST %d ROWS ONLY", b.limit)
-			}
-		default:
+		} else {
 			sql.WriteString(" LIMIT ")
 			fmt.Fprintf(&sql, "%d", b.limit)
 			if b.offset > 0 {

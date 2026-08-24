@@ -10,8 +10,6 @@ const (
 	DialectMySQL  Dialect = "mysql"
 	DialectPgsql  Dialect = "pgsql"
 	DialectSQLite Dialect = "sqlite"
-	DialectOracle Dialect = "oracle"
-	DialectMssql  Dialect = "mssql"
 )
 
 type Expression interface {

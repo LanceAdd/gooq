@@ -379,9 +379,6 @@ func (b *DMLBuilder) renderInsertBatch(rc *renderContext) (string, []any, error)
 }
 
 func (b *DMLBuilder) renderUpdate(rc *renderContext) (string, []any, error) {
-	if len(b.joins) > 0 && rc.dialect == DialectOracle {
-		return "", nil, fmt.Errorf("gooq: UPDATE ... JOIN is not supported by dialect oracle")
-	}
 	if len(b.data) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
 	}
@@ -392,8 +389,6 @@ func (b *DMLBuilder) renderUpdate(rc *renderContext) (string, []any, error) {
 		sqlStr = fmt.Sprintf("UPDATE %s SET %s", renderTableName(rc, b.table), b.renderSets(rc))
 	case rc.dialect == DialectPgsql || rc.dialect == DialectSQLite:
 		sqlStr = fmt.Sprintf("UPDATE %s SET %s FROM %s", renderTableName(rc, b.table), b.renderSets(rc), b.renderJoinTables(rc))
-	case rc.dialect == DialectMssql:
-		sqlStr = fmt.Sprintf("UPDATE %s SET %s FROM %s %s", renderTableName(rc, b.table), b.renderSets(rc), renderTableName(rc, b.table), b.renderJoinClauses(rc))
 	default:
 		sqlStr = fmt.Sprintf("UPDATE %s %s SET %s", renderTableName(rc, b.table), b.renderJoinClauses(rc), b.renderSets(rc))
 	}

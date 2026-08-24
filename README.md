@@ -9,7 +9,7 @@ It builds type-safe SQL — `Select`/`From`/conditions/subqueries/functions/offl
 - **Pure SQL builder**: no DB connection required for rendering; `ToSql(dialect)` produces SQL + args offline.
 - **Typed fields**: `Field[T]` carries the column type at compile time; comparison methods (`Eq(v T)`, `Gt(v T)`, ...) reject type mismatches at compile time. Expression operands (subqueries, column comparisons, `Raw`) go through explicit `EqExpr`/`InExpr` methods.
 - **Composable conditions**: conditions are first-class objects — build, reuse, and assemble them dynamically with `AND(...)`/`OR(...)`/`NOT(...)`.
-- **Dialect registry**: MySQL/PG/SQLite/Oracle/MSSQL built in; drivers register their own dialect via `RegisterDialect` to override rendering details.
+- **Dialect registry**: MySQL/PG/SQLite built in; drivers register their own dialect via `RegisterDialect` to override rendering details.
 - **Offline by design**: soft-delete auto conditions, auto-increment skipping, and `AllFields()` derivation all come from `TableMeta` — static metadata written at codegen time, zero runtime guessing.
 
 ## Quick Start
@@ -102,7 +102,7 @@ var User = &UserTable{
 - **Conditional**: `Case().When(cond).Then(v).Else(v).End().As("alias")`.
 - **Function library (30+)**: string (`Concat/Substring/Upper/Lower/Trim/Replace/Length`), math (`Abs/Round/Ceil/Floor/Mod`), date (`CurDate/DateAdd/DateDiff`), aggregate (`Count/Sum/Avg/Min/Max/CountDistinct`), general (`Coalesce/IfNull/Now`).
 - **Window functions**: `Rank/RowNumber/DenseRank/Ntile/Lag/Lead` + `Over(partitionBy, orderBy)` + `OverFrame`.
-- **String aggregation**: `GroupConcatFunc` (GROUP_CONCAT / STRING_AGG / LISTAGG per dialect).
+- **String aggregation**: `GroupConcatFunc` (GROUP_CONCAT / STRING_AGG per dialect).
 - **Custom operators**: `OperatorFunc(name, impl, drivers...)` registration + `Func(name, args...)` invocation.
 - **Raw**: `Raw(sql, args...)` structured SQL with parameter binding.
 
@@ -113,9 +113,9 @@ var User = &UserTable{
 | `Insert(t, data)` | single / batch (`[]map`/`[]struct`), auto-skips auto-increment columns |
 | `InsertFrom(t, subquery)` | INSERT ... SELECT |
 | `Update(t)` | `Set(field, value)` / `Data(do)` partial update |
-| `Update ... Join` | multi-table UPDATE (MySQL `JOIN`, PG/SQLite `FROM`, MSSQL `FROM`; Oracle errors at render) |
+| `Update ... Join` | multi-table UPDATE (MySQL `JOIN`, PG/SQLite `FROM`) |
 | `Delete(t)` | soft-delete tables auto-rewrite to `UPDATE deleted_at`; `Unscoped()` for real DELETE |
-| `Returning(fields...)` | PG/SQLite `RETURNING`, MSSQL `OUTPUT` (MySQL/Oracle error at render) |
+| `Returning(fields...)` | PG/SQLite `RETURNING` (MySQL error at render) |
 | Upsert | `OnConflictKey(...)` + `DoUpdate(...)` / `DoNothing()` (MySQL `INSERT IGNORE`/`ON DUPLICATE KEY UPDATE`, PG `ON CONFLICT`) |
 | Soft delete | auto `deleted_at IS NULL`; explicit column reference overrides; `Unscoped()` bypasses |
 
@@ -126,8 +126,6 @@ var User = &UserTable{
 | mysql | `?` | `` ` `` | LIMIT | LOCK IN SHARE MODE |
 | pgsql | `$n` | `"` | LIMIT | FOR SHARE |
 | sqlite | `?` | `"` | LIMIT | — |
-| oracle | `:n` | `"` | FETCH FIRST / OFFSET-FETCH | FOR SHARE |
-| mssql | `?` | `"` | FETCH FIRST / OFFSET-FETCH | FOR SHARE |
 
 Unregistered dialects fall back to default rendering; drivers can `RegisterDialect` to override built-ins incrementally.
 
