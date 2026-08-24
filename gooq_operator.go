@@ -2,7 +2,6 @@ package gooq
 
 import (
 	"context"
-	"fmt"
 	"strings"
 )
 
@@ -204,72 +203,6 @@ func RankFunc() Fn {
 
 func NowFunc() Fn {
 	return Fn{name: "NOW"}
-}
-
-func init() {
-	OperatorFunc("DATE_FORMAT", func(ctx context.Context, args ...any) (string, []any, error) {
-		if len(args) != 2 {
-			return "", nil, fmt.Errorf("DATE_FORMAT expects 2 arguments")
-		}
-		return fmt.Sprintf(`DATE_FORMAT(%s, %s)`, args[0], args[1]), nil, nil
-	})
-	OperatorFunc("COUNT", func(ctx context.Context, args ...any) (string, []any, error) {
-		return fmt.Sprintf(`COUNT(%s)`, args[0]), nil, nil
-	})
-	OperatorFunc("SUM", func(ctx context.Context, args ...any) (string, []any, error) {
-		return fmt.Sprintf(`SUM(%s)`, args[0]), nil, nil
-	})
-	OperatorFunc("COALESCE", func(ctx context.Context, args ...any) (string, []any, error) {
-		return "COALESCE(" + strings.Join(toStrings(args), ", ") + ")", nil, nil
-	})
-	OperatorFunc("IFNULL", func(ctx context.Context, args ...any) (string, []any, error) {
-		return fmt.Sprintf(`IFNULL(%s, %s)`, args[0], args[1]), nil, nil
-	})
-	OperatorFunc("RANK", func(ctx context.Context, args ...any) (string, []any, error) {
-		return "RANK()", nil, nil
-	})
-	OperatorFunc("NOW", func(ctx context.Context, args ...any) (string, []any, error) {
-		return "NOW()", nil, nil
-	})
-	// DATE_FORMAT 跨库内置：PG 用 TO_CHAR（格式映射），SQLite 用 strftime（格式兼容）。
-	OperatorFunc("DATE_FORMAT", func(ctx context.Context, args ...any) (string, []any, error) {
-		if len(args) != 2 {
-			return "", nil, fmt.Errorf("DATE_FORMAT expects 2 arguments")
-		}
-		pgFormat := mysqlToPgFormat(trimQuotes(args[1].(string)))
-		return "TO_CHAR(" + args[0].(string) + ", '" + pgFormat + "')", nil, nil
-	}, "pgsql")
-	OperatorFunc("DATE_FORMAT", func(ctx context.Context, args ...any) (string, []any, error) {
-		if len(args) != 2 {
-			return "", nil, fmt.Errorf("DATE_FORMAT expects 2 arguments")
-		}
-		return "strftime(" + args[1].(string) + ", " + args[0].(string) + ")", nil, nil
-	}, "sqlite")
-}
-
-func trimQuotes(s string) string {
-	if len(s) >= 2 && s[0] == '\'' && s[len(s)-1] == '\'' {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
-func mysqlToPgFormat(format string) string {
-	var replacer = strings.NewReplacer(
-		"%Y", "YYYY", "%y", "YY",
-		"%m", "MM", "%d", "DD",
-		"%H", "HH24", "%i", "MI", "%s", "SS",
-		"%e", "FMDD", "%j", "DDD",
-	)
-	return replacer.Replace(format)
-}
-
-func toStrings(args []any) []string {
-	result := make([]string, len(args))
-	for i, a := range args {
-		result[i] = fmt.Sprintf(`%v`, a)
-	}
-	return result
 }
 
 func ConcatFunc(args ...any) Fn {
