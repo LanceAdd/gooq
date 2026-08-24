@@ -166,125 +166,125 @@ func DateFormatFunc(args ...any) Fn {
 			converted[i] = arg
 		}
 	}
-	return Fn{name: "DATE_FORMAT", args: converted}
+	return Fn{name: FuncDateFormat, args: converted}
 }
 
 func CountFunc(field Expression) Fn {
-	return Fn{name: "COUNT", args: []any{field}}
+	return Fn{name: FuncCount, args: []any{field}}
 }
 
 func SumFunc(field Expression) Fn {
-	return Fn{name: "SUM", args: []any{field}}
+	return Fn{name: FuncSum, args: []any{field}}
 }
 
 func AvgFunc(field Expression) Fn {
-	return Fn{name: "AVG", args: []any{field}}
+	return Fn{name: FuncAvg, args: []any{field}}
 }
 
 func MinFunc(field Expression) Fn {
-	return Fn{name: "MIN", args: []any{field}}
+	return Fn{name: FuncMin, args: []any{field}}
 }
 
 func MaxFunc(field Expression) Fn {
-	return Fn{name: "MAX", args: []any{field}}
+	return Fn{name: FuncMax, args: []any{field}}
 }
 
 func CoalesceFunc(args ...any) Fn {
-	return Fn{name: "COALESCE", args: args}
+	return Fn{name: FuncCoalesce, args: args}
 }
 
 func IfNullFunc(a, b Expression) Fn {
-	return Fn{name: "IFNULL", args: []any{a, b}}
+	return Fn{name: FuncIfNull, args: []any{a, b}}
 }
 
 func RankFunc() Fn {
-	return Fn{name: "RANK"}
+	return Fn{name: FuncRank}
 }
 
 func NowFunc() Fn {
-	return Fn{name: "NOW"}
+	return Fn{name: FuncNow}
 }
 
 func ConcatFunc(args ...any) Fn {
-	return Fn{name: "CONCAT", args: args}
+	return Fn{name: FuncConcat, args: args}
 }
 
 func SubstringFunc(s any, start, length any) Fn {
-	return Fn{name: "SUBSTRING", args: []any{s, start, length}}
+	return Fn{name: FuncSubstring, args: []any{s, start, length}}
 }
 
 func UpperFunc(e Expression) Fn {
-	return Fn{name: "UPPER", args: []any{e}}
+	return Fn{name: FuncUpper, args: []any{e}}
 }
 
 func LowerFunc(e Expression) Fn {
-	return Fn{name: "LOWER", args: []any{e}}
+	return Fn{name: FuncLower, args: []any{e}}
 }
 
 func TrimFunc(e Expression) Fn {
-	return Fn{name: "TRIM", args: []any{e}}
+	return Fn{name: FuncTrim, args: []any{e}}
 }
 
 func ReplaceFunc(s, old, new any) Fn {
-	return Fn{name: "REPLACE", args: []any{s, old, new}}
+	return Fn{name: FuncReplace, args: []any{s, old, new}}
 }
 
 func LengthFunc(e Expression) Fn {
-	return Fn{name: "LENGTH", args: []any{e}}
+	return Fn{name: FuncLength, args: []any{e}}
 }
 
 func AbsFunc(e Expression) Fn {
-	return Fn{name: "ABS", args: []any{e}}
+	return Fn{name: FuncAbs, args: []any{e}}
 }
 
 func RoundFunc(e Expression, decimals any) Fn {
-	return Fn{name: "ROUND", args: []any{e, decimals}}
+	return Fn{name: FuncRound, args: []any{e, decimals}}
 }
 
 func CeilFunc(e Expression) Fn {
-	return Fn{name: "CEIL", args: []any{e}}
+	return Fn{name: FuncCeil, args: []any{e}}
 }
 
 func FloorFunc(e Expression) Fn {
-	return Fn{name: "FLOOR", args: []any{e}}
+	return Fn{name: FuncFloor, args: []any{e}}
 }
 
 func ModFunc(a, b any) Fn {
-	return Fn{name: "MOD", args: []any{a, b}}
+	return Fn{name: FuncMod, args: []any{a, b}}
 }
 
 func CurDateFunc() Fn {
-	return Fn{name: "CURDATE"}
+	return Fn{name: FuncCurdate}
 }
 
 func DateAddFunc(date Expression, interval string) Fn {
-	return Fn{name: "DATE_ADD", args: []any{date, interval}}
+	return Fn{name: FuncDateadd, args: []any{date, interval}}
 }
 
 func DateDiffFunc(a, b Expression) Fn {
-	return Fn{name: "DATEDIFF", args: []any{a, b}}
+	return Fn{name: FuncDatediff, args: []any{a, b}}
 }
 
 func CountDistinctFunc(field Expression) Fn {
-	return Fn{name: "COUNT", args: []any{Distinct(field)}}
+	return Fn{name: FuncCount, args: []any{Distinct(field)}}
 }
 
 func RowNumberFunc() Fn {
-	return Fn{name: "ROW_NUMBER"}
+	return Fn{name: FuncRownumber}
 }
 
 func DenseRankFunc() Fn {
-	return Fn{name: "DENSE_RANK"}
+	return Fn{name: FuncDenserank}
 }
 
 func NtileFunc(n int) Fn {
-	return Fn{name: "NTILE", args: []any{n}}
+	return Fn{name: FuncNtile, args: []any{n}}
 }
 
 func LagFunc(field Expression, offset, defaultValue any) Fn {
-	return Fn{name: "LAG", args: []any{field, offset, defaultValue}}
+	return Fn{name: FuncLag, args: []any{field, offset, defaultValue}}
 }
 
 func LeadFunc(field Expression, offset, defaultValue any) Fn {
-	return Fn{name: "LEAD", args: []any{field, offset, defaultValue}}
+	return Fn{name: FuncLead, args: []any{field, offset, defaultValue}}
 }

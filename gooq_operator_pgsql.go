@@ -13,13 +13,13 @@ import (
 )
 
 func init() {
-	OperatorFunc("DATE_FORMAT", func(ctx context.Context, args ...any) (string, []any, error) {
+	OperatorFunc(FuncDateFormat, func(ctx context.Context, args ...any) (string, []any, error) {
 		if len(args) != 2 {
 			return "", nil, fmt.Errorf("DATE_FORMAT expects 2 arguments")
 		}
 		pgFormat := mysqlToPgFormat(trimQuotes(args[1].(string)))
 		return "TO_CHAR(" + args[0].(string) + ", '" + pgFormat + "')", nil, nil
-	}, "pgsql")
+	}, string(DialectPgsql))
 }
 
 func trimQuotes(s string) string {
