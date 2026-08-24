@@ -28,7 +28,7 @@ func generateDo(ctx context.Context, db gdb.DB, tableNames []string, dirPathDo s
 		doFilePath := gfile.Join(dirPathDo, formatFileName(tableName, "")+".go")
 		structDefinition := generateStructDefinition(ctx, db, fieldMap, tableNameCamelCase, tableName, true)
 		doContent := renderStructContent(
-			TemplateGenDaoDoContent, "do", tableName, tableNameCamelCase, structDefinition, true,
+			getTemplate(tplFileDo), "do", tableName, tableNameCamelCase, structDefinition, true,
 		)
 		err = gfile.PutContents(doFilePath, strings.TrimSpace(doContent))
 		if err != nil {

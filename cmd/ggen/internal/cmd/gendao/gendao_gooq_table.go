@@ -118,10 +118,7 @@ func generateGooqTableContent(
 		imports = append(imports, `"github.com/google/uuid"`)
 	}
 
-	tplContent, err := getGooqTableTemplate()
-	if err != nil {
-		return "", err
-	}
+	tplContent := getTemplate(tplFileGooqTable)
 	tplPackageName := filepath.Base(dirPathTable)
 	tplGooqImport := `	"github.com/lanceadd/gooq"`
 	if gooqRef == "" {
@@ -169,15 +166,6 @@ func gooqFieldTypes(
 		*hasUUID = true
 	}
 	return goType, localTypeStr
-}
-
-// getGooqTableTemplate reads the embedded gooq table template.
-func getGooqTableTemplate() (string, error) {
-	content, err := gooqTemplateFS.ReadFile("template/gooq_table.tpl")
-	if err != nil {
-		return "", err
-	}
-	return string(content), nil
 }
 
 // boolSuffix renders a struct field suffix for boolean meta flags.

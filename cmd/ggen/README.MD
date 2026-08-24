@@ -23,8 +23,13 @@ Built-in drivers: `mysql`, `pgsql`, `sqlite`. To enable other drivers (e.g. `dm`
 | --- | --- |
 | `-l, --link` | database link, same as the ORM configuration of GoFrame (required) |
 | `-p, --path` | output directory, default `internal` |
+| `-t, --tpl` | export built-in templates to `./template` then exit |
 
 All tables of the database are generated — output subdirectories are fixed to `table/`, `do/`, `entity/` under the output directory.
+
+## Template customization
+
+Run `ggen -t` to export the built-in templates (`template/do.tpl`, `template/entity.tpl`, `template/gooq_table.tpl`) into the current working directory. Generation prefers the local templates under `./template` and falls back to the embedded ones — edit the exported files and re-run `ggen` to see the effect.
 
 ## Generated examples
 

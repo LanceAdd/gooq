@@ -23,8 +23,13 @@ go run . -l "sqlite::@file(./test.db)" -p internal
 | --- | --- |
 | `-l, --link` | 数据库连接，与 GoFrame 的 ORM 配置一致（必填） |
 | `-p, --path` | 输出目录，默认 `internal` |
+| `-t, --tpl` | 将内置模板导出到当前目录 `./template` 后退出 |
 
 默认生成数据库全部表；输出目录下固定为 `table/`、`do/`、`entity/` 三个子目录。
+
+## 模板定制
+
+运行 `ggen -t` 将内置模板（`template/do.tpl`、`template/entity.tpl`、`template/gooq_table.tpl`）导出到当前工作目录。生成时优先使用 `./template` 下的本地模板，不存在时回退到内置模板——修改导出的模板后重新运行 `ggen` 即可生效。
 
 ## 产物示例
 

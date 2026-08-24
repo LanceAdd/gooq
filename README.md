@@ -139,7 +139,7 @@ Unregistered dialects fall back to default rendering; drivers can `RegisterDiale
 cd cmd/ggen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db"
 ```
 
-- Only two options: `-l/--link` (database link, required) and `-p/--path` (output directory, default `internal`).
+- Options: `-l/--link` (database link, required), `-p/--path` (output directory, default `internal`), `-t/--tpl` (export built-in templates to `./template` for customization, then exit; generation prefers local templates over embedded ones).
 - Metadata derivation: primary key (`PRI`), auto-increment (`auto_increment`), soft delete (column-name convention), unique (`UNI`), `LocalType` markers; Go-naming conventions (`id` → `ID`).
 - Built-in drivers: mysql/pgsql/sqlite; other drivers enabled by uncommenting the import in `internal/cmd/cmd.go`.
 

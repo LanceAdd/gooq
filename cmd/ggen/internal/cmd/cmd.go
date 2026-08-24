@@ -58,11 +58,16 @@ type cGFInput struct {
 	Debug      bool   `short:"d" name:"debug"   brief:"show internal detailed debugging information" orphan:"true"`
 	Link       string `name:"link" short:"l" brief:"database link, like mysql:root:pass@tcp(127.0.0.1:3306)/db"`
 	Path       string `name:"path" short:"p" brief:"directory path for generated files" d:"internal"`
+	Tpl        bool   `name:"tpl" short:"t" brief:"export built-in templates to ./template then exit" orphan:"true"`
 }
 
 type cGFOutput struct{}
 
 func (c cGF) Index(ctx context.Context, in cGFInput) (out *cGFOutput, err error) {
+	if in.Tpl {
+		gendao.ExportTemplates()
+		return
+	}
 	gendao.Generate(ctx, gendao.Input{
 		Link: in.Link,
 		Path: in.Path,

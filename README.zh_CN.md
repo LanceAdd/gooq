@@ -139,7 +139,7 @@ var User = &UserTable{
 cd cmd/ggen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db"
 ```
 
-- 仅两个参数：`-l/--link`（数据库连接，必填）、`-p/--path`（输出目录，默认 `internal`）。
+- 参数：`-l/--link`（数据库连接，必填）、`-p/--path`（输出目录，默认 `internal`）、`-t/--tpl`（导出内置模板到 `./template` 便于定制后退出；生成时本地模板优先于内置模板）。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；Go 命名规范（`id` → `ID`）。
 - 内置驱动：mysql/pgsql/sqlite；其他驱动取消 `internal/cmd/cmd.go` 中 import 注释启用。
 

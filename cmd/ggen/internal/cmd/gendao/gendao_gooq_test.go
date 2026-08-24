@@ -111,3 +111,38 @@ func TestGooqGen_Sqlite(t *testing.T) {
 		t.Assert(gstr.Contains(entityContent, `"time"`), true)
 	})
 }
+
+// TestGooq_Template_Override 验证模板落盘（-t）与本地模板覆盖：工作目录 template/ 下的
+// 自定义模板优先于内置模板。
+func TestGooq_Template_Override(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			ctx     = context.Background()
+			tmpDir  = gfile.Temp("ggen-tpl-test")
+			dbPath  = filepath.Join(tmpDir, "gooq_test.db")
+			genPath = filepath.Join(tmpDir, "gen")
+		)
+		defer gfile.Remove(tmpDir)
+		t.AssertNil(gfile.Mkdir(tmpDir))
+		t.T.Chdir(tmpDir)
+		initSqlite(t, dbPath)
+
+		// 导出内置模板到当前工作目录 template/。
+		ExportTemplates()
+		t.Assert(gfile.Exists(gfile.Join("template", "do.tpl")), true)
+		t.Assert(gfile.Exists(gfile.Join("template", "entity.tpl")), true)
+		t.Assert(gfile.Exists(gfile.Join("template", "gooq_table.tpl")), true)
+
+		// 自定义 do 模板（标记 CUSTOM 便于断言）。
+		t.AssertNil(gfile.PutContents(
+			gfile.Join("template", "do.tpl"),
+			`CUSTOM {{.TplStructDefine}}`,
+		))
+
+		// 生成：本地模板应优先于内置模板。
+		t.AssertNil(gfile.Mkdir(genPath))
+		Generate(ctx, Input{Link: "sqlite::@file(" + dbPath + ")", Path: genPath})
+		doContent := gfile.GetContents(filepath.Join(genPath, "do", "user.go"))
+		t.Assert(gstr.Contains(doContent, `CUSTOM type User struct {`), true)
+	})
+}

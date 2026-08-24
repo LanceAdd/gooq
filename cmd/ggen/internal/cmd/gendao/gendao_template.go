@@ -4,7 +4,7 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
-// 本文件定义 do 与 entity 结构体的默认生成模板（gview 语法）。
+// 本文件定义模板变量常量；模板内容位于 template/ 目录（embed 内嵌，可落盘到工作目录覆盖）。
 package gendao
 
 // 模板变量常量。
@@ -15,29 +15,3 @@ const (
 	tplVarStructDefine       = `TplStructDefine`
 	tplVarPackageName        = `TplPackageName`
 )
-
-const TemplateGenDaoDoContent = `
-// =================================================================================
-// Code generated and maintained by GoFrame CLI tool. DO NOT EDIT. {{.TplCreatedAtDatetimeStr}}
-// =================================================================================
-
-package {{.TplPackageName}}
-
-{{.TplPackageImports}}
-
-// {{.TplTableNameCamelCase}} is the golang structure of table {{.TplTableName}} for DAO operations like Where/Data.
-{{.TplStructDefine}}
-`
-
-const TemplateGenDaoEntityContent = `
-// =================================================================================
-// Code generated and maintained by GoFrame CLI tool. DO NOT EDIT. {{.TplCreatedAtDatetimeStr}}
-// =================================================================================
-
-package {{.TplPackageName}}
-
-{{.TplPackageImports}}
-
-// {{.TplTableNameCamelCase}} is the golang structure for table {{.TplTableName}}.
-{{.TplStructDefine}}
-`

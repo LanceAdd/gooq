@@ -28,7 +28,7 @@ func generateEntity(ctx context.Context, db gdb.DB, tableNames []string, dirPath
 		entityFilePath := gfile.Join(dirPathEntity, formatFileName(tableName, "")+".go")
 		structDefinition := generateStructDefinition(ctx, db, fieldMap, tableNameCamelCase, tableName, false)
 		entityContent := renderStructContent(
-			TemplateGenDaoEntityContent, "entity", tableName, tableNameCamelCase, structDefinition, false,
+			getTemplate(tplFileEntity), "entity", tableName, tableNameCamelCase, structDefinition, false,
 		)
 		err = gfile.PutContents(entityFilePath, strings.TrimSpace(entityContent))
 		if err != nil {

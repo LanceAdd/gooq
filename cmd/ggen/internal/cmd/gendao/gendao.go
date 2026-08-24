@@ -9,6 +9,7 @@ package gendao
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gfile"
@@ -33,6 +34,43 @@ const (
 
 // tplView 是模板渲染视图（跨表生成复用）。
 var tplView = gview.New()
+
+// 内置模板文件名。
+const (
+	tplFileDo        = "do.tpl"
+	tplFileEntity    = "entity.tpl"
+	tplFileGooqTable = "gooq_table.tpl"
+)
+
+// getTemplate 读取模板内容：优先使用工作目录下 template/ 目录中的本地模板（便于调试定制），
+// 否则回退到内嵌模板。
+func getTemplate(name string) string {
+	if path := gfile.Join("template", name); gfile.Exists(path) {
+		return gfile.GetContents(path)
+	}
+	content, err := gooqTemplateFS.ReadFile("template/" + name)
+	if err != nil {
+		mlog.Fatalf(`reading embedded template "%s" failed: %+v`, name, err)
+	}
+	return string(content)
+}
+
+// ExportTemplates 将内置模板落盘到当前工作目录的 template/ 目录（-t 参数使用）。
+func ExportTemplates() {
+	if !gfile.Exists("template") {
+		if err := gfile.Mkdir("template"); err != nil {
+			mlog.Fatalf(`creating template directory failed: %+v`, err)
+		}
+	}
+	for _, name := range []string{tplFileDo, tplFileEntity, tplFileGooqTable} {
+		path := gfile.Join("template", name)
+		if err := gfile.PutContents(path, getTemplate(name)); err != nil {
+			mlog.Fatalf(`writing template "%s" failed: %+v`, path, err)
+		}
+		mlog.Print("exported:", gfile.RealPath(path))
+	}
+	mlog.Print(fmt.Sprintf(`templates exported, edit files under "template/" then re-run ggen`))
+}
 
 // Generate generates do/entity/gooq-table files for all tables of the given database.
 func Generate(ctx context.Context, in Input) {
