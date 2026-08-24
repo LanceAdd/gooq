@@ -69,7 +69,8 @@ func TestGooqGen_Sqlite(t *testing.T) {
 		// 类型化表对象骨架。
 		t.Assert(gstr.Contains(content, `type UserTable struct {`), true)
 		t.Assert(gstr.Contains(content, `*gooq.TableBase`), true)
-		t.Assert(gstr.Contains(content, `ALL_FIELDS gooq.AllFields`), true)
+		// 全列由 TableBase.AllFields() 从元数据派生，生成代码不重复维护列名列表。
+		t.Assert(gstr.Contains(content, `ALL_FIELDS`), false)
 
 		// 字段定义（Go 类型映射：sqlite INTEGER → int，datetime → *gtime.Time）。
 		t.Assert(gstr.Contains(content, `gooq.Field[int]`), true)
@@ -88,7 +89,7 @@ func TestGooqGen_Sqlite(t *testing.T) {
 		t.Assert(gstr.Contains(content, `func (t *UserTable) As(alias string) *UserTable {`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) Clone() *UserTable {`), true)
 
-		// ALL_FIELDS 是全列（含软删列）。
+		// FieldMeta 含软删列。
 		t.Assert(gstr.Contains(content, `"deleted_at"`), true)
 
 		// 主键/自增标记依赖驱动返回 Key/Extra（sqlite 驱动不支持），由 MySQL e2e 验证。

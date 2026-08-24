@@ -12,8 +12,8 @@ import (
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gctx"
 
-	"github.com/lanceadd/gooq/cmd/ggen/gfcmd"
-	"github.com/lanceadd/gooq/cmd/ggen/internal/utility/mlog"
+	"github.com/gogf/gf/cmd/ggen/gfcmd"
+	"github.com/gogf/gf/cmd/ggen/internal/utility/mlog"
 )
 
 func main() {

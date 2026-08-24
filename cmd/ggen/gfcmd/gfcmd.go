@@ -14,8 +14,8 @@ import (
 	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/os/gfile"
 
-	"github.com/lanceadd/gooq/cmd/ggen/internal/cmd"
-	"github.com/lanceadd/gooq/cmd/ggen/internal/utility/mlog"
+	"github.com/gogf/gf/cmd/ggen/internal/cmd"
+	"github.com/gogf/gf/cmd/ggen/internal/utility/mlog"
 )
 
 const cliFolderName = `hack`

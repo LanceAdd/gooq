@@ -1,19 +1,14 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
-// 本文件实现 V3 类型化查询 DSL 的核心：SelectBuilder 链式构建、渲染与执行。
 package gooq
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/gogf/gf/v2/database/gdb"
 )
 
-// lockMode 是行锁模式。
 type lockMode int
 
 const (
@@ -22,7 +17,6 @@ const (
 	lockInShareMode
 )
 
-// joinType 是连接类型。
 type joinType int
 
 const (
@@ -32,7 +26,6 @@ const (
 	joinFull
 )
 
-// joinKeyword 是连接类型对应的 SQL 关键字。
 var joinKeyword = map[joinType]string{
 	joinLeft:  "LEFT JOIN",
 	joinRight: "RIGHT JOIN",
@@ -40,14 +33,12 @@ var joinKeyword = map[joinType]string{
 	joinFull:  "FULL JOIN",
 }
 
-// joinClause 是连接子句（表 + ON 条件）。
 type joinClause struct {
 	joinType joinType
 	table    Table
 	on       []Expression
 }
 
-// setOp 是集合操作类型。
 type setOp int
 
 const (
@@ -57,7 +48,6 @@ const (
 	setExcept
 )
 
-// setOpKeyword 是集合操作对应的 SQL 关键字。
 var setOpKeyword = map[setOp]string{
 	setUnionAll:  "UNION ALL",
 	setUnion:     "UNION",
@@ -65,100 +55,116 @@ var setOpKeyword = map[setOp]string{
 	setExcept:    "EXCEPT",
 }
 
-// setOpClause 是集合操作子句（操作符 + 另一查询）。
 type setOpClause struct {
 	op    setOp
 	query *SelectBuilder
 }
 
-// cteClause 是 CTE 子句（WITH name AS (query)）。
 type cteClause struct {
 	name  string
 	query *SelectBuilder
 }
+type groupExtKind int
 
-// SelectBuilder 是类型化查询构建器：Select(字段).From(表) 链式 DSL。
-// 它同时实现 Table 接口（As 后作为派生表）与 Expression 接口（子查询/标量子查询）。
+const (
+	groupExtNone groupExtKind = iota
+	groupExtRollup
+	groupExtCube
+	groupExtGroupingSets
+)
+
 type SelectBuilder struct {
 	ctx          context.Context
-	fields       []Expression  // SELECT 字段。
-	from         Table         // FROM 表或派生表。
-	joins        []*joinClause // JOIN 子句。
-	conditions   []Expression  // WHERE 条件（默认 AND）。
-	groupBy      []Expression  // GROUP BY。
-	having       []Expression  // HAVING 条件。
-	orderBy      []OrderClause // ORDER BY。
-	limit        int           // LIMIT（0 表示不限制）。
-	offset       int           // OFFSET。
-	distinct     bool          // DISTINCT。
-	unscoped     bool          // 是否绕过软删除自动条件。
-	alias        string        // 子查询别名（派生表或标量子查询的 AS alias）。
-	cacheOption  *CacheOption  // 单查询缓存配置（nil 不缓存）。
-	pageCacheOpt *CacheOption  // 分页缓存配置（count 与各页 data 同 key 同生命周期，共享一个配置）。
-	pageNum      int           // 分页页码（Page 设置，供分页缓存 field 使用）。
-	pageSize     int           // 分页条数（Page 设置，供分页缓存 field 使用）。
-	lock         lockMode      // 行锁模式（默认无锁）。
-	setOps       []setOpClause // 集合操作（UNION/INTERSECT/EXCEPT）。
-	ctes         []cteClause   // CTE（WITH name AS (query)）。
-	recursive    bool          // CTE 是否递归（WITH RECURSIVE）。
+	fields       []Expression   // SELECT 字段。
+	from         Table          // FROM 表或派生表。
+	joins        []*joinClause  // JOIN 子句。
+	conditions   []Expression   // WHERE 条件（默认 AND）。
+	groupBy      []Expression   // GROUP BY。
+	groupExt     groupExtKind   // GROUP BY 扩展（ROLLUP/CUBE/GROUPING SETS）。
+	groupExtSets [][]Expression // 扩展分组字段（ROLLUP/CUBE 单组；GROUPING SETS 每组一个列表）。
+	having       []Expression   // HAVING 条件。
+	orderBy      []OrderClause  // ORDER BY。
+	limit        int            // LIMIT（0 表示不限制）。
+	offset       int            // OFFSET。
+	distinct     bool           // DISTINCT。
+	unscoped     bool           // 是否绕过软删除自动条件。
+	alias        string         // 子查询别名（派生表或标量子查询的 AS alias）。
+	cacheOption  *CacheOption   // 单查询缓存配置（nil 不缓存）。
+	pageCacheOpt *CacheOption   // 分页缓存配置（count 与各页 data 同 key 同生命周期，共享一个配置）。
+	pageNum      int            // 分页页码（Page 设置，供分页缓存 field 使用）。
+	pageSize     int            // 分页条数（Page 设置，供分页缓存 field 使用）。
+	lock         lockMode       // 行锁模式（默认无锁）。
+	setOps       []setOpClause  // 集合操作（UNION/INTERSECT/EXCEPT）。
+	ctes         []cteClause    // CTE（WITH name AS (query)）。
+	recursive    bool           // CTE 是否递归（WITH RECURSIVE）。
+	executor     executor       // 执行器（UseDB/UseTX 绑定；nil 时仅离线渲染）。
+	columns      []string       // 结果列名（字段收集；派生表列访问与 FieldsEx 使用）。
 }
 
-// TableName 实现 Table 接口（子查询无表名，From 渲染走专门逻辑）。
 func (b *SelectBuilder) TableName() string {
 	return ""
 }
 
-// Alias 实现 Table 接口。
 func (b *SelectBuilder) Alias() string {
 	return b.alias
 }
 
-// Meta 实现 Table 接口（子查询无元数据）。
 func (b *SelectBuilder) Meta() *TableMeta {
 	return nil
 }
 
-// AllColumns 实现 Table 接口（子查询列未知）。
 func (b *SelectBuilder) AllColumns() []string {
-	return nil
+	return b.columns
 }
 
-// JoinBuilder 是连接子句构建器：LeftJoin(t).On(conds...)。
-type JoinBuilder struct {
-	parent *SelectBuilder
+func (b *SelectBuilder) Field(column string) Field[any] {
+	return Field[any]{tableName: b.alias, columnName: column}
+}
+
+type JoinBuilder[T any] struct {
+	parent T
 	clause *joinClause
 }
 
-// Select 创建查询构建器（未绑定实例，执行时取默认实例；多库场景用 DB 绑定）。
+func (j *JoinBuilder[T]) On(conds ...Expression) T {
+	j.clause.on = append(j.clause.on, conds...)
+	return j.parent
+}
+
 func Select(fields ...any) *SelectBuilder {
 	b := &SelectBuilder{ctx: context.Background()}
 	return b.Fields(fields...)
 }
 
-// SelectFrom 创建 SELECT * 查询构建器（jOOQ selectFrom 同款便捷入口）。
 func SelectFrom(t Table) *SelectBuilder {
 	return Select().From(t)
 }
 
-// Ctx 设置查询上下文。
 func (b *SelectBuilder) Ctx(ctx context.Context) *SelectBuilder {
 	b.ctx = ctx
 	return b
 }
 
-// Fields 设置 SELECT 字段（空参表示全字段）。
 func (b *SelectBuilder) Fields(fields ...any) *SelectBuilder {
 	for _, f := range fields {
-		if expr, ok := f.(Expression); ok {
-			b.fields = append(b.fields, expr)
-		} else {
+		switch v := f.(type) {
+		case []Field[any]:
+			for _, f2 := range v {
+				b.fields = append(b.fields, f2)
+				b.columns = append(b.columns, f2.ColumnName())
+			}
+		case Expression:
+			b.fields = append(b.fields, v)
+			if c, ok := v.(interface{ ColumnName() string }); ok {
+				b.columns = append(b.columns, c.ColumnName())
+			}
+		default:
 			b.fields = append(b.fields, Raw(fmt.Sprintf(`%v`, f)))
 		}
 	}
 	return b
 }
 
-// FieldsEx 设置全字段减去排除字段（集合差集）。
 func (b *SelectBuilder) FieldsEx(fields ...any) *SelectBuilder {
 	excluded := make(map[string]bool)
 	for _, f := range fields {
@@ -171,6 +177,7 @@ func (b *SelectBuilder) FieldsEx(fields ...any) *SelectBuilder {
 		for _, col := range b.from.AllColumns() {
 			if !excluded[col] {
 				kept = append(kept, NewField[any](b.from.TableName(), col))
+				b.columns = append(b.columns, col)
 			}
 		}
 	}
@@ -178,71 +185,84 @@ func (b *SelectBuilder) FieldsEx(fields ...any) *SelectBuilder {
 	return b
 }
 
-// From 设置查询表（可为派生表）。
 func (b *SelectBuilder) From(t Table) *SelectBuilder {
 	b.from = t
 	return b
 }
 
-// Distinct 设置 DISTINCT 查询。
 func (b *SelectBuilder) Distinct() *SelectBuilder {
 	b.distinct = true
 	return b
 }
 
-// Where 追加条件（多参数默认 AND 连接）。
 func (b *SelectBuilder) Where(conds ...Expression) *SelectBuilder {
 	b.conditions = append(b.conditions, conds...)
 	return b
 }
 
-// And 追加 AND 条件。
 func (b *SelectBuilder) And(cond Expression) *SelectBuilder {
 	b.conditions = append(b.conditions, cond)
 	return b
 }
 
-// Or 追加 OR 条件。
 func (b *SelectBuilder) Or(cond Expression) *SelectBuilder {
 	b.conditions = append(b.conditions, OR(cond))
 	return b
 }
 
-// Order 设置排序子句。
 func (b *SelectBuilder) Order(clauses ...OrderClause) *SelectBuilder {
 	b.orderBy = append(b.orderBy, clauses...)
 	return b
 }
 
-// Group 设置分组字段。
 func (b *SelectBuilder) Group(fields ...any) *SelectBuilder {
-	for _, f := range fields {
-		if expr, ok := f.(Expression); ok {
-			b.groupBy = append(b.groupBy, expr)
-		}
-	}
+	b.groupBy = append(b.groupBy, toExpressions(fields)...)
 	return b
 }
 
-// Having 设置分组过滤条件。
+func (b *SelectBuilder) GroupRollup(fields ...any) *SelectBuilder {
+	return b.setGroupExt(groupExtRollup, [][]Expression{toExpressions(fields)})
+}
+
+func (b *SelectBuilder) GroupCube(fields ...any) *SelectBuilder {
+	return b.setGroupExt(groupExtCube, [][]Expression{toExpressions(fields)})
+}
+
+func (b *SelectBuilder) GroupingSets(sets ...[]Expression) *SelectBuilder {
+	return b.setGroupExt(groupExtGroupingSets, sets)
+}
+
+func (b *SelectBuilder) setGroupExt(kind groupExtKind, sets [][]Expression) *SelectBuilder {
+	b.groupExt = kind
+	b.groupExtSets = sets
+	return b
+}
+
+func toExpressions(fields []any) []Expression {
+	var exprs []Expression
+	for _, f := range fields {
+		if expr, ok := f.(Expression); ok {
+			exprs = append(exprs, expr)
+		}
+	}
+	return exprs
+}
+
 func (b *SelectBuilder) Having(conds ...Expression) *SelectBuilder {
 	b.having = append(b.having, conds...)
 	return b
 }
 
-// Limit 设置查询条数限制。
 func (b *SelectBuilder) Limit(n int) *SelectBuilder {
 	b.limit = n
 	return b
 }
 
-// Offset 设置查询偏移。
 func (b *SelectBuilder) Offset(n int) *SelectBuilder {
 	b.offset = n
 	return b
 }
 
-// Page 设置分页（page 从 1 开始）。
 func (b *SelectBuilder) Page(page, size int) *SelectBuilder {
 	b.pageNum = page
 	b.pageSize = size
@@ -251,158 +271,125 @@ func (b *SelectBuilder) Page(page, size int) *SelectBuilder {
 	return b
 }
 
-// Unscoped 绕过软删除自动条件。
 func (b *SelectBuilder) Unscoped() *SelectBuilder {
 	b.unscoped = true
 	return b
 }
 
-// LockForUpdate 设置行锁 FOR UPDATE（MySQL/PG；SQLite 忽略）。
 func (b *SelectBuilder) LockForUpdate() *SelectBuilder {
 	b.lock = lockForUpdate
 	return b
 }
 
-// LockInShareMode 设置共享锁（MySQL: LOCK IN SHARE MODE；PG: FOR SHARE；SQLite 忽略）。
 func (b *SelectBuilder) LockInShareMode() *SelectBuilder {
 	b.lock = lockInShareMode
 	return b
 }
 
-// Cache 启用单查询缓存（键值适配器；未注入适配器时自动跳过）。
 func (b *SelectBuilder) Cache(option CacheOption) *SelectBuilder {
 	b.cacheOption = &option
 	return b
 }
 
-// PageCache 启用分页缓存：count 与各页 data 同 key 同生命周期（哈希适配器）。
-// 单个 CacheOption 即可：hash key 的 TTL 语义为刷新整个 key，count 与 data 不存在独立过期。
 func (b *SelectBuilder) PageCache(option CacheOption) *SelectBuilder {
 	b.pageCacheOpt = &option
 	return b
 }
 
-// LeftJoin 创建 LEFT JOIN 子句（随后调用 On）。
-func (b *SelectBuilder) LeftJoin(t Table) *JoinBuilder {
+func (b *SelectBuilder) LeftJoin(t Table) *JoinBuilder[*SelectBuilder] {
 	return b.addJoin(joinLeft, t)
 }
 
-// RightJoin 创建 RIGHT JOIN 子句（随后调用 On）。
-func (b *SelectBuilder) RightJoin(t Table) *JoinBuilder {
+func (b *SelectBuilder) RightJoin(t Table) *JoinBuilder[*SelectBuilder] {
 	return b.addJoin(joinRight, t)
 }
 
-// InnerJoin 创建 INNER JOIN 子句（随后调用 On）。
-func (b *SelectBuilder) InnerJoin(t Table) *JoinBuilder {
+func (b *SelectBuilder) InnerJoin(t Table) *JoinBuilder[*SelectBuilder] {
 	return b.addJoin(joinInner, t)
 }
 
-// FullJoin 创建 FULL JOIN 子句（随后调用 On）。
-func (b *SelectBuilder) FullJoin(t Table) *JoinBuilder {
+func (b *SelectBuilder) FullJoin(t Table) *JoinBuilder[*SelectBuilder] {
 	return b.addJoin(joinFull, t)
 }
 
-func (b *SelectBuilder) addJoin(joinType joinType, t Table) *JoinBuilder {
+func (b *SelectBuilder) addJoin(joinType joinType, t Table) *JoinBuilder[*SelectBuilder] {
 	clause := &joinClause{joinType: joinType, table: t}
 	b.joins = append(b.joins, clause)
-	return &JoinBuilder{parent: b, clause: clause}
+	return &JoinBuilder[*SelectBuilder]{parent: b, clause: clause}
 }
 
-// On 设置连接条件（多条件默认 AND）。
-func (j *JoinBuilder) On(conds ...Expression) *SelectBuilder {
-	j.clause.on = append(j.clause.on, conds...)
-	return j.parent
-}
-
-// As 设置子查询别名；返回值同时可用作派生表（From 位置）与标量子查询（SELECT 位置）。
 func (b *SelectBuilder) As(alias string) *SelectBuilder {
 	b.alias = alias
 	return b
 }
 
-// UnionAll 追加 UNION ALL 集合操作。
 func (b *SelectBuilder) UnionAll(other *SelectBuilder) *SelectBuilder {
 	b.setOps = append(b.setOps, setOpClause{op: setUnionAll, query: other})
 	return b
 }
 
-// Union 追加 UNION 集合操作。
 func (b *SelectBuilder) Union(other *SelectBuilder) *SelectBuilder {
 	b.setOps = append(b.setOps, setOpClause{op: setUnion, query: other})
 	return b
 }
 
-// Intersect 追加 INTERSECT 集合操作。
 func (b *SelectBuilder) Intersect(other *SelectBuilder) *SelectBuilder {
 	b.setOps = append(b.setOps, setOpClause{op: setIntersect, query: other})
 	return b
 }
 
-// Except 追加 EXCEPT 集合操作。
 func (b *SelectBuilder) Except(other *SelectBuilder) *SelectBuilder {
 	b.setOps = append(b.setOps, setOpClause{op: setExcept, query: other})
 	return b
 }
 
-// With 追加普通 CTE（WITH name AS (query)），主查询继续链式构建。
 func (b *SelectBuilder) With(name string, query *SelectBuilder) *SelectBuilder {
 	b.ctes = append(b.ctes, cteClause{name: name, query: query})
 	return b
 }
 
-// WithRecursive 追加递归 CTE（WITH RECURSIVE name AS (query)）。
 func (b *SelectBuilder) WithRecursive(name string, query *SelectBuilder) *SelectBuilder {
 	b.recursive = true
 	return b.With(name, query)
 }
 
-// With 创建以普通 CTE 开头的查询（主查询继续链式构建）。
 func With(name string, query *SelectBuilder) *SelectBuilder {
 	return Select().With(name, query)
 }
 
-// WithRecursive 创建以递归 CTE 开头的查询（主查询继续链式构建）。
 func WithRecursive(name string, query *SelectBuilder) *SelectBuilder {
 	return Select().WithRecursive(name, query)
 }
 
-// Cte 返回 CTE 名称的表引用（主查询 FROM 使用）。
 func Cte(name string) Table {
 	return &cteTable{name: name}
 }
 
-// cteTable 是 CTE 名称的表引用。
 type cteTable struct {
 	name string
 }
 
-// TableName 实现 Table 接口。
 func (c *cteTable) TableName() string {
 	return c.name
 }
 
-// Alias 实现 Table 接口。
 func (c *cteTable) Alias() string {
 	return ""
 }
 
-// Meta 实现 Table 接口（CTE 无表元数据，软删自动条件不生效）。
 func (c *cteTable) Meta() *TableMeta {
 	return nil
 }
 
-// AllColumns 实现 Table 接口（CTE 列未知）。
 func (c *cteTable) AllColumns() []string {
 	return nil
 }
 
-// Condition 实现 Expression 接口：渲染为 (SELECT ...) 子查询。
 func (b *SelectBuilder) Condition() (string, []any) {
 	return b.render(newRenderContext(b.ctx, DialectMySQL))
 }
 
 func (b *SelectBuilder) render(rc *renderContext) (string, []any) {
-	// 表达式位置（子查询/标量）总是带括号包装；顶层 ToSql 不走本方法。
 	sql, args := b.renderSelect(rc)
 	sql = "(" + sql + ")"
 	if b.alias != "" {
@@ -411,17 +398,178 @@ func (b *SelectBuilder) render(rc *renderContext) (string, []any) {
 	return sql, args
 }
 
-// ToSql 离线渲染 SQL（不连库）；dialect 为空时使用 MySQL 方言。
+func (b *SelectBuilder) UseDB(db gdb.DB) *SelectBuilder {
+	b.executor = db
+	return b
+}
+
+func (b *SelectBuilder) UseTX(tx gdb.TX) *SelectBuilder {
+	b.executor = &txExecutor{tx: tx}
+	return b
+}
+
+func (b *SelectBuilder) Scan(ctx context.Context, dest any) error {
+	if b.executor == nil {
+		return fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Scan")
+	}
+	dialect := b.dialect()
+	sql, args, err := b.ToSql(dialect)
+	if err != nil {
+		return err
+	}
+	if b.cacheOption != nil {
+		if adapter := GetCacheAdapter(); adapter != nil {
+			return b.scanWithCache(ctx, adapter, dialect, sql, args, dest)
+		}
+	}
+	return scanExec(ctx, b.executor, sql, args, dest)
+}
+
+func (b *SelectBuilder) scanWithCache(
+	ctx context.Context, adapter CacheAdapter, dialect Dialect, sql string, args []any, dest any,
+) error {
+	key, err := b.cacheKey(dialect)
+	if err != nil {
+		return err
+	}
+	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
+		return json.Unmarshal(bytes, dest)
+	}
+	if err := scanExec(ctx, b.executor, sql, args, dest); err != nil {
+		return err
+	}
+	if bytes, err := json.Marshal(dest); err == nil {
+		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
+	}
+	return nil
+}
+
+func (b *SelectBuilder) Row(ctx context.Context) (Record, error) {
+	if b.executor == nil {
+		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Row")
+	}
+	sql, args, err := b.ToSql(b.dialect())
+	if err != nil {
+		return nil, err
+	}
+	record, err := b.executor.GetOne(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	if record == nil {
+		return nil, nil
+	}
+	return Record(record), nil
+}
+
+func (b *SelectBuilder) dialect() Dialect {
+	if b.executor != nil {
+		return autoDialect(b.executor)
+	}
+	return DialectMySQL
+}
+
 func (b *SelectBuilder) ToSql(dialect Dialect) (string, []any, error) {
 	if dialect == "" {
 		dialect = DialectMySQL
+	}
+	if err := b.validate(dialect); err != nil {
+		return "", nil, err
 	}
 	rc := newRenderContext(b.ctx, dialect)
 	sql, args := b.renderSelect(rc)
 	return sql, args, nil
 }
 
-// renderSelect 渲染完整 SELECT 语句。
+func (b *SelectBuilder) validate(dialect Dialect) error {
+	if dialect == DialectMySQL {
+		switch b.groupExt {
+		case groupExtCube, groupExtGroupingSets:
+			return fmt.Errorf("gooq: GROUP BY %s is not supported by dialect mysql", groupExtKeyword(b.groupExt))
+		}
+	}
+	visit := func(e Expression) error {
+		if g, ok := e.(*groupConcatExpr); ok && g.distinct {
+			switch dialect {
+			case DialectPgsql, DialectOracle, DialectMssql:
+				return fmt.Errorf("gooq: GROUP_CONCAT DISTINCT is not supported by dialect %s", dialect)
+			}
+		}
+		return nil
+	}
+	for _, e := range b.fields {
+		if err := walkExpression(e, dialect, visit); err != nil {
+			return err
+		}
+	}
+	for _, e := range b.conditions {
+		if err := walkExpression(e, dialect, visit); err != nil {
+			return err
+		}
+	}
+	for _, j := range b.joins {
+		for _, on := range j.on {
+			if err := walkExpression(on, dialect, visit); err != nil {
+				return err
+			}
+		}
+	}
+	for _, e := range b.groupBy {
+		if err := walkExpression(e, dialect, visit); err != nil {
+			return err
+		}
+	}
+	for _, e := range b.having {
+		if err := walkExpression(e, dialect, visit); err != nil {
+			return err
+		}
+	}
+	for _, o := range b.orderBy {
+		if err := walkExpression(o.field, dialect, visit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func groupExtKeyword(k groupExtKind) string {
+	switch k {
+	case groupExtRollup:
+		return "ROLLUP"
+	case groupExtCube:
+		return "CUBE"
+	case groupExtGroupingSets:
+		return "GROUPING SETS"
+	}
+	return ""
+}
+
+func (b *SelectBuilder) renderGroupExt(rc *renderContext) string {
+	switch b.groupExt {
+	case groupExtRollup, groupExtCube:
+		var flat []string
+		for _, set := range b.groupExtSets {
+			for _, f := range set {
+				groupSQL, _ := rc.render(f)
+				flat = append(flat, groupSQL)
+			}
+		}
+		return groupExtKeyword(b.groupExt) + "(" + strings.Join(flat, ", ") + ")"
+	case groupExtGroupingSets:
+		var setParts []string
+		for _, set := range b.groupExtSets {
+			var fields []string
+			for _, f := range set {
+				groupSQL, _ := rc.render(f)
+				fields = append(fields, groupSQL)
+			}
+			setParts = append(setParts, "("+strings.Join(fields, ", ")+")")
+		}
+		return "GROUPING SETS(" + strings.Join(setParts, ", ") + ")"
+	}
+	return ""
+}
+
 func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 	b.registerAliases(rc)
 	var (
@@ -481,14 +629,30 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 		sql.WriteString(" WHERE ")
 		sql.WriteString(where)
 	}
-	if len(b.groupBy) > 0 {
+	if len(b.groupBy) > 0 || b.groupExt != groupExtNone {
 		var groups []string
 		for _, g := range b.groupBy {
 			groupSQL, _ := rc.render(g)
 			groups = append(groups, groupSQL)
 		}
-		sql.WriteString(" GROUP BY ")
-		sql.WriteString(strings.Join(groups, ", "))
+		if b.groupExt != groupExtNone && b.groupExt == groupExtRollup && rc.dialect == DialectMySQL {
+			for _, set := range b.groupExtSets {
+				for _, f := range set {
+					groupSQL, _ := rc.render(f)
+					groups = append(groups, groupSQL)
+				}
+			}
+			sql.WriteString(" GROUP BY ")
+			sql.WriteString(strings.Join(groups, ", "))
+			sql.WriteString(" WITH ROLLUP")
+		} else {
+			// 其余方言括号语法：ROLLUP(a,b) / CUBE(a,b) / GROUPING SETS((a),(b))。
+			if b.groupExt != groupExtNone {
+				groups = append(groups, b.renderGroupExt(rc))
+			}
+			sql.WriteString(" GROUP BY ")
+			sql.WriteString(strings.Join(groups, ", "))
+		}
 	}
 	if len(b.having) > 0 {
 		var haves []string
@@ -521,8 +685,11 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 		sql.WriteString(strings.Join(orders, ", "))
 	}
 	if b.limit > 0 {
-		switch rc.dialect {
-		case DialectOracle, DialectMssql:
+		switch {
+		case rc.dialectInfo != nil && rc.dialectInfo.RenderLimit != nil:
+			// 驱动注册的自定义分页渲染（扩展点）。
+			sql.WriteString(rc.dialectInfo.RenderLimit(rc, b.limit, b.offset))
+		case rc.dialectInfo != nil && rc.dialectInfo.Pagination == PaginationFetch:
 			// SQL:2008 FETCH 语法（Oracle 12c+ / MSSQL 2012+ 支持）。
 			if b.offset > 0 {
 				fmt.Fprintf(&sql, " OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", b.offset, b.limit)
@@ -543,11 +710,7 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 		case lockForUpdate:
 			sql.WriteString(" FOR UPDATE")
 		case lockInShareMode:
-			if rc.dialect == DialectPgsql {
-				sql.WriteString(" FOR SHARE")
-			} else {
-				sql.WriteString(" LOCK IN SHARE MODE")
-			}
+			sql.WriteString(" " + rc.shareLockKeyword())
 		}
 	}
 	return sql.String(), rc.args
@@ -557,16 +720,28 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 func (b *SelectBuilder) registerAliases(rc *renderContext) {
 	if b.from != nil && b.from.Alias() != "" {
 		rc.registerAlias(b.from.TableName(), b.from.Alias())
+		// 派生表无表名（TableName 为空）：注册别名自映射，支撑 t.Field("col") 的前缀渲染。
+		if sub, ok := b.from.(*SelectBuilder); ok {
+			rc.registerAlias(sub.Alias(), sub.Alias())
+		}
 	}
 	for _, j := range b.joins {
 		if j.table.Alias() != "" {
 			rc.registerAlias(j.table.TableName(), j.table.Alias())
+			if sub, ok := j.table.(*SelectBuilder); ok {
+				rc.registerAlias(sub.Alias(), sub.Alias())
+			}
 		}
 	}
 }
 
 // renderTable 渲染表或派生表。
 func (b *SelectBuilder) renderTable(rc *renderContext, t Table) string {
+	return renderTableName(rc, t)
+}
+
+// renderTableName 渲染表或派生表（表名 + 别名）；SelectBuilder 与 DMLBuilder 共用。
+func renderTableName(rc *renderContext, t Table) string {
 	if sub, ok := t.(*SelectBuilder); ok {
 		subSQL, _ := sub.renderSelect(rc)
 		return "(" + subSQL + ") AS " + sub.alias

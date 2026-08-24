@@ -16,7 +16,7 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 
-	"github.com/lanceadd/gooq/cmd/ggen/internal/utility/mlog"
+	"github.com/gogf/gf/cmd/ggen/internal/utility/mlog"
 )
 
 // HTTPDownloadFileWithPercent downloads target url file to local path with percent process printing.

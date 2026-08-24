@@ -9,14 +9,14 @@ package cmd
 import (
 	_ "github.com/gogf/gf/contrib/drivers/clickhouse/v2"
 	_ "github.com/gogf/gf/contrib/drivers/mssql/v2"
+	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
 	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
 
-	"github.com/lanceadd/gooq/cmd/ggen/internal/cmd/gendao"
+	"github.com/gogf/gf/cmd/ggen/internal/cmd/gendao"
 )
 
-// 使用 MySQL/PostgreSQL 等驱动时，在下方取消对应行注释并执行 go mod tidy：
+// 使用 PostgreSQL/DM 等驱动时，在下方取消对应行注释并执行 go mod tidy：
 // import (
-//     _ "github.com/gogf/gf/contrib/drivers/mysql/v2"
 //     _ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
 //     _ "github.com/gogf/gf/contrib/drivers/dm/v2"
 // )

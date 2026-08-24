@@ -5,7 +5,7 @@
 package {{.TplPackageName}}
 
 import (
-	"github.com/lanceadd/gooq"
+{{.TplGooqImport}}
 {{- if .TplGooqImports}}
 {{.TplGooqImports}}
 {{- end}}
@@ -13,21 +13,19 @@ import (
 
 // {{.TplTableNameCamelCase}}Table is the typed table object for table "{{.TplTableName}}".
 type {{.TplTableNameCamelCase}}Table struct {
-	*gooq.TableBase
-	ALL_FIELDS gooq.AllFields
+	*{{.TplGooqRef}}TableBase
 
 {{.TplGooqFields}}
 }
 
 // {{.TplTableNameCamelCase}} is the globally accessible table object for table {{.TplTableName}}.
 var {{.TplTableNameCamelCase}} = &{{.TplTableNameCamelCase}}Table{
-	TableBase: gooq.NewTableBase(&gooq.TableMeta{
+	TableBase: {{.TplGooqRef}}NewTableBase(&{{.TplGooqRef}}TableMeta{
 		TableName: "{{.TplTableName}}",
-		Fields: []gooq.FieldMeta{
+		Fields: []{{.TplGooqRef}}FieldMeta{
 {{.TplGooqFieldMetas}}
 		},
 	}),
-	ALL_FIELDS: gooq.NewAllFields([]string{ {{.TplGooqAllColumns}} }),
 {{.TplGooqFieldAssigns}}
 }
 

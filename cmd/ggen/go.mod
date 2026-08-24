@@ -1,13 +1,13 @@
-module github.com/lanceadd/gooq/cmd/ggen
+module github.com/gogf/gf/cmd/ggen
 
-go 1.23.0
+go 1.24
 
 require (
 	github.com/gogf/gf/contrib/drivers/clickhouse/v2 v2.10.2
 	github.com/gogf/gf/contrib/drivers/mssql/v2 v2.10.2
+	github.com/gogf/gf/contrib/drivers/mysql/v2 v2.10.2
 	github.com/gogf/gf/contrib/drivers/sqlite/v2 v2.10.2
 	github.com/gogf/gf/v2 v2.10.2
-	github.com/olekukonko/tablewriter v1.1.0
 	github.com/schollz/progressbar/v3 v3.15.0
 	golang.org/x/tools v0.26.0
 )
@@ -23,9 +23,11 @@ require (
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-sql-driver/mysql v1.7.1 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grokify/html-strip-tags-go v0.1.0 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -33,8 +35,10 @@ require (
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/microsoft/go-mssqldb v1.7.1 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
+	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/olekukonko/errors v1.1.0 // indirect
 	github.com/olekukonko/ll v0.0.9 // indirect
+	github.com/olekukonko/tablewriter v1.1.0 // indirect
 	github.com/paulmach/orb v0.7.1 // indirect
 	github.com/pierrec/lz4/v4 v4.1.14 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -47,28 +51,14 @@ require (
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	golang.org/x/crypto v0.38.0 // indirect
 	golang.org/x/mod v0.25.0 // indirect
+	golang.org/x/net v0.40.0 // indirect
 	golang.org/x/sync v0.14.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/term v0.32.0 // indirect
 	golang.org/x/text v0.25.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	modernc.org/libc v1.22.5 // indirect
-	modernc.org/mathutil v1.5.0 // indirect
-	modernc.org/memory v1.5.0 // indirect
-	modernc.org/sqlite v1.23.1 // indirect
-)
-
-replace (
-	github.com/gogf/gf/contrib/drivers/clickhouse/v2 => ../../../gf2/contrib/drivers/clickhouse
-	github.com/gogf/gf/contrib/drivers/dm/v2 => ../../../gf2/contrib/drivers/dm
-	github.com/gogf/gf/contrib/drivers/gaussdb/v2 => ../../../gf2/contrib/drivers/gaussdb
-	github.com/gogf/gf/contrib/drivers/mariadb/v2 => ../../../gf2/contrib/drivers/mariadb
-	github.com/gogf/gf/contrib/drivers/mssql/v2 => ../../../gf2/contrib/drivers/mssql
-	github.com/gogf/gf/contrib/drivers/mysql/v2 => ../../../gf2/contrib/drivers/mysql
-	github.com/gogf/gf/contrib/drivers/oceanbase/v2 => ../../../gf2/contrib/drivers/oceanbase
-	github.com/gogf/gf/contrib/drivers/oracle/v2 => ../../../gf2/contrib/drivers/oracle
-	github.com/gogf/gf/contrib/drivers/pgsql/v2 => ../../../gf2/contrib/drivers/pgsql
-	github.com/gogf/gf/contrib/drivers/sqlite/v2 => ../../../gf2/contrib/drivers/sqlite
-	github.com/gogf/gf/contrib/drivers/tidb/v2 => ../../../gf2/contrib/drivers/tidb
-	github.com/gogf/gf/v2 => ../../../gf2
+	modernc.org/libc v1.50.9 // indirect
+	modernc.org/mathutil v1.6.0 // indirect
+	modernc.org/memory v1.8.0 // indirect
+	modernc.org/sqlite v1.30.0 // indirect
 )

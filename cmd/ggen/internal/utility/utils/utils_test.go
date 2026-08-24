@@ -12,7 +12,7 @@ import (
 
 	"github.com/gogf/gf/v2/test/gtest"
 
-	"github.com/lanceadd/gooq/cmd/ggen/internal/utility/utils"
+	"github.com/gogf/gf/cmd/ggen/internal/utility/utils"
 )
 
 func Test_GetModPath(t *testing.T) {

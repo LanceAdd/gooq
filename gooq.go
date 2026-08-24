@@ -1,14 +1,3 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
-// Package gooq provides a typed SQL query DSL:
-// typed fields, composable conditions, offline SQL rendering and dialect-aware operators.
-//
-// gooq 定位为纯 SQL 构建器：DSL 类型安全地构建 SQL（Select/From/条件/子查询/函数/离线渲染），
-// 不依赖任何数据库实例；生成的 SQL 可由调用方自选执行方式（标准库 database/sql 等）。
 package gooq
 
 import (

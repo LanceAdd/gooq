@@ -1,24 +1,18 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
-// 本文件实现写操作 DSL：Insert/Update/Delete 与 Upsert。
 package gooq
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"reflect"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
-// dmlKind 是写操作类型。
 type dmlKind int
 
 const (
@@ -28,14 +22,12 @@ const (
 	dmlDelete
 )
 
-// upsertClause 是 Upsert 子句。
 type upsertClause struct {
 	conflictCols []string
 	updateMap    map[string]any
 	doNothing    bool // 冲突时不做任何操作。
 }
 
-// DMLBuilder 是写操作构建器：Insert/Update/Delete。
 type DMLBuilder struct {
 	ctx           context.Context
 	table         Table
@@ -46,9 +38,11 @@ type DMLBuilder struct {
 	conditions    []Expression
 	unscoped      bool
 	upsert        *upsertClause
+	joins         []*joinClause // UPDATE 多表 JOIN 子句。
+	returning     []Expression  // RETURNING/OUTPUT 返回列。
+	executor      executor      // 执行器（UseDB/UseTX 绑定；nil 时仅离线渲染）。
 }
 
-// Insert 创建 INSERT 构建器（data 为 entity/map/do 对象，或 []map/[]struct 批量数据）。
 func Insert(t Table, data any) *DMLBuilder {
 	b := &DMLBuilder{
 		ctx:   context.Background(),
@@ -77,7 +71,6 @@ func Insert(t Table, data any) *DMLBuilder {
 	return b
 }
 
-// InsertFrom 创建 INSERT ... SELECT 构建器（从查询结果插入）。
 func InsertFrom(t Table, sub *SelectBuilder) *DMLBuilder {
 	return &DMLBuilder{
 		ctx:           context.Background(),
@@ -87,13 +80,11 @@ func InsertFrom(t Table, sub *SelectBuilder) *DMLBuilder {
 	}
 }
 
-// isSliceValue 判断值是否为切片。
 func isSliceValue(v any) bool {
 	rv := reflect.ValueOf(v)
 	return rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array
 }
 
-// toSlice 将切片值转为 []any。
 func toSlice(v any) []any {
 	rv := reflect.ValueOf(v)
 	result := make([]any, rv.Len())
@@ -103,7 +94,6 @@ func toSlice(v any) []any {
 	return result
 }
 
-// Update 创建 UPDATE 构建器。
 func Update(t Table) *DMLBuilder {
 	return &DMLBuilder{
 		ctx:   context.Background(),
@@ -113,7 +103,6 @@ func Update(t Table) *DMLBuilder {
 	}
 }
 
-// Delete 创建 DELETE 构建器（软删表默认转为 UPDATE deleted_at）。
 func Delete(t Table) *DMLBuilder {
 	return &DMLBuilder{
 		ctx:   context.Background(),
@@ -122,13 +111,11 @@ func Delete(t Table) *DMLBuilder {
 	}
 }
 
-// Ctx 设置上下文。
 func (b *DMLBuilder) Ctx(ctx context.Context) *DMLBuilder {
 	b.ctx = ctx
 	return b
 }
 
-// Data 设置数据（entity/map/do 对象）。
 func (b *DMLBuilder) Data(data any) *DMLBuilder {
 	for k, v := range gconv.Map(data) {
 		b.data[k] = v
@@ -136,25 +123,48 @@ func (b *DMLBuilder) Data(data any) *DMLBuilder {
 	return b
 }
 
-// Set 类型化设置单列值（接受任意 Field[T]）。
 func (b *DMLBuilder) Set(field interface{ ColumnName() string }, v any) *DMLBuilder {
 	b.data[field.ColumnName()] = v
 	return b
 }
 
-// Where 追加条件（默认 AND）。
 func (b *DMLBuilder) Where(conds ...Expression) *DMLBuilder {
 	b.conditions = append(b.conditions, conds...)
 	return b
 }
 
-// Unscoped 绕过软删除（Delete 变为真 DELETE）。
+func (b *DMLBuilder) LeftJoin(t Table) *JoinBuilder[*DMLBuilder] {
+	return b.addJoin(joinLeft, t)
+}
+
+func (b *DMLBuilder) RightJoin(t Table) *JoinBuilder[*DMLBuilder] {
+	return b.addJoin(joinRight, t)
+}
+
+func (b *DMLBuilder) InnerJoin(t Table) *JoinBuilder[*DMLBuilder] {
+	return b.addJoin(joinInner, t)
+}
+
+func (b *DMLBuilder) FullJoin(t Table) *JoinBuilder[*DMLBuilder] {
+	return b.addJoin(joinFull, t)
+}
+
+func (b *DMLBuilder) addJoin(joinType joinType, t Table) *JoinBuilder[*DMLBuilder] {
+	clause := &joinClause{joinType: joinType, table: t}
+	b.joins = append(b.joins, clause)
+	return &JoinBuilder[*DMLBuilder]{parent: b, clause: clause}
+}
+
+func (b *DMLBuilder) Returning(fields ...any) *DMLBuilder {
+	b.returning = append(b.returning, toExpressions(fields)...)
+	return b
+}
+
 func (b *DMLBuilder) Unscoped() *DMLBuilder {
 	b.unscoped = true
 	return b
 }
 
-// OnConflictKey 设置 Upsert 冲突目标列（PG 语义要求唯一索引）。
 func (b *DMLBuilder) OnConflictKey(fields ...interface{ ColumnName() string }) *DMLBuilder {
 	if b.upsert == nil {
 		b.upsert = &upsertClause{updateMap: make(map[string]any)}
@@ -165,7 +175,6 @@ func (b *DMLBuilder) OnConflictKey(fields ...interface{ ColumnName() string }) *
 	return b
 }
 
-// DoNothing 设置 Upsert 冲突时不做任何操作（PG: ON CONFLICT DO NOTHING；MySQL: INSERT IGNORE）。
 func (b *DMLBuilder) DoNothing() *DMLBuilder {
 	if b.upsert == nil {
 		b.upsert = &upsertClause{updateMap: make(map[string]any)}
@@ -174,7 +183,6 @@ func (b *DMLBuilder) DoNothing() *DMLBuilder {
 	return b
 }
 
-// DoUpdate 设置 Upsert 冲突后的更新列。
 func (b *DMLBuilder) DoUpdate(field interface{ ColumnName() string }, v any) *DMLBuilder {
 	if b.upsert == nil {
 		b.upsert = &upsertClause{updateMap: make(map[string]any)}
@@ -183,7 +191,48 @@ func (b *DMLBuilder) DoUpdate(field interface{ ColumnName() string }, v any) *DM
 	return b
 }
 
-// ToSql 离线渲染写操作 SQL（不连库）。
+func (b *DMLBuilder) UseDB(db gdb.DB) *DMLBuilder {
+	b.executor = db
+	return b
+}
+
+func (b *DMLBuilder) UseTX(tx gdb.TX) *DMLBuilder {
+	b.executor = &txExecutor{tx: tx}
+	return b
+}
+
+func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
+	if b.executor == nil {
+		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Exec")
+	}
+	sqlStr, args, err := b.ToSql(b.dmlDialect())
+	if err != nil {
+		return nil, err
+	}
+	return b.executor.Exec(ctx, sqlStr, args...)
+}
+
+func (b *DMLBuilder) Scan(ctx context.Context, dest any) error {
+	if b.executor == nil {
+		return fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Scan")
+	}
+	if len(b.returning) == 0 {
+		return fmt.Errorf("gooq: Scan on DML requires Returning fields")
+	}
+	sqlStr, args, err := b.ToSql(b.dmlDialect())
+	if err != nil {
+		return err
+	}
+	return scanExec(ctx, b.executor, sqlStr, args, dest)
+}
+
+func (b *DMLBuilder) dmlDialect() Dialect {
+	if b.executor != nil {
+		return autoDialect(b.executor)
+	}
+	return DialectMySQL
+}
+
 func (b *DMLBuilder) ToSql(dialect Dialect) (string, []any, error) {
 	if dialect == "" {
 		dialect = DialectMySQL
@@ -203,7 +252,6 @@ func (b *DMLBuilder) ToSql(dialect Dialect) (string, []any, error) {
 	}
 }
 
-// renderInsertFrom 渲染 INSERT ... SELECT。
 func (b *DMLBuilder) renderInsertFrom(rc *renderContext) (string, []any, error) {
 	// 列清单：优先子查询字段的列名，否则表全列。
 	var columns []string
@@ -220,17 +268,21 @@ func (b *DMLBuilder) renderInsertFrom(rc *renderContext) (string, []any, error) 
 	if len(columns) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert-from columns is empty")
 	}
-	subSQL, subArgs := b.selectBuilder.renderSelect(rc)
+	subSQL, _ := b.selectBuilder.renderSelect(rc)
 	var sqlStr = fmt.Sprintf(
 		"INSERT INTO %s (%s) %s",
 		b.table.TableName(),
 		strings.Join(columns, ", "),
 		subSQL,
 	)
-	return sqlStr, subArgs, nil
+	if returning, err := b.renderReturning(rc); err != nil {
+		return "", nil, err
+	} else if returning != "" {
+		sqlStr += returning
+	}
+	return sqlStr, rc.args, nil
 }
 
-// renderInsert 渲染 INSERT（含批量与 Upsert，跳过自增列；列名排序保证确定性输出）。
 func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
 	if len(b.dataList) > 0 {
 		return b.renderInsertBatch(rc)
@@ -250,10 +302,8 @@ func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
 	}
 	sort.Strings(columns)
 	values := make([]string, len(columns))
-	args := make([]any, len(columns))
 	for i, col := range columns {
 		values[i] = rc.addArg(b.data[col])
-		args[i] = b.data[col]
 	}
 	insertKeyword := "INSERT"
 	if b.upsert != nil && b.upsert.doNothing && rc.dialect == DialectMySQL {
@@ -269,10 +319,14 @@ func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
 	if b.upsert != nil && !(b.upsert.doNothing && rc.dialect == DialectMySQL) {
 		sqlStr += renderUpsertClause(rc, b.upsert, rc.dialect)
 	}
-	return sqlStr, args, nil
+	if returning, err := b.renderReturning(rc); err != nil {
+		return "", nil, err
+	} else if returning != "" {
+		sqlStr += returning
+	}
+	return sqlStr, rc.args, nil
 }
 
-// renderInsertBatch 渲染批量 INSERT：列 = 各行键并集，缺失列补 nil。
 func (b *DMLBuilder) renderInsertBatch(rc *renderContext) (string, []any, error) {
 	var (
 		columnSet = make(map[string]bool)
@@ -289,19 +343,16 @@ func (b *DMLBuilder) renderInsertBatch(rc *renderContext) (string, []any, error)
 	for col := range columnSet {
 		columns = append(columns, col)
 	}
+	sort.Strings(columns)
 	if len(columns) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert batch data is empty")
 	}
 	sort.Strings(columns)
-	var (
-		rows []string
-		args []any
-	)
+	var rows []string
 	for _, row := range b.dataList {
 		placeholders := make([]string, len(columns))
 		for i, col := range columns {
 			placeholders[i] = rc.addArg(row[col])
-			args = append(args, row[col])
 		}
 		rows = append(rows, "("+strings.Join(placeholders, ", ")+")")
 	}
@@ -319,76 +370,162 @@ func (b *DMLBuilder) renderInsertBatch(rc *renderContext) (string, []any, error)
 	if b.upsert != nil && !(b.upsert.doNothing && rc.dialect == DialectMySQL) {
 		sqlStr += renderUpsertClause(rc, b.upsert, rc.dialect)
 	}
-	return sqlStr, args, nil
+	if returning, err := b.renderReturning(rc); err != nil {
+		return "", nil, err
+	} else if returning != "" {
+		sqlStr += returning
+	}
+	return sqlStr, rc.args, nil
 }
 
-// renderUpdate 渲染 UPDATE。
 func (b *DMLBuilder) renderUpdate(rc *renderContext) (string, []any, error) {
-	var (
-		sets []string
-		args []any
-	)
-	for col, val := range b.data {
-		sets = append(sets, fmt.Sprintf(`%s = %s`, col, rc.addArg(val)))
-		args = append(args, val)
+	if len(b.joins) > 0 && rc.dialect == DialectOracle {
+		return "", nil, fmt.Errorf("gooq: UPDATE ... JOIN is not supported by dialect oracle")
 	}
-	if len(sets) == 0 {
+	if len(b.data) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
 	}
-	var sqlStr = fmt.Sprintf("UPDATE %s SET %s", b.table.TableName(), strings.Join(sets, ", "))
-	if where, whereArgs := b.renderWhere(rc); where != "" {
-		sqlStr += " WHERE " + where
-		args = append(args, whereArgs...)
+	b.registerAliases(rc)
+	var sqlStr string
+	switch {
+	case len(b.joins) == 0:
+		sqlStr = fmt.Sprintf("UPDATE %s SET %s", renderTableName(rc, b.table), b.renderSets(rc))
+	case rc.dialect == DialectPgsql || rc.dialect == DialectSQLite:
+		sqlStr = fmt.Sprintf("UPDATE %s SET %s FROM %s", renderTableName(rc, b.table), b.renderSets(rc), b.renderJoinTables(rc))
+	case rc.dialect == DialectMssql:
+		sqlStr = fmt.Sprintf("UPDATE %s SET %s FROM %s %s", renderTableName(rc, b.table), b.renderSets(rc), renderTableName(rc, b.table), b.renderJoinClauses(rc))
+	default:
+		sqlStr = fmt.Sprintf("UPDATE %s %s SET %s", renderTableName(rc, b.table), b.renderJoinClauses(rc), b.renderSets(rc))
 	}
-	return sqlStr, args, nil
+	if where := b.renderWhere(rc); where != "" {
+		sqlStr += " WHERE " + where
+	}
+	if returning, err := b.renderReturning(rc); err != nil {
+		return "", nil, err
+	} else if returning != "" {
+		sqlStr += returning
+	}
+	return sqlStr, rc.args, nil
 }
 
-// renderDelete 渲染删除；软删表默认转为 UPDATE deleted_at，Unscoped 时真 DELETE。
 func (b *DMLBuilder) renderDelete(rc *renderContext) (string, []any, error) {
 	if !b.unscoped && b.table.Meta() != nil {
 		if softField := b.table.Meta().SoftDeleteField(); softField != nil {
-			softCol := softField.ColumnName
-			now := time.Now()
 			sqlStr := fmt.Sprintf(
 				"UPDATE %s SET %s = %s",
 				b.table.TableName(),
-				softCol,
-				rc.addArg(now),
+				softField.ColumnName,
+				rc.addArg(time.Now()),
 			)
-			var args = []any{now}
-			if where, whereArgs := b.renderWhere(rc); where != "" {
+			if where := b.renderWhere(rc); where != "" {
 				sqlStr += " WHERE " + where
-				args = append(args, whereArgs...)
 			}
-			return sqlStr, args, nil
+			if returning, err := b.renderReturning(rc); err != nil {
+				return "", nil, err
+			} else if returning != "" {
+				sqlStr += returning
+			}
+			return sqlStr, rc.args, nil
 		}
 	}
 	var sqlStr = "DELETE FROM " + b.table.TableName()
-	var args []any
-	if where, whereArgs := b.renderWhere(rc); where != "" {
+	if where := b.renderWhere(rc); where != "" {
 		sqlStr += " WHERE " + where
-		args = whereArgs
 	}
-	return sqlStr, args, nil
+	if returning, err := b.renderReturning(rc); err != nil {
+		return "", nil, err
+	} else if returning != "" {
+		sqlStr += returning
+	}
+	return sqlStr, rc.args, nil
 }
 
-// renderWhere 渲染条件（空返回空串）。
-func (b *DMLBuilder) renderWhere(rc *renderContext) (string, []any) {
-	var (
-		parts []string
-		args  []any
-	)
-	for _, c := range b.conditions {
-		condSQL, condArgs := rc.render(c)
-		if condSQL != "" {
-			parts = append(parts, condSQL)
-			args = append(args, condArgs...)
+func (b *DMLBuilder) renderWhere(rc *renderContext) string {
+	conds := b.conditions
+	if len(b.joins) > 0 && (rc.dialect == DialectPgsql || rc.dialect == DialectSQLite) {
+		for _, j := range b.joins {
+			conds = append(conds, j.on...)
 		}
 	}
-	return strings.Join(parts, " AND "), args
+	var parts []string
+	for _, c := range conds {
+		condSQL, _ := rc.render(c)
+		if condSQL != "" {
+			parts = append(parts, condSQL)
+		}
+	}
+	return strings.Join(parts, " AND ")
 }
 
-// autoIncrementColumn 返回自增列名（无则空串）。
+func (b *DMLBuilder) renderSets(rc *renderContext) string {
+	var sets []string
+	for col, val := range b.data {
+		sets = append(sets, fmt.Sprintf(`%s = %s`, col, rc.addArg(val)))
+	}
+	return strings.Join(sets, ", ")
+}
+
+func (b *DMLBuilder) renderJoinClauses(rc *renderContext) string {
+	var joins []string
+	for _, j := range b.joins {
+		joins = append(joins, joinKeyword[j.joinType]+" "+renderTableName(rc, j.table)+b.renderJoinOn(rc, j))
+	}
+	return strings.Join(joins, " ")
+}
+
+// renderJoinTables 渲染 FROM 表列表（PG/SQLite 的 UPDATE...FROM 语法，无 ON 条件）。
+func (b *DMLBuilder) renderJoinTables(rc *renderContext) string {
+	var tables []string
+	for _, j := range b.joins {
+		tables = append(tables, renderTableName(rc, j.table))
+	}
+	return strings.Join(tables, ", ")
+}
+
+func (b *DMLBuilder) renderJoinOn(rc *renderContext, j *joinClause) string {
+	if len(j.on) == 0 {
+		return ""
+	}
+	var ons []string
+	for _, c := range j.on {
+		onSQL, _ := rc.render(c)
+		if onSQL != "" {
+			ons = append(ons, onSQL)
+		}
+	}
+	return " ON " + strings.Join(ons, " AND ")
+}
+
+func (b *DMLBuilder) registerAliases(rc *renderContext) {
+	if b.table.Alias() != "" {
+		rc.registerAlias(b.table.TableName(), b.table.Alias())
+	}
+	for _, j := range b.joins {
+		if j.table.Alias() != "" {
+			rc.registerAlias(j.table.TableName(), j.table.Alias())
+		}
+	}
+}
+
+func (b *DMLBuilder) renderReturning(rc *renderContext) (string, error) {
+	if len(b.returning) == 0 {
+		return "", nil
+	}
+	var keyword string
+	if rc.dialectInfo != nil {
+		keyword = rc.dialectInfo.Returning
+	}
+	if keyword == "" {
+		return "", fmt.Errorf("gooq: RETURNING is not supported by dialect %s", rc.dialect)
+	}
+	var parts []string
+	for _, f := range b.returning {
+		fieldSQL, _ := rc.render(f)
+		parts = append(parts, fieldSQL)
+	}
+	return " " + keyword + " " + strings.Join(parts, ", "), nil
+}
+
 func autoIncrementColumn(t Table) string {
 	if t.Meta() == nil {
 		return ""
@@ -401,7 +538,6 @@ func autoIncrementColumn(t Table) string {
 	return ""
 }
 
-// renderUpsertClause 按方言渲染 Upsert 子句。
 func renderUpsertClause(rc *renderContext, clause *upsertClause, dialect Dialect) string {
 	switch dialect {
 	case DialectPgsql:

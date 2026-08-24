@@ -17,8 +17,8 @@ import (
 	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 
-	"github.com/lanceadd/gooq/cmd/ggen/internal/consts"
-	"github.com/lanceadd/gooq/cmd/ggen/internal/utility/mlog"
+	"github.com/gogf/gf/cmd/ggen/internal/consts"
+	"github.com/gogf/gf/cmd/ggen/internal/utility/mlog"
 )
 
 // GoFmt formats the source file and adds or removes import statements as necessary.

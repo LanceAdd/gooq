@@ -1,6 +1,6 @@
 module github.com/lanceadd/gooq
 
-go 1.23.0
+go 1.24
 
 require github.com/gogf/gf/v2 v2.10.2
 
@@ -25,5 +25,3 @@ require (
 	golang.org/x/text v0.25.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/gogf/gf/v2 => ../gf2

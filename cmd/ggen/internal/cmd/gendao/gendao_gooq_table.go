@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -22,17 +21,19 @@ import (
 	"github.com/gogf/gf/v2/os/gview"
 	"github.com/gogf/gf/v2/text/gstr"
 
-	"github.com/lanceadd/gooq/cmd/ggen/internal/utility/mlog"
-	"github.com/lanceadd/gooq/cmd/ggen/internal/utility/utils"
+	"github.com/gogf/gf/cmd/ggen/internal/utility/mlog"
+	"github.com/gogf/gf/cmd/ggen/internal/utility/utils"
 )
 
 //go:embed template/*.tpl
 var gooqTemplateFS embed.FS
 
+// tplView 是模板渲染视图（跨表生成复用）。
+var tplView = gview.New()
+
 // generateGooqTable generates gooq typed table object files for given tables.
 func generateGooqTable(ctx context.Context, in CGenDaoInternalInput) {
 	dirPathTable := gfile.Join(in.Path, in.TablePath)
-	in.genItems.AppendDirPath(dirPathTable)
 	for i := 0; i < len(in.TableNames); i++ {
 		generateGooqTableSingle(ctx, generateGooqTableSingleInput{
 			CGenDaoInternalInput: in,
@@ -57,9 +58,8 @@ func generateGooqTableSingle(ctx context.Context, in generateGooqTableSingleInpu
 	if err != nil {
 		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, in.TableName, err)
 	}
-	fileName := formatFileName(in.NewTableName, in.FileNameCase)
+	fileName := formatFileName(in.NewTableName, "")
 	path := filepath.FromSlash(gfile.Join(in.DirPathTable, fileName+".go"))
-	in.genItems.AppendGeneratedFilePath(path)
 	if in.OverwriteDao || !gfile.Exists(path) {
 		tableContent, err := generateGooqTableContent(ctx, in, fieldMap)
 		if err != nil {
@@ -82,13 +82,17 @@ func generateGooqTableContent(
 		fieldsLines []string
 		metaLines   []string
 		assignLines []string
-		columnNames []string
 		imports     = make([]string, 0, 4)
 		hasGTime    bool
 		hasGJson    bool
 		hasStdTime  bool
 		hasUUID     bool
 	)
+	// 包内生成（TplPackageName == "gooq"）时无需包前缀与自引用 import。
+	gooqRef := "gooq."
+	if filepath.Base(in.TablePath) == "gooq" {
+		gooqRef = ""
+	}
 	fieldNames := make([]string, 0, len(fieldMap))
 	for fieldName := range fieldMap {
 		fieldNames = append(fieldNames, fieldName)
@@ -103,33 +107,35 @@ func generateGooqTableContent(
 			newFieldName = gstr.TrimLeftStr(newFieldName, v, 1)
 		}
 		camelName := formatFieldName(newFieldName, FieldNameCaseCamel)
-		// Go 惯例：主键 id 字段命名为 ID（与设计文档/示例一致）。
-		if camelName == "Id" {
-			camelName = "ID"
-		}
+		// Go 惯例：Id 词统一为 ID 缩写（UserId → UserID、ProductId → ProductID、主键 id → ID）。
+		camelName = gstr.Replace(camelName, "Id", "ID")
 
 		goType, localType := gooqFieldTypes(ctx, in.CGenDaoInternalInput, field, &hasGTime, &hasGJson, &hasStdTime, &hasUUID)
 
-		primary := field.Key == "PRI"
+		// Key 大小写不敏感：sqlite 驱动返回 "pri"/"uni"（小写），MySQL 返回 "PRI"/"UNI"。
+		primary := strings.EqualFold(field.Key, "PRI")
 		autoIncrement := gstr.Contains(field.Extra, "auto_increment")
+		// sqlite：INTEGER PRIMARY KEY 即 rowid 别名（自增语义），驱动 Extra 不返回 auto_increment。
+		if !autoIncrement && in.DB.GetConfig().Type == "sqlite" && primary && localType == string(gdb.LocalTypeInt) {
+			autoIncrement = true
+		}
 		softDelete := fieldName == "deleted_at" || fieldName == "delete_at"
-		unique := field.Key == "UNI"
+		unique := strings.EqualFold(field.Key, "UNI")
 
 		fieldsLines = append(fieldsLines, fmt.Sprintf(
-			"\t%-20s gooq.Field[%s]", camelName, goType,
+			"\t%-20s %sField[%s]", camelName, gooqRef, goType,
 		))
 		metaLines = append(metaLines, fmt.Sprintf(
-			"\t\t\t{ColumnName: %q, LocalType: gooq.LocalType(%q)%s%s%s%s},",
-			fieldName, localType,
+			"\t\t\t{ColumnName: %q, LocalType: %sLocalType(%q)%s%s%s%s},",
+			fieldName, gooqRef, localType,
 			boolSuffix("Primary", primary),
 			boolSuffix("AutoIncrement", autoIncrement),
 			boolSuffix("SoftDelete", softDelete),
 			boolSuffix("Unique", unique),
 		))
 		assignLines = append(assignLines, fmt.Sprintf(
-			"\t%s: gooq.NewField[%s](%q, %q),", camelName, goType, in.NewTableName, fieldName,
+			"\t%s: %sNewField[%s](%q, %q),", camelName, gooqRef, goType, in.NewTableName, fieldName,
 		))
-		columnNames = append(columnNames, strconv.Quote(fieldName))
 	}
 	if hasGTime {
 		imports = append(imports, `"github.com/gogf/gf/v2/os/gtime"`)
@@ -148,15 +154,21 @@ func generateGooqTableContent(
 	if err != nil {
 		return "", err
 	}
+	tplPackageName := filepath.Base(in.TablePath)
+	tplGooqImport := `	"github.com/gogf/gf/v2/database/gooq"`
+	if gooqRef == "" {
+		tplGooqImport = ""
+	}
 	tplView.ClearAssigns()
 	tplView.Assigns(gview.Params{
-		"TplPackageName":        filepath.Base(in.TablePath),
+		"TplPackageName":        tplPackageName,
+		"TplGooqRef":            gooqRef,
+		"TplGooqImport":         tplGooqImport,
 		"TplTableNameCamelCase": formatFieldName(in.NewTableName, FieldNameCaseCamel),
 		"TplTableName":          in.TableName,
 		"TplGooqFields":         strings.Join(fieldsLines, "\n"),
 		"TplGooqFieldMetas":     strings.Join(metaLines, "\n"),
 		"TplGooqFieldAssigns":   strings.Join(assignLines, "\n"),
-		"TplGooqAllColumns":     strings.Join(columnNames, ", "),
 		"TplGooqImports":        strings.Join(imports, "\n"),
 	})
 	return tplView.ParseContent(ctx, tplContent)
