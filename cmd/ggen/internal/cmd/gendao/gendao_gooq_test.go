@@ -4,7 +4,7 @@
 // If a copy of the MIT was not distributed with this file,
 // You can obtain one at https://github.com/gogf/gf.
 
-// 本文件为 gooq 表对象生成的端到端测试：sqlite 建库 → gen dao → 产物断言。
+// 本文件为 ggen 的端到端测试：sqlite 建库 → Generate → do/entity/gooq table 产物断言。
 package gendao
 
 import (
@@ -17,6 +17,7 @@ import (
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/test/gtest"
+	"github.com/gogf/gf/v2/text/gregex"
 	"github.com/gogf/gf/v2/text/gstr"
 )
 
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS user (
 	t.AssertNil(err)
 }
 
-// TestGooqGen_Sqlite 验证 sqlite 建库 → gen dao → 生成 gooq 表对象 → 产物内容断言。
+// TestGooqGen_Sqlite 验证 sqlite 建库 → Generate → 生成 do/entity/gooq table 三类产物 → 产物内容断言。
 func TestGooqGen_Sqlite(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		var (
@@ -53,15 +54,12 @@ func TestGooqGen_Sqlite(t *testing.T) {
 		t.AssertNil(gfile.Mkdir(genPath))
 		initSqlite(t, dbPath)
 
-		_, err := (CGenDao{}).Dao(ctx, CGenDaoInput{
-			Link:      "sqlite::@file(" + dbPath + ")",
-			Path:      genPath,
-			TablePath: "table",
-			Tables:    "user",
+		Generate(ctx, Input{
+			Link: "sqlite::@file(" + dbPath + ")",
+			Path: genPath,
 		})
-		t.AssertNil(err)
 
-		// 产物文件存在。
+		// gooq table 产物。
 		generated := filepath.Join(genPath, "table", "user.go")
 		t.Assert(gfile.Exists(generated), true)
 		content := gfile.GetContents(generated)
@@ -72,10 +70,10 @@ func TestGooqGen_Sqlite(t *testing.T) {
 		// 全列由 TableBase.AllFields() 从元数据派生，生成代码不重复维护列名列表。
 		t.Assert(gstr.Contains(content, `ALL_FIELDS`), false)
 
-		// 字段定义（Go 类型映射：sqlite INTEGER → int，datetime → *gtime.Time）。
+		// 字段定义（Go 类型映射：sqlite INTEGER → int，datetime → time.Time）。
 		t.Assert(gstr.Contains(content, `gooq.Field[int]`), true)
 		t.Assert(gstr.Contains(content, `gooq.Field[string]`), true)
-		t.Assert(gstr.Contains(content, `gooq.Field[*gtime.Time]`), true)
+		t.Assert(gstr.Contains(content, `gooq.Field[time.Time]`), true)
 
 		// 全局表对象与元数据（软删标记由列名约定识别，与驱动无关）。
 		t.Assert(gstr.Contains(content, `var User = &UserTable{`), true)
@@ -92,6 +90,24 @@ func TestGooqGen_Sqlite(t *testing.T) {
 		// FieldMeta 含软删列。
 		t.Assert(gstr.Contains(content, `"deleted_at"`), true)
 
-		// 主键/自增标记依赖驱动返回 Key/Extra（sqlite 驱动不支持），由 MySQL e2e 验证。
+		// do 产物：字段类型统一为 any，带 g.Meta 标记。
+		doFile := filepath.Join(genPath, "do", "user.go")
+		t.Assert(gfile.Exists(doFile), true)
+		doContent := gfile.GetContents(doFile)
+		t.Assert(gstr.Contains(doContent, `type User struct {`), true)
+		t.Assert(gstr.Contains(doContent, `g.Meta`), true)
+		t.Assert(gstr.Contains(doContent, `orm:"table:user, do:true"`), true)
+		t.Assert(gregex.IsMatchString(`(?m)^\s+Name\s+any\s+//`, doContent), true)
+		t.Assert(gregex.IsMatchString(`(?m)^\s+DeletedAt\s+any\s+//`, doContent), true)
+
+		// entity 产物：带 json/orm tag，时间字段 time.Time。
+		entityFile := filepath.Join(genPath, "entity", "user.go")
+		t.Assert(gfile.Exists(entityFile), true)
+		entityContent := gfile.GetContents(entityFile)
+		t.Assert(gstr.Contains(entityContent, `type User struct {`), true)
+		t.Assert(gstr.Contains(entityContent, `json:"name"`), true)
+		t.Assert(gstr.Contains(entityContent, `orm:"name"`), true)
+		t.Assert(gstr.Contains(entityContent, `DeletedAt time.Time`), true)
+		t.Assert(gstr.Contains(entityContent, `"time"`), true)
 	})
 }

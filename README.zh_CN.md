@@ -133,22 +133,28 @@ var User = &UserTable{
 
 ## ggen（代码生成工具）
 
-`database/gooq/cmd/ggen` 从数据库表结构生成类型化表对象：
+`cmd/ggen` 连接数据库后一次性生成所有表的三类产物：`do/`（DO 结构体）、`entity/`（带 `json`/`orm` tag 的实体，`time.Time`）、`table/`（gooq 类型化表对象）：
 
 ```bash
-cd database/gooq/cmd/ggen && go run . gen dao -link "mysql:root:pass@tcp(127.0.0.1:3306)/db" -t user -tablePath table
+cd cmd/ggen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db"
 ```
 
-- 模板驱动（`template/gooq_table.tpl`，支持 `-t5` 外部路径覆盖）。
+- 仅两个参数：`-l/--link`（数据库连接，必填）、`-p/--path`（输出目录，默认 `internal`）。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；Go 命名规范（`id` → `ID`）。
-- 默认驱动：sqlite/mssql/clickhouse（零门面依赖）；MySQL/PG 取消注释 import 启用。
+- 内置驱动：mysql/pgsql/sqlite；其他驱动取消 `internal/cmd/cmd.go` 中 import 注释启用。
 
 ## 测试
 
 ```bash
-go test ./database/gooq/ -count=1              # 主库（渲染断言）
-cd database/gooq/e2e && go test . -count=1     # e2e（真实 MySQL）
-cd database/gooq/cmd/ggen && go test ./...     # ggen 端到端
+go test ./ -count=1                # 主库（渲染断言）
+cd cmd/ggen && go test ./...       # ggen 端到端（sqlite）
+cd test && go test ./...           # 集成测试（真实 MySQL，使用 test/generate 产物）
+```
+
+`test/generate/` 存放 ggen 从 MySQL `test` 库生成的产物（连接配置见 `test/generate_test.go`）；重新生成：
+
+```bash
+cd cmd/ggen && go run . -l "mysql:root:xxx@tcp(127.0.0.1:3306)/test?loc=Local&parseTime=true" -p ../test/generate
 ```
 
 ## 执行（gooq + gdb 融合）

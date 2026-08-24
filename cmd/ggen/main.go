@@ -13,7 +13,7 @@ import (
 	"github.com/gogf/gf/v2/os/gctx"
 
 	"github.com/gogf/gf/cmd/ggen/gfcmd"
-	"github.com/gogf/gf/cmd/ggen/internal/utility/mlog"
+	"github.com/gogf/gf/cmd/ggen/internal/mlog"
 )
 
 func main() {
@@ -26,7 +26,7 @@ func main() {
 		mlog.Fatalf(`%+v`, err)
 	}
 	if command == nil {
-		panic(gerror.New(`retrieve root command failed for "gf"`))
+		panic(gerror.New(`retrieve root command failed for "ggen"`))
 	}
 	command.Run(ctx)
 }

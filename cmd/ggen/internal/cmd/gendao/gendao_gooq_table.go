@@ -5,7 +5,7 @@
 // You can obtain one at https://github.com/gogf/gf.
 
 // 本文件实现 gooq 类型化表对象的生成：连库取表结构 → 模板渲染 → 写盘。
-// 模板为外部文件（template/gooq_table.tpl），支持通过 TplGooqTablePath 参数覆盖。
+// 模板为外部文件（template/gooq_table.tpl）。
 package gendao
 
 import (
@@ -21,76 +21,54 @@ import (
 	"github.com/gogf/gf/v2/os/gview"
 	"github.com/gogf/gf/v2/text/gstr"
 
-	"github.com/gogf/gf/cmd/ggen/internal/utility/mlog"
-	"github.com/gogf/gf/cmd/ggen/internal/utility/utils"
+	"github.com/gogf/gf/cmd/ggen/internal/mlog"
 )
 
 //go:embed template/*.tpl
 var gooqTemplateFS embed.FS
 
-// tplView 是模板渲染视图（跨表生成复用）。
-var tplView = gview.New()
-
 // generateGooqTable generates gooq typed table object files for given tables.
-func generateGooqTable(ctx context.Context, in CGenDaoInternalInput) {
-	dirPathTable := gfile.Join(in.Path, in.TablePath)
-	for i := 0; i < len(in.TableNames); i++ {
-		generateGooqTableSingle(ctx, generateGooqTableSingleInput{
-			CGenDaoInternalInput: in,
-			TableName:            in.TableNames[i],
-			NewTableName:         in.NewTableNames[i],
-			DirPathTable:         dirPathTable,
-		})
+func generateGooqTable(ctx context.Context, db gdb.DB, tableNames []string, dirPathTable string) {
+	for _, tableName := range tableNames {
+		generateGooqTableSingle(ctx, db, tableName, dirPathTable)
 	}
-}
-
-// generateGooqTableSingleInput is the input parameter for generateGooqTableSingle.
-type generateGooqTableSingleInput struct {
-	CGenDaoInternalInput
-	TableName    string
-	NewTableName string
-	DirPathTable string
 }
 
 // generateGooqTableSingle generates the gooq table object for a single table.
-func generateGooqTableSingle(ctx context.Context, in generateGooqTableSingleInput) {
-	fieldMap, err := in.DB.TableFields(ctx, in.TableName)
+func generateGooqTableSingle(ctx context.Context, db gdb.DB, tableName, dirPathTable string) {
+	fieldMap, err := db.TableFields(ctx, tableName)
 	if err != nil {
-		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, in.TableName, err)
+		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, tableName, err)
 	}
-	fileName := formatFileName(in.NewTableName, "")
-	path := filepath.FromSlash(gfile.Join(in.DirPathTable, fileName+".go"))
-	if in.OverwriteDao || !gfile.Exists(path) {
-		tableContent, err := generateGooqTableContent(ctx, in, fieldMap)
-		if err != nil {
-			mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, in.TableName, err)
-		}
-		if err = gfile.PutContents(path, tableContent); err != nil {
-			mlog.Fatalf("writing content to '%s' failed: %v", path, err)
-		} else {
-			utils.GoFmt(path)
-			mlog.Print("generated:", gfile.RealPath(path))
-		}
+	fileName := formatFileName(tableName, "")
+	path := filepath.FromSlash(gfile.Join(dirPathTable, fileName+".go"))
+	tableContent, err := generateGooqTableContent(ctx, db, tableName, dirPathTable, fieldMap)
+	if err != nil {
+		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, tableName, err)
+	}
+	if err = gfile.PutContents(path, tableContent); err != nil {
+		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
+	} else {
+		GoFmt(path)
+		mlog.Print("generated:", gfile.RealPath(path))
 	}
 }
 
 // generateGooqTableContent builds and renders the gooq table object content.
 func generateGooqTableContent(
-	ctx context.Context, in generateGooqTableSingleInput, fieldMap map[string]*gdb.TableField,
+	ctx context.Context, db gdb.DB, tableName, dirPathTable string, fieldMap map[string]*gdb.TableField,
 ) (string, error) {
 	var (
 		fieldsLines []string
 		metaLines   []string
 		assignLines []string
 		imports     = make([]string, 0, 4)
-		hasGTime    bool
-		hasGJson    bool
 		hasStdTime  bool
 		hasUUID     bool
 	)
 	// 包内生成（TplPackageName == "gooq"）时无需包前缀与自引用 import。
 	gooqRef := "gooq."
-	if filepath.Base(in.TablePath) == "gooq" {
+	if filepath.Base(dirPathTable) == "gooq" {
 		gooqRef = ""
 	}
 	fieldNames := make([]string, 0, len(fieldMap))
@@ -102,21 +80,17 @@ func generateGooqTableContent(
 	})
 	for _, fieldName := range fieldNames {
 		field := fieldMap[fieldName]
-		newFieldName := fieldName
-		for _, v := range gstr.SplitAndTrim(in.RemoveFieldPrefix, ",") {
-			newFieldName = gstr.TrimLeftStr(newFieldName, v, 1)
-		}
-		camelName := formatFieldName(newFieldName, FieldNameCaseCamel)
+		camelName := formatFieldName(fieldName, FieldNameCaseCamel)
 		// Go 惯例：Id 词统一为 ID 缩写（UserId → UserID、ProductId → ProductID、主键 id → ID）。
 		camelName = gstr.Replace(camelName, "Id", "ID")
 
-		goType, localType := gooqFieldTypes(ctx, in.CGenDaoInternalInput, field, &hasGTime, &hasGJson, &hasStdTime, &hasUUID)
+		goType, localType := gooqFieldTypes(ctx, db, field, &hasStdTime, &hasUUID)
 
 		// Key 大小写不敏感：sqlite 驱动返回 "pri"/"uni"（小写），MySQL 返回 "PRI"/"UNI"。
 		primary := strings.EqualFold(field.Key, "PRI")
 		autoIncrement := gstr.Contains(field.Extra, "auto_increment")
 		// sqlite：INTEGER PRIMARY KEY 即 rowid 别名（自增语义），驱动 Extra 不返回 auto_increment。
-		if !autoIncrement && in.DB.GetConfig().Type == "sqlite" && primary && localType == string(gdb.LocalTypeInt) {
+		if !autoIncrement && db.GetConfig().Type == "sqlite" && primary && localType == string(gdb.LocalTypeInt) {
 			autoIncrement = true
 		}
 		softDelete := fieldName == "deleted_at" || fieldName == "delete_at"
@@ -134,14 +108,8 @@ func generateGooqTableContent(
 			boolSuffix("Unique", unique),
 		))
 		assignLines = append(assignLines, fmt.Sprintf(
-			"\t%s: %sNewField[%s](%q, %q),", camelName, gooqRef, goType, in.NewTableName, fieldName,
+			"\t%s: %sNewField[%s](%q, %q),", camelName, gooqRef, goType, tableName, fieldName,
 		))
-	}
-	if hasGTime {
-		imports = append(imports, `"github.com/gogf/gf/v2/os/gtime"`)
-	}
-	if hasGJson {
-		imports = append(imports, `"github.com/gogf/gf/v2/encoding/gjson"`)
 	}
 	if hasStdTime {
 		imports = append(imports, `"time"`)
@@ -150,12 +118,12 @@ func generateGooqTableContent(
 		imports = append(imports, `"github.com/google/uuid"`)
 	}
 
-	tplContent, err := getGooqTableTemplate(in.CGenDaoInternalInput)
+	tplContent, err := getGooqTableTemplate()
 	if err != nil {
 		return "", err
 	}
-	tplPackageName := filepath.Base(in.TablePath)
-	tplGooqImport := `	"github.com/gogf/gf/v2/database/gooq"`
+	tplPackageName := filepath.Base(dirPathTable)
+	tplGooqImport := `	"github.com/lanceadd/gooq"`
 	if gooqRef == "" {
 		tplGooqImport = ""
 	}
@@ -164,8 +132,8 @@ func generateGooqTableContent(
 		"TplPackageName":        tplPackageName,
 		"TplGooqRef":            gooqRef,
 		"TplGooqImport":         tplGooqImport,
-		"TplTableNameCamelCase": formatFieldName(in.NewTableName, FieldNameCaseCamel),
-		"TplTableName":          in.TableName,
+		"TplTableNameCamelCase": formatFieldName(tableName, FieldNameCaseCamel),
+		"TplTableName":          tableName,
 		"TplGooqFields":         strings.Join(fieldsLines, "\n"),
 		"TplGooqFieldMetas":     strings.Join(metaLines, "\n"),
 		"TplGooqFieldAssigns":   strings.Join(assignLines, "\n"),
@@ -176,10 +144,10 @@ func generateGooqTableContent(
 
 // gooqFieldTypes returns the Go type name and LocalType string for the given field.
 func gooqFieldTypes(
-	ctx context.Context, in CGenDaoInternalInput, field *gdb.TableField,
-	hasGTime, hasGJson, hasStdTime, hasUUID *bool,
+	ctx context.Context, db gdb.DB, field *gdb.TableField,
+	hasStdTime, hasUUID *bool,
 ) (goType string, localTypeStr string) {
-	localType, err := in.DB.CheckLocalTypeForField(ctx, field.Type, nil)
+	localType, err := db.CheckLocalTypeForField(ctx, field.Type, nil)
 	if err != nil {
 		mlog.Fatalf(`check local type for field "%s" failed: %+v`, field.Name, err)
 	}
@@ -187,24 +155,15 @@ func gooqFieldTypes(
 	goType = localTypeStr
 	switch localType {
 	case gdb.LocalTypeDate, gdb.LocalTypeTime, gdb.LocalTypeDatetime:
-		if in.StdTime {
-			goType = "time.Time"
-			*hasStdTime = true
-		} else {
-			goType = "*gtime.Time"
-			*hasGTime = true
-		}
+		// 统一使用 stdlib time.Time。
+		goType = "time.Time"
+		*hasStdTime = true
 	case gdb.LocalTypeInt64Bytes:
 		goType = "int64"
 	case gdb.LocalTypeUint64Bytes:
 		goType = "uint64"
 	case gdb.LocalTypeJson, gdb.LocalTypeJsonb:
-		if in.GJsonSupport {
-			goType = "*gjson.Json"
-			*hasGJson = true
-		} else {
-			goType = "string"
-		}
+		goType = "string"
 	case gdb.LocalTypeUUID:
 		goType = "uuid.UUID"
 		*hasUUID = true
@@ -212,14 +171,8 @@ func gooqFieldTypes(
 	return goType, localTypeStr
 }
 
-// getGooqTableTemplate reads the gooq table template: external path first, embedded as fallback.
-func getGooqTableTemplate(in CGenDaoInternalInput) (string, error) {
-	if in.TplGooqTablePath != "" {
-		if gfile.Exists(in.TplGooqTablePath) {
-			return gfile.GetContents(in.TplGooqTablePath), nil
-		}
-		return "", fmt.Errorf("template file not found: %s", in.TplGooqTablePath)
-	}
+// getGooqTableTemplate reads the embedded gooq table template.
+func getGooqTableTemplate() (string, error) {
 	content, err := gooqTemplateFS.ReadFile("template/gooq_table.tpl")
 	if err != nil {
 		return "", err
