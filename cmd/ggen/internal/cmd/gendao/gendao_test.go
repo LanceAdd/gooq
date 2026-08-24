@@ -41,8 +41,8 @@ CREATE TABLE IF NOT EXISTS user (
 	t.AssertNil(err)
 }
 
-// TestGooqGen_Sqlite 验证 sqlite 建库 → Generate → 生成 do/entity/gooq table 三类产物 → 产物内容断言。
-func TestGooqGen_Sqlite(t *testing.T) {
+// TestGen_Sqlite 验证 sqlite 建库 → Generate → 生成 do/entity/gooq table 三类产物 → 产物内容断言。
+func TestGen_Sqlite(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		var (
 			ctx     = context.Background()
@@ -112,9 +112,9 @@ func TestGooqGen_Sqlite(t *testing.T) {
 	})
 }
 
-// TestGooq_Template_Override 验证模板落盘（-t）与本地模板覆盖：工作目录 template/ 下的
+// TestTemplate_Override 验证模板落盘（-t）与本地模板覆盖：工作目录 template/ 下的
 // 自定义模板优先于内置模板。
-func TestGooq_Template_Override(t *testing.T) {
+func TestTemplate_Override(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		var (
 			ctx     = context.Background()
@@ -131,7 +131,7 @@ func TestGooq_Template_Override(t *testing.T) {
 		ExportTemplates()
 		t.Assert(gfile.Exists(gfile.Join("template", "do.tpl")), true)
 		t.Assert(gfile.Exists(gfile.Join("template", "entity.tpl")), true)
-		t.Assert(gfile.Exists(gfile.Join("template", "gooq_table.tpl")), true)
+		t.Assert(gfile.Exists(gfile.Join("template", "table.tmpl")), true)
 
 		// 自定义 do 模板（标记 CUSTOM 便于断言）。
 		t.AssertNil(gfile.PutContents(

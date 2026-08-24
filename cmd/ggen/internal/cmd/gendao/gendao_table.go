@@ -5,7 +5,7 @@
 // You can obtain one at https://github.com/gogf/gf.
 
 // 本文件实现 gooq 类型化表对象的生成：连库取表结构 → 模板渲染 → 写盘。
-// 模板为外部文件（template/gooq_table.tpl）。
+// 模板为外部文件（template/table.tmpl）。
 package gendao
 
 import (
@@ -24,25 +24,25 @@ import (
 	"github.com/gogf/gf/cmd/ggen/internal/mlog"
 )
 
-//go:embed template/*.tpl
+//go:embed template/*
 var gooqTemplateFS embed.FS
 
-// generateGooqTable generates gooq typed table object files for given tables.
-func generateGooqTable(ctx context.Context, db gdb.DB, tableNames []string, dirPathTable string) {
+// generateTable generates gooq typed table object files for given tables.
+func generateTable(ctx context.Context, db gdb.DB, tableNames []string, dirPathTable string) {
 	for _, tableName := range tableNames {
-		generateGooqTableSingle(ctx, db, tableName, dirPathTable)
+		generateTableSingle(ctx, db, tableName, dirPathTable)
 	}
 }
 
-// generateGooqTableSingle generates the gooq table object for a single table.
-func generateGooqTableSingle(ctx context.Context, db gdb.DB, tableName, dirPathTable string) {
+// generateTableSingle generates the gooq table object for a single table.
+func generateTableSingle(ctx context.Context, db gdb.DB, tableName, dirPathTable string) {
 	fieldMap, err := db.TableFields(ctx, tableName)
 	if err != nil {
 		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, tableName, err)
 	}
 	fileName := formatFileName(tableName, "")
 	path := filepath.FromSlash(gfile.Join(dirPathTable, fileName+".go"))
-	tableContent, err := generateGooqTableContent(ctx, db, tableName, dirPathTable, fieldMap)
+	tableContent, err := generateTableContent(ctx, db, tableName, dirPathTable, fieldMap)
 	if err != nil {
 		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, tableName, err)
 	}
@@ -54,8 +54,8 @@ func generateGooqTableSingle(ctx context.Context, db gdb.DB, tableName, dirPathT
 	}
 }
 
-// generateGooqTableContent builds and renders the gooq table object content.
-func generateGooqTableContent(
+// generateTableContent builds and renders the gooq table object content.
+func generateTableContent(
 	ctx context.Context, db gdb.DB, tableName, dirPathTable string, fieldMap map[string]*gdb.TableField,
 ) (string, error) {
 	var (
@@ -84,7 +84,7 @@ func generateGooqTableContent(
 		// Go 惯例：Id 词统一为 ID 缩写（UserId → UserID、ProductId → ProductID、主键 id → ID）。
 		camelName = gstr.Replace(camelName, "Id", "ID")
 
-		goType, localType := gooqFieldTypes(ctx, db, field, &hasStdTime, &hasUUID)
+		goType, localType := tableFieldTypes(ctx, db, field, &hasStdTime, &hasUUID)
 
 		// Key 大小写不敏感：sqlite 驱动返回 "pri"/"uni"（小写），MySQL 返回 "PRI"/"UNI"。
 		primary := strings.EqualFold(field.Key, "PRI")
@@ -118,7 +118,7 @@ func generateGooqTableContent(
 		imports = append(imports, `"github.com/google/uuid"`)
 	}
 
-	tplContent := getTemplate(tplFileGooqTable)
+	tplContent := getTemplate(tplFileTable)
 	tplPackageName := filepath.Base(dirPathTable)
 	tplGooqImport := `	"github.com/lanceadd/gooq"`
 	if gooqRef == "" {
@@ -139,8 +139,8 @@ func generateGooqTableContent(
 	return tplView.ParseContent(ctx, tplContent)
 }
 
-// gooqFieldTypes returns the Go type name and LocalType string for the given field.
-func gooqFieldTypes(
+// tableFieldTypes returns the Go type name and LocalType string for the given field.
+func tableFieldTypes(
 	ctx context.Context, db gdb.DB, field *gdb.TableField,
 	hasStdTime, hasUUID *bool,
 ) (goType string, localTypeStr string) {

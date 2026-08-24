@@ -37,9 +37,9 @@ var tplView = gview.New()
 
 // 内置模板文件名。
 const (
-	tplFileDo        = "do.tpl"
-	tplFileEntity    = "entity.tpl"
-	tplFileGooqTable = "gooq_table.tpl"
+	tplFileDo     = "do.tpl"
+	tplFileEntity = "entity.tpl"
+	tplFileTable  = "table.tmpl"
 )
 
 // getTemplate 读取模板内容：优先使用工作目录下 template/ 目录中的本地模板（便于调试定制），
@@ -62,7 +62,7 @@ func ExportTemplates() {
 			mlog.Fatalf(`creating template directory failed: %+v`, err)
 		}
 	}
-	for _, name := range []string{tplFileDo, tplFileEntity, tplFileGooqTable} {
+	for _, name := range []string{tplFileDo, tplFileEntity, tplFileTable} {
 		path := gfile.Join("template", name)
 		if err := gfile.PutContents(path, getTemplate(name)); err != nil {
 			mlog.Fatalf(`writing template "%s" failed: %+v`, path, err)
@@ -110,7 +110,7 @@ func Generate(ctx context.Context, in Input) {
 	// Entity.
 	generateEntity(ctx, db, tableNames, gfile.Join(in.Path, dirPathEntity))
 	// Gooq table.
-	generateGooqTable(ctx, db, tableNames, gfile.Join(in.Path, dirPathTable))
+	generateTable(ctx, db, tableNames, gfile.Join(in.Path, dirPathTable))
 
 	mlog.Print("done!")
 }
