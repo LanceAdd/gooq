@@ -6,6 +6,14 @@ import (
 	"sync"
 )
 
+type Dialect string
+
+const (
+	DialectMySQL  Dialect = "mysql"
+	DialectPgsql  Dialect = "pgsql"
+	DialectSQLite Dialect = "sqlite"
+)
+
 type DialectInfo struct {
 	Placeholder string
 	QuoteChar   string

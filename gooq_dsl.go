@@ -4,14 +4,6 @@ import (
 	"context"
 )
 
-type Dialect string
-
-const (
-	DialectMySQL  Dialect = "mysql"
-	DialectPgsql  Dialect = "pgsql"
-	DialectSQLite Dialect = "sqlite"
-)
-
 type Expression interface {
 	Condition() (where string, args []any)
 }
