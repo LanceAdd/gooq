@@ -75,6 +75,8 @@ var User = &UserTable{
 - `As(alias)` 返回带别名的副本（用于 JOIN 与自连接）；`Clone()` 返回无别名副本。
 - `AllFields()` 从 `TableMeta` 派生全列 `[]Field[any]`——可直接 `Select(User.AllFields())`，也可组合：`Select(u.AllFields(), o.Amount)`。
 - `TableMeta` 静态承载列元数据（主键/自增/软删/唯一/注释），供软删除自动条件、自增列跳过、`FieldsEx` 差集使用。
+- **Schema 限定**：`TableMeta.Schema` 非空时渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；ggen 仅 PG 生成 schema（`current_schema()`），MySQL/SQLite 留空。
+- 生成代码为构造函数模式（`var User = newUserTable()`），字段经 `NewFieldAt[T](TableBase, 列名)` 构造——字段绑定表实例，别名/schema 随克隆自动正确；`NewField(table, column)` 为无表场景逃生舱。
 
 ## 查询 DSL
 

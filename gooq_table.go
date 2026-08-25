@@ -12,6 +12,7 @@ type FieldMeta struct {
 
 type TableMeta struct {
 	TableName string      // 表名。
+	Schema    string      // schema 名（空则不渲染前缀）。
 	Fields    []FieldMeta // 字段列表（含顺序）。
 }
 

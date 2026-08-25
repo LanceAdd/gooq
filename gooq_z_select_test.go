@@ -55,6 +55,35 @@ func TestDsl_Select_AllFields_FieldsEx(t *testing.T) {
 	})
 }
 
+func TestDsl_Schema(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		su := newSchemaUserTable()
+
+		sql, _, err := Select(su.ID, su.Name).From(su).Where(su.ID.Eq(1)).ToSql(DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "public"."user"."id", "public"."user"."name" FROM "public"."user" WHERE "public"."user"."id" = $1`)
+
+		sql, _, err = Select(su.ID).From(su).ToSql(DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `public`.`user`.`id` FROM `public`.`user`")
+
+		// 别名遮蔽 schema：字段用别名前缀。
+		u1 := su.As("u1")
+		sql, _, err = Select(u1.ID).From(u1).ToSql(DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "u1"."id" FROM "public"."user" AS u1`)
+
+		// DML：INSERT 与 DELETE 目标表带 schema 限定。
+		sql, _, err = Insert(su).Columns(su.Name).Values("a").ToSql(DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "public"."user" ("name") VALUES ($1)`)
+
+		sql, _, err = Delete(su).Where(su.ID.Eq(1)).ToSql(DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "DELETE FROM `public`.`user` WHERE `public`.`user`.`id` = ?")
+	})
+}
+
 func TestDsl_Select_SoftDelete(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, _, err := Select(testUser.ID).From(testUser).Unscoped().ToSql(DialectMySQL)

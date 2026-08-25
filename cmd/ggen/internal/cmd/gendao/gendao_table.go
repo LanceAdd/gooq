@@ -109,7 +109,7 @@ func generateTableContent(
 			boolSuffix("Unique", unique),
 		))
 		assignLines = append(assignLines, fmt.Sprintf(
-			"\t%s: %sNewField[%s](%q, %q),", camelName, gooqRef, goType, tableName, fieldName,
+			"\tt.%s = %sNewFieldAt[%s](t.TableBase, %q)", camelName, gooqRef, goType, fieldName,
 		))
 		aliasAssignLines = append(aliasAssignLines, fmt.Sprintf(
 			"\tnewT.%s.BindTable(newT.TableBase)", camelName,
@@ -135,6 +135,7 @@ func generateTableContent(
 		"TplGooqImport":            tplGooqImport,
 		"TplTableNameCamelCase":    formatFieldName(tableName, FieldNameCaseCamel),
 		"TplTableName":             tableName,
+		"TplTableSchema":           currentSchema(ctx, db),
 		"TplGooqFields":            strings.Join(fieldsLines, "\n"),
 		"TplGooqFieldMetas":        strings.Join(metaLines, "\n"),
 		"TplGooqFieldAssigns":      strings.Join(assignLines, "\n"),
@@ -171,6 +172,17 @@ func tableFieldTypes(
 		*hasUUID = true
 	}
 	return goType, localTypeStr
+}
+
+// currentSchema returns the default schema for schema-qualified rendering (PG only).
+func currentSchema(ctx context.Context, db gdb.DB) string {
+	if db.GetConfig().Type != "pgsql" {
+		return ""
+	}
+	if v, err := db.GetValue(ctx, "SELECT current_schema()"); err == nil {
+		return v.String()
+	}
+	return ""
 }
 
 // boolSuffix renders a struct field suffix for boolean meta flags.

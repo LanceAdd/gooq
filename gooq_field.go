@@ -17,6 +17,10 @@ func NewField[T any](tableName, columnName string) Field[T] {
 	return Field[T]{tableName: tableName, columnName: columnName}
 }
 
+func NewFieldAt[T any](t *TableBase, column string) Field[T] {
+	return Field[T]{table: t, tableName: t.meta.TableName, columnName: column}
+}
+
 func (f *Field[T]) BindTable(t *TableBase) {
 	f.table = t
 }
@@ -52,8 +56,12 @@ func (f Field[T]) Condition() (string, []any) {
 
 func (f Field[T]) render(rc *renderContext) (string, []any) {
 	var sql string
-	if prefix := f.prefix(); prefix != "" {
-		sql = rc.quote(prefix) + "." + rc.quote(f.columnName)
+	if parts := f.prefixParts(); len(parts) > 0 && parts[0] != "" {
+		var quoted []string
+		for _, p := range parts {
+			quoted = append(quoted, rc.quote(p))
+		}
+		sql = strings.Join(quoted, ".") + "." + rc.quote(f.columnName)
 	} else {
 		sql = rc.quote(f.columnName)
 	}
@@ -63,13 +71,16 @@ func (f Field[T]) render(rc *renderContext) (string, []any) {
 	return sql, nil
 }
 
-func (f Field[T]) prefix() string {
+func (f Field[T]) prefixParts() []string {
 	if f.table != nil {
 		if alias := f.table.Alias(); alias != "" {
-			return alias
+			return []string{alias}
+		}
+		if schema := f.table.Meta().Schema; schema != "" {
+			return []string{schema, f.tableName}
 		}
 	}
-	return f.tableName
+	return strings.Split(f.tableName, ".")
 }
 
 type OrderClause struct {

@@ -465,7 +465,7 @@ func (b *DMLBuilder) renderInsertFrom(rc *renderContext) (string, []any, error) 
 	subSQL, _ := b.selectBuilder.renderSelect(rc)
 	var sqlStr = fmt.Sprintf(
 		"INSERT INTO %s (%s) %s",
-		rc.quote(b.table.TableName()),
+		tableNameSQL(rc, b.table),
 		strings.Join(quoteColumns(rc, columns), ", "),
 		subSQL,
 	)
@@ -508,7 +508,7 @@ func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
 	var sqlStr = fmt.Sprintf(
 		"%s INTO %s (%s) VALUES %s",
 		insertKeyword,
-		rc.quote(b.table.TableName()),
+		tableNameSQL(rc, b.table),
 		strings.Join(quoteColumns(rc, columns), ", "),
 		strings.Join(rows, ", "),
 	)
@@ -616,19 +616,19 @@ func (b *DMLBuilder) renderBatchDML(dialect Dialect) ([]string, [][]any, error) 
 			if softField != nil && !b.unscoped {
 				sqlStr = fmt.Sprintf(
 					"UPDATE %s SET %s = %s",
-					rc.quote(b.table.TableName()),
+					tableNameSQL(rc, b.table),
 					rc.quote(softField.ColumnName),
 					rc.addArg(time.Now()),
 				)
 			} else {
-				sqlStr = "DELETE FROM " + rc.quote(b.table.TableName())
+				sqlStr = "DELETE FROM " + tableNameSQL(rc, b.table)
 			}
 		default:
 			placeholders := make([]string, len(setCols))
 			for i := range setCols {
 				placeholders[i] = fmt.Sprintf("%s = %s", rc.quote(setCols[i]), rc.addArg(setArgs[i]))
 			}
-			sqlStr = fmt.Sprintf("UPDATE %s SET %s", rc.quote(b.table.TableName()), strings.Join(placeholders, ", "))
+			sqlStr = fmt.Sprintf("UPDATE %s SET %s", tableNameSQL(rc, b.table), strings.Join(placeholders, ", "))
 		}
 		whereParts := make([]string, len(where))
 		for i := range where {
@@ -645,7 +645,7 @@ func (b *DMLBuilder) renderDelete(rc *renderContext) (string, []any, error) {
 		if softField := b.table.Meta().SoftDeleteField(); softField != nil {
 			sqlStr := fmt.Sprintf(
 				"UPDATE %s SET %s = %s",
-				rc.quote(b.table.TableName()),
+				tableNameSQL(rc, b.table),
 				rc.quote(softField.ColumnName),
 				rc.addArg(time.Now()),
 			)
@@ -660,7 +660,7 @@ func (b *DMLBuilder) renderDelete(rc *renderContext) (string, []any, error) {
 			return sqlStr, rc.args, nil
 		}
 	}
-	var sqlStr = "DELETE FROM " + rc.quote(b.table.TableName())
+	var sqlStr = "DELETE FROM " + tableNameSQL(rc, b.table)
 	if where := b.renderWhere(rc); where != "" {
 		sqlStr += " WHERE " + where
 	}

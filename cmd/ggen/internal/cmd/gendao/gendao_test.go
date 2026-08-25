@@ -76,14 +76,14 @@ func TestGen_Sqlite(t *testing.T) {
 		t.Assert(gstr.Contains(content, `gooq.Field[time.Time]`), true)
 
 		// 全局表对象与元数据（软删标记由列名约定识别，与驱动无关）。
-		t.Assert(gstr.Contains(content, `var User = &UserTable{`), true)
+		t.Assert(gstr.Contains(content, `var User = newUserTable()`), true)
 		t.Assert(gstr.Contains(content, `gooq.TableMeta{`), true)
 		t.Assert(gstr.Contains(content, `TableName: "user"`), true)
 		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalType("int")`), true)
 		t.Assert(gstr.Contains(content, `SoftDelete: true`), true)
 
-		// NewField 赋值与 As/Clone。
-		t.Assert(gstr.Contains(content, `gooq.NewField[int]("user", "id")`), true)
+		// NewFieldAt 赋值与 As/Clone。
+		t.Assert(gstr.Contains(content, `t.ID = gooq.NewFieldAt[int](t.TableBase, "id")`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) As(alias string) *UserTable {`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) Clone() *UserTable {`), true)
 

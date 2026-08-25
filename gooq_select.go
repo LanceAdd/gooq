@@ -824,11 +824,20 @@ func renderTableName(rc *renderContext, t Table) string {
 		subSQL, _ := sub.renderSelect(rc)
 		return "(" + subSQL + ") AS " + sub.alias
 	}
-	var sql = rc.quote(t.TableName())
+	var sql = tableNameSQL(rc, t)
 	if t.Alias() != "" {
 		sql += " AS " + t.Alias()
 	}
 	return sql
+}
+
+// tableNameSQL 渲染限定表名（schema.table）；表元数据无 schema 时仅表名。
+func tableNameSQL(rc *renderContext, t Table) string {
+	var name = rc.quote(t.TableName())
+	if m := t.Meta(); m != nil && m.Schema != "" {
+		name = rc.quote(m.Schema) + "." + name
+	}
+	return name
 }
 
 // renderWhere 渲染 WHERE 条件（含软删除自动条件）。

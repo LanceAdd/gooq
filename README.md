@@ -75,6 +75,8 @@ var User = &UserTable{
 - `As(alias)` returns an aliased copy (for JOINs and self-joins); `Clone()` returns an alias-free copy.
 - `AllFields()` derives a full-column `[]Field[any]` from `TableMeta` — usable as `Select(User.AllFields())` or combined with other fields: `Select(u.AllFields(), o.Amount)`.
 - `TableMeta` statically holds column metadata (primary key, auto-increment, soft delete, unique, comment) used by soft-delete auto conditions, auto-increment skipping, and `FieldsEx` difference sets.
+- **Schema qualification**: non-empty `TableMeta.Schema` renders three-part `schema.table.column` (alias shadows schema); ggen fills schema for PG only (`current_schema()`), MySQL/SQLite leave it empty.
+- Generated code uses a constructor (`var User = newUserTable()`) with fields built via `NewFieldAt[T](TableBase, column)` — fields are bound to the table instance, so alias/schema stay correct across clones; `NewField(table, column)` remains the escape hatch for table-less expressions.
 
 ## Select DSL
 

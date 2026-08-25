@@ -18,16 +18,20 @@ type {{.TplTableNameCamelCase}}Table struct {
 {{.TplGooqFields}}
 }
 
-// {{.TplTableNameCamelCase}} is the globally accessible table object for table {{.TplTableName}}.
-var {{.TplTableNameCamelCase}} = &{{.TplTableNameCamelCase}}Table{
-	TableBase: {{.TplGooqRef}}NewTableBase(&{{.TplGooqRef}}TableMeta{
+func new{{.TplTableNameCamelCase}}Table() *{{.TplTableNameCamelCase}}Table {
+	t := &{{.TplTableNameCamelCase}}Table{TableBase: {{.TplGooqRef}}NewTableBase(&{{.TplGooqRef}}TableMeta{
 		TableName: "{{.TplTableName}}",
+		Schema:    "{{.TplTableSchema}}",
 		Fields: []{{.TplGooqRef}}FieldMeta{
 {{.TplGooqFieldMetas}}
 		},
-	}),
+	})}
 {{.TplGooqFieldAssigns}}
+	return t
 }
+
+// {{.TplTableNameCamelCase}} is the globally accessible table object for table {{.TplTableName}}.
+var {{.TplTableNameCamelCase}} = new{{.TplTableNameCamelCase}}Table()
 
 // As returns a copy of the table object with the given alias.
 func (t *{{.TplTableNameCamelCase}}Table) As(alias string) *{{.TplTableNameCamelCase}}Table {
