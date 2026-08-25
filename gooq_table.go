@@ -46,6 +46,7 @@ type Table interface {
 	Alias() string
 	Meta() *TableMeta
 	AllColumns() []string
+	Field(column string) Field[any]
 }
 
 type TableBase struct {
@@ -87,7 +88,11 @@ func (t *TableBase) Clone() *TableBase {
 func (t *TableBase) AllFields() []Field[any] {
 	fields := make([]Field[any], len(t.meta.Fields))
 	for i, fm := range t.meta.Fields {
-		fields[i] = Field[any]{tableName: t.meta.TableName, columnName: fm.ColumnName}
+		fields[i] = t.Field(fm.ColumnName)
 	}
 	return fields
+}
+
+func (t *TableBase) Field(column string) Field[any] {
+	return Field[any]{table: t, tableName: t.meta.TableName, columnName: column}
 }

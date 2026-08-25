@@ -71,7 +71,6 @@ func (b *SelectBuilder) cacheKey(dialect Dialect) (string, error) {
 
 func (b *SelectBuilder) pageCacheKey(dialect Dialect) (string, error) {
 	rc := newRenderContext(b.ctx, dialect)
-	b.registerAliases(rc)
 	var sb strings.Builder
 	sb.WriteString(b.from.TableName())
 	for _, j := range b.joins {

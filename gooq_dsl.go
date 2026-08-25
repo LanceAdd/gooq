@@ -18,7 +18,6 @@ type renderContext struct {
 	dialectInfo *DialectInfo // 方言元数据（注册表解析）。
 	driverName  string       // 操作符驱动名（由方言推断）。
 	args        []any
-	aliases     map[string]string // tableName → alias。
 	argIndex    int
 }
 
@@ -26,7 +25,6 @@ func newRenderContext(ctx context.Context, dialect Dialect) *renderContext {
 	rc := &renderContext{
 		ctx:     ctx,
 		dialect: dialect,
-		aliases: make(map[string]string),
 	}
 	if dialect != "" {
 		rc.driverName = string(dialect)
@@ -50,14 +48,6 @@ func (rc *renderContext) addArg(v any) string {
 	rc.args = append(rc.args, v)
 	rc.argIndex++
 	return rc.placeholder(rc.argIndex)
-}
-
-func (rc *renderContext) aliasFor(tableName string) string {
-	return rc.aliases[tableName]
-}
-
-func (rc *renderContext) registerAlias(tableName, alias string) {
-	rc.aliases[tableName] = alias
 }
 
 func (rc *renderContext) render(e Expression) (sql string, args []any) {

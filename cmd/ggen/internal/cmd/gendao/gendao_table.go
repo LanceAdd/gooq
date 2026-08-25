@@ -59,12 +59,13 @@ func generateTableContent(
 	ctx context.Context, db gdb.DB, tableName, dirPathTable string, fieldMap map[string]*gdb.TableField,
 ) (string, error) {
 	var (
-		fieldsLines []string
-		metaLines   []string
-		assignLines []string
-		imports     = make([]string, 0, 4)
-		hasStdTime  bool
-		hasUUID     bool
+		fieldsLines      []string
+		metaLines        []string
+		assignLines      []string
+		aliasAssignLines []string
+		imports          = make([]string, 0, 4)
+		hasStdTime       bool
+		hasUUID          bool
 	)
 	// 包内生成（TplPackageName == "gooq"）时无需包前缀与自引用 import。
 	gooqRef := "gooq."
@@ -110,6 +111,9 @@ func generateTableContent(
 		assignLines = append(assignLines, fmt.Sprintf(
 			"\t%s: %sNewField[%s](%q, %q),", camelName, gooqRef, goType, tableName, fieldName,
 		))
+		aliasAssignLines = append(aliasAssignLines, fmt.Sprintf(
+			"\tnewT.%s.BindTable(newT.TableBase)", camelName,
+		))
 	}
 	if hasStdTime {
 		imports = append(imports, `"time"`)
@@ -126,15 +130,16 @@ func generateTableContent(
 	}
 	tplView.ClearAssigns()
 	tplView.Assigns(gview.Params{
-		"TplPackageName":        tplPackageName,
-		"TplGooqRef":            gooqRef,
-		"TplGooqImport":         tplGooqImport,
-		"TplTableNameCamelCase": formatFieldName(tableName, FieldNameCaseCamel),
-		"TplTableName":          tableName,
-		"TplGooqFields":         strings.Join(fieldsLines, "\n"),
-		"TplGooqFieldMetas":     strings.Join(metaLines, "\n"),
-		"TplGooqFieldAssigns":   strings.Join(assignLines, "\n"),
-		"TplGooqImports":        strings.Join(imports, "\n"),
+		"TplPackageName":           tplPackageName,
+		"TplGooqRef":               gooqRef,
+		"TplGooqImport":            tplGooqImport,
+		"TplTableNameCamelCase":    formatFieldName(tableName, FieldNameCaseCamel),
+		"TplTableName":             tableName,
+		"TplGooqFields":            strings.Join(fieldsLines, "\n"),
+		"TplGooqFieldMetas":        strings.Join(metaLines, "\n"),
+		"TplGooqFieldAssigns":      strings.Join(assignLines, "\n"),
+		"TplGooqFieldAliasAssigns": strings.Join(aliasAssignLines, "\n"),
+		"TplGooqImports":           strings.Join(imports, "\n"),
 	})
 	return tplView.ParseContent(ctx, tplContent)
 }

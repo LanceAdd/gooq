@@ -7,13 +7,18 @@ import (
 )
 
 type Field[T any] struct {
-	tableName  string // 所属表名（无表归属时为空串，用于自定义表达式）。
-	columnName string // 列名。
-	alias      string // 列别名（SELECT 位置渲染为 col AS alias）。
+	table      *TableBase // 所属表实例（As/Clone 时绑定；nil 时回退 tableName 前缀）。
+	tableName  string     // 渲染前缀表名（无指针绑定时使用）。
+	columnName string     // 列名。
+	alias      string     // 列别名（SELECT 位置渲染为 col AS alias）。
 }
 
 func NewField[T any](tableName, columnName string) Field[T] {
 	return Field[T]{tableName: tableName, columnName: columnName}
+}
+
+func (f *Field[T]) BindTable(t *TableBase) {
+	f.table = t
 }
 
 func (f Field[T]) TableName() string {
@@ -47,7 +52,7 @@ func (f Field[T]) Condition() (string, []any) {
 
 func (f Field[T]) render(rc *renderContext) (string, []any) {
 	var sql string
-	if prefix := rc.aliasFor(f.tableName); prefix != "" {
+	if prefix := f.prefix(); prefix != "" {
 		sql = rc.quote(prefix) + "." + rc.quote(f.columnName)
 	} else {
 		sql = rc.quote(f.columnName)
@@ -56,6 +61,15 @@ func (f Field[T]) render(rc *renderContext) (string, []any) {
 		sql += " AS " + f.alias
 	}
 	return sql, nil
+}
+
+func (f Field[T]) prefix() string {
+	if f.table != nil {
+		if alias := f.table.Alias(); alias != "" {
+			return alias
+		}
+	}
+	return f.tableName
 }
 
 type OrderClause struct {
@@ -303,7 +317,7 @@ func (f Field[T]) Div(v T) Expression {
 }
 
 func toAnyField[T any](f Field[T]) Field[any] {
-	return Field[any]{tableName: f.tableName, columnName: f.columnName, alias: f.alias}
+	return Field[any]{table: f.table, tableName: f.tableName, columnName: f.columnName, alias: f.alias}
 }
 
 func toAnySlice[T any](values []T) []any {

@@ -44,12 +44,24 @@ var testUser = &testUserTable{
 func (t *testUserTable) As(alias string) *testUserTable {
 	newT := *t
 	newT.TableBase = t.TableBase.As(alias)
+	newT.ID.BindTable(newT.TableBase)
+	newT.Name.BindTable(newT.TableBase)
+	newT.Age.BindTable(newT.TableBase)
+	newT.Status.BindTable(newT.TableBase)
+	newT.CreatedAt.BindTable(newT.TableBase)
+	newT.DeletedAt.BindTable(newT.TableBase)
 	return &newT
 }
 
 func (t *testUserTable) Clone() *testUserTable {
 	newT := *t
 	newT.TableBase = t.TableBase.Clone()
+	newT.ID.BindTable(newT.TableBase)
+	newT.Name.BindTable(newT.TableBase)
+	newT.Age.BindTable(newT.TableBase)
+	newT.Status.BindTable(newT.TableBase)
+	newT.CreatedAt.BindTable(newT.TableBase)
+	newT.DeletedAt.BindTable(newT.TableBase)
 	return &newT
 }
 
@@ -80,12 +92,20 @@ var testRole = &testRoleTable{
 func (t *testRoleTable) As(alias string) *testRoleTable {
 	newT := *t
 	newT.TableBase = t.TableBase.As(alias)
+	newT.ID.BindTable(newT.TableBase)
+	newT.Name.BindTable(newT.TableBase)
+	newT.Remark.BindTable(newT.TableBase)
+	newT.DeletedAt.BindTable(newT.TableBase)
 	return &newT
 }
 
 func (t *testRoleTable) Clone() *testRoleTable {
 	newT := *t
 	newT.TableBase = t.TableBase.Clone()
+	newT.ID.BindTable(newT.TableBase)
+	newT.Name.BindTable(newT.TableBase)
+	newT.Remark.BindTable(newT.TableBase)
+	newT.DeletedAt.BindTable(newT.TableBase)
 	return &newT
 }
 
@@ -113,11 +133,17 @@ var testUserRole = &testUserRoleTable{
 func (t *testUserRoleTable) As(alias string) *testUserRoleTable {
 	newT := *t
 	newT.TableBase = t.TableBase.As(alias)
+	newT.ID.BindTable(newT.TableBase)
+	newT.UserID.BindTable(newT.TableBase)
+	newT.RoleID.BindTable(newT.TableBase)
 	return &newT
 }
 
 func (t *testUserRoleTable) Clone() *testUserRoleTable {
 	newT := *t
 	newT.TableBase = t.TableBase.Clone()
+	newT.ID.BindTable(newT.TableBase)
+	newT.UserID.BindTable(newT.TableBase)
+	newT.RoleID.BindTable(newT.TableBase)
 	return &newT
 }

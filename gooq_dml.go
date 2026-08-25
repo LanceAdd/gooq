@@ -553,7 +553,6 @@ func (b *DMLBuilder) renderUpdate(rc *renderContext) (string, []any, error) {
 	if len(b.setValues) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
 	}
-	b.registerAliases(rc)
 	var sqlStr string
 	switch {
 	case len(b.joins) == 0:
@@ -727,22 +726,6 @@ func (b *DMLBuilder) renderJoinOn(rc *renderContext, j *joinClause) string {
 		}
 	}
 	return " ON " + strings.Join(ons, " AND ")
-}
-
-func (b *DMLBuilder) registerAliases(rc *renderContext) {
-	multiTable := len(b.joins) > 0
-	if b.table.Alias() != "" {
-		rc.registerAlias(b.table.TableName(), b.table.Alias())
-	} else if multiTable {
-		rc.registerAlias(b.table.TableName(), b.table.TableName())
-	}
-	for _, j := range b.joins {
-		if j.table.Alias() != "" {
-			rc.registerAlias(j.table.TableName(), j.table.Alias())
-		} else {
-			rc.registerAlias(j.table.TableName(), j.table.TableName())
-		}
-	}
 }
 
 func (b *DMLBuilder) renderReturning(rc *renderContext) (string, error) {

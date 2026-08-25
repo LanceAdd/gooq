@@ -84,7 +84,7 @@ func TestDsl_Insert_From(t *testing.T) {
 		sql, _, err := InsertFrom(testUser, Select(testUser.Name).From(testUser).Where(testUser.Age.Gt(18))).
 			ToSql(DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "INSERT INTO `user` (`name`) SELECT `name` FROM `user` WHERE `age` > ? AND `deleted_at` IS NULL")
+		t.Assert(sql, "INSERT INTO `user` (`name`) SELECT `user`.`name` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL")
 	})
 }
 
@@ -96,7 +96,7 @@ func TestDsl_Update_Set(t *testing.T) {
 			Where(testUser.ID.Eq(1)).
 			ToSql(DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` SET `name` = ?, `age` = ? WHERE `id` = ?")
+		t.Assert(sql, "UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?")
 		t.AssertEQ(args, []any{"x", 20, int64(1)})
 	})
 }
@@ -161,15 +161,15 @@ func TestDsl_Delete(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, _, err := Delete(testUser).Where(testUser.ID.Eq(1)).ToSql(DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` SET `deleted_at` = ? WHERE `id` = ?")
+		t.Assert(sql, "UPDATE `user` SET `deleted_at` = ? WHERE `user`.`id` = ?")
 
 		sql, _, err = Delete(testUser).Unscoped().Where(testUser.ID.Eq(1)).ToSql(DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "DELETE FROM `user` WHERE `id` = ?")
+		t.Assert(sql, "DELETE FROM `user` WHERE `user`.`id` = ?")
 
 		sql, _, err = Delete(testUserRole).Where(testUserRole.ID.Eq(1)).ToSql(DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "DELETE FROM `user_role` WHERE `id` = ?")
+		t.Assert(sql, "DELETE FROM `user_role` WHERE `user_role`.`id` = ?")
 
 		sqls, argss, err := Delete(testUser).Records([]testUserRecord{{Id: 1}, {Id: 2}}).renderBatchDML(DialectMySQL)
 		t.AssertNil(err)
@@ -227,13 +227,13 @@ func TestDsl_Returning(t *testing.T) {
 			Returning(testUser.ID).
 			ToSql(DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `UPDATE "user" SET "status" = $1 WHERE "id" = $2 RETURNING "id"`)
+		t.Assert(sql, `UPDATE "user" SET "status" = $1 WHERE "user"."id" = $2 RETURNING "user"."id"`)
 
 		sql, _, err = Insert(testUser).Columns(testUser.Name).Values("a").
 			Returning(testUser.ID).
 			ToSql(DialectSQLite)
 		t.AssertNil(err)
-		t.Assert(sql, `INSERT INTO "user" ("name") VALUES (?) RETURNING "id"`)
+		t.Assert(sql, `INSERT INTO "user" ("name") VALUES (?) RETURNING "user"."id"`)
 
 		_, _, err = Update(testUser).Set(testUser.Status, "vip").Returning(testUser.ID).ToSql(DialectMySQL)
 		t.AssertNE(err, nil)

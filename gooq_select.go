@@ -219,7 +219,7 @@ func (b *SelectBuilder) FieldsEx(fields ...any) *SelectBuilder {
 	if b.from != nil {
 		for _, col := range b.from.AllColumns() {
 			if !excluded[col] {
-				kept = append(kept, NewField[any](b.from.TableName(), col))
+				kept = append(kept, b.from.Field(col))
 				b.columns = append(b.columns, col)
 			}
 		}
@@ -426,6 +426,10 @@ func (c *cteTable) Meta() *TableMeta {
 
 func (c *cteTable) AllColumns() []string {
 	return nil
+}
+
+func (c *cteTable) Field(column string) Field[any] {
+	return Field[any]{tableName: c.name, columnName: column}
 }
 
 func (b *SelectBuilder) Condition() (string, []any) {
@@ -650,7 +654,6 @@ func (b *SelectBuilder) renderGroupExt(rc *renderContext) string {
 }
 
 func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
-	b.registerAliases(rc)
 	var (
 		sql     strings.Builder
 		selects []string
@@ -788,33 +791,6 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 	return sql.String(), rc.args
 }
 
-// registerAliases 收集全部表的别名映射；多表（JOIN）场景下无别名的表注册表名自映射，
-// 使字段渲染自动带表名前缀（避免同名列冲突）。
-func (b *SelectBuilder) registerAliases(rc *renderContext) {
-	multiTable := len(b.joins) > 0
-	if b.from != nil {
-		if b.from.Alias() != "" {
-			rc.registerAlias(b.from.TableName(), b.from.Alias())
-		} else if multiTable {
-			rc.registerAlias(b.from.TableName(), b.from.TableName())
-		}
-		// 派生表无表名（TableName 为空）：注册别名自映射，支撑 t.Field("col") 的前缀渲染。
-		if sub, ok := b.from.(*SelectBuilder); ok {
-			rc.registerAlias(sub.Alias(), sub.Alias())
-		}
-	}
-	for _, j := range b.joins {
-		if j.table.Alias() != "" {
-			rc.registerAlias(j.table.TableName(), j.table.Alias())
-		} else {
-			rc.registerAlias(j.table.TableName(), j.table.TableName())
-		}
-		if sub, ok := j.table.(*SelectBuilder); ok {
-			rc.registerAlias(sub.Alias(), sub.Alias())
-		}
-	}
-}
-
 // renderTable 渲染表或派生表。
 func (b *SelectBuilder) renderTable(rc *renderContext, t Table) string {
 	return renderTableName(rc, t)
@@ -838,7 +814,7 @@ func (b *SelectBuilder) renderWhere(rc *renderContext) string {
 	conditions := b.conditions
 	if !b.unscoped && b.from != nil && b.from.Meta() != nil {
 		if softField := b.from.Meta().SoftDeleteField(); softField != nil && !containsColumn(b.conditions, softField.ColumnName) {
-			conditions = append(conditions, NewField[any](b.from.TableName(), softField.ColumnName).IsNull())
+			conditions = append(conditions, b.from.Field(softField.ColumnName).IsNull())
 		}
 	}
 	var parts []string
