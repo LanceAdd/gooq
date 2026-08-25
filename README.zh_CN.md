@@ -114,7 +114,10 @@ var User = &UserTable{
 | `Insert(t)` + `Columns(字段...).Values(值...)` | 列值位置匹配，多次 `Values` 即批量 |
 | `Batch(size)` | 批量插入分批执行，`RowsAffected` 聚合 |
 | `InsertFrom(t, 子查询)` | INSERT ... SELECT |
-| `Update(t)` | `Set(字段, 值)` / `Data(do)` 部分更新 |
+| `Update(t)` + `Set(字段, 值)` | 单字段链式更新 |
+| `Update(t)` + `Record(实体)` | 非零字段转为 SET（gorm 风格） |
+| `Update(t)` + `Data(map)` | map 全量更新 |
+| `Update(t)` + `Records([]实体)` | 按主键（或 `Keys(...)`）批量更新，`RowsAffected` 聚合 |
 | `Update ... Join` | 多表 UPDATE（MySQL `JOIN`、PG/SQLite `FROM`） |
 | `Delete(t)` | 软删表自动转 `UPDATE deleted_at`；`Unscoped()` 真 DELETE |
 | `Returning(字段...)` | PG/SQLite `RETURNING`（MySQL 渲染报错） |

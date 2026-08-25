@@ -11,7 +11,6 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/text/gstr"
-	"github.com/gogf/gf/v2/util/gconv"
 )
 
 type dmlKind int
@@ -35,20 +34,22 @@ type columnValue struct {
 }
 
 type DMLBuilder struct {
-	ctx           context.Context
-	table         Table
-	kind          dmlKind
-	data          map[string]any
-	insertColumns []string        // Columns 设置的列（当前组）。
-	insertRows    [][]columnValue // INSERT 行数据（保序列值对）。
-	batch         int             // INSERT 分批大小（0 不分批）。
-	selectBuilder *SelectBuilder  // INSERT ... SELECT 数据源。
-	conditions    []Expression
-	unscoped      bool
-	upsert        *upsertClause
-	joins         []*joinClause // UPDATE 多表 JOIN 子句。
-	returning     []Expression  // RETURNING/OUTPUT 返回列。
-	executor      executor      // 执行器（UseDB/UseTX 绑定；nil 时仅离线渲染）。
+	ctx             context.Context
+	table           Table
+	kind            dmlKind
+	insertColumns   []string        // Columns 设置的列（当前组）。
+	insertRows      [][]columnValue // INSERT 行数据（保序列值对）。
+	batch           int             // INSERT 分批大小（0 不分批）。
+	setValues       []columnValue   // UPDATE SET 列值对（保序）。
+	batchUpdateRows [][]columnValue // 批量 UPDATE 数据（每条：列值对）。
+	updateKeys      []string        // 批量 UPDATE 条件列（默认主键）。
+	selectBuilder   *SelectBuilder  // INSERT ... SELECT 数据源。
+	conditions      []Expression
+	unscoped        bool
+	upsert          *upsertClause
+	joins           []*joinClause // UPDATE 多表 JOIN 子句。
+	returning       []Expression  // RETURNING/OUTPUT 返回列。
+	executor        executor      // 执行器（UseDB/UseTX 绑定；nil 时仅离线渲染）。
 }
 
 func Insert(t Table) *DMLBuilder {
@@ -90,15 +91,29 @@ func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
 }
 
 func (b *DMLBuilder) Record(data any) *DMLBuilder {
-	b.insertRows = append(b.insertRows, recordToRow(b.table, data))
+	row := recordToRow(b.table, data, b.kind == dmlInsert)
+	if b.kind == dmlUpdate {
+		b.setValues = append(b.setValues, row...)
+		return b
+	}
+	b.insertRows = append(b.insertRows, row)
 	return b
 }
 
 func (b *DMLBuilder) Records(data any) *DMLBuilder {
 	rv := reflect.ValueOf(data)
-	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
-		for i := 0; i < rv.Len(); i++ {
-			b.insertRows = append(b.insertRows, recordToRow(b.table, rv.Index(i).Interface()))
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+		return b
+	}
+	for i := 0; i < rv.Len(); i++ {
+		row := recordToRow(b.table, rv.Index(i).Interface(), b.kind == dmlInsert)
+		if len(row) == 0 {
+			continue
+		}
+		if b.kind == dmlUpdate {
+			b.batchUpdateRows = append(b.batchUpdateRows, row)
+		} else {
+			b.insertRows = append(b.insertRows, row)
 		}
 	}
 	return b
@@ -109,7 +124,14 @@ func (b *DMLBuilder) Batch(size int) *DMLBuilder {
 	return b
 }
 
-func recordToRow(t Table, data any) []columnValue {
+func (b *DMLBuilder) Keys(fields ...interface{ ColumnName() string }) *DMLBuilder {
+	for _, f := range fields {
+		b.updateKeys = append(b.updateKeys, f.ColumnName())
+	}
+	return b
+}
+
+func recordToRow(t Table, data any, skipAutoIncr bool) []columnValue {
 	rv := reflect.ValueOf(data)
 	for rv.Kind() == reflect.Ptr {
 		if rv.IsNil() {
@@ -127,7 +149,7 @@ func recordToRow(t Table, data any) []columnValue {
 	rt := rv.Type()
 	var row []columnValue
 	for _, fm := range t.Meta().Fields {
-		if fm.ColumnName == autoIncr {
+		if skipAutoIncr && fm.ColumnName == autoIncr {
 			continue
 		}
 		for i := 0; i < rt.NumField(); i++ {
@@ -163,16 +185,18 @@ func (b *DMLBuilder) Clone() *DMLBuilder {
 	newB.joins = cloneJoins(b.joins)
 	newB.returning = append([]Expression(nil), b.returning...)
 	newB.insertColumns = append([]string(nil), b.insertColumns...)
+	newB.setValues = append([]columnValue(nil), b.setValues...)
+	newB.updateKeys = append([]string(nil), b.updateKeys...)
 	if b.insertRows != nil {
 		newB.insertRows = make([][]columnValue, len(b.insertRows))
 		for i, row := range b.insertRows {
 			newB.insertRows[i] = append([]columnValue(nil), row...)
 		}
 	}
-	if b.data != nil {
-		newB.data = make(map[string]any, len(b.data))
-		for k, v := range b.data {
-			newB.data[k] = v
+	if b.batchUpdateRows != nil {
+		newB.batchUpdateRows = make([][]columnValue, len(b.batchUpdateRows))
+		for i, row := range b.batchUpdateRows {
+			newB.batchUpdateRows[i] = append([]columnValue(nil), row...)
 		}
 	}
 	if b.upsert != nil {
@@ -194,7 +218,6 @@ func Update(t Table) *DMLBuilder {
 		ctx:   context.Background(),
 		table: t,
 		kind:  dmlUpdate,
-		data:  make(map[string]any),
 	}
 }
 
@@ -211,15 +234,20 @@ func (b *DMLBuilder) Ctx(ctx context.Context) *DMLBuilder {
 	return b
 }
 
-func (b *DMLBuilder) Data(data any) *DMLBuilder {
-	for k, v := range gconv.Map(data) {
-		b.data[k] = v
+func (b *DMLBuilder) Data(data map[string]any) *DMLBuilder {
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		b.setValues = append(b.setValues, columnValue{column: k, value: data[k]})
 	}
 	return b
 }
 
 func (b *DMLBuilder) Set(field interface{ ColumnName() string }, v any) *DMLBuilder {
-	b.data[field.ColumnName()] = v
+	b.setValues = append(b.setValues, columnValue{column: field.ColumnName(), value: v})
 	return b
 }
 
@@ -301,6 +329,30 @@ func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
 		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Exec")
 	}
 	dialect := b.dmlDialect()
+	if b.kind == dmlUpdate && len(b.batchUpdateRows) > 0 {
+		sqls, argss, err := b.renderBatchUpdate(dialect)
+		if err != nil {
+			return nil, err
+		}
+		if len(sqls) == 0 {
+			return nil, fmt.Errorf("gooq: batch update has no valid records")
+		}
+		var (
+			total      int64
+			lastResult sql.Result
+		)
+		for i, sqlStr := range sqls {
+			result, err := b.executor.Exec(ctx, sqlStr, argss[i]...)
+			if err != nil {
+				return nil, err
+			}
+			if n, err := result.RowsAffected(); err == nil {
+				total += n
+			}
+			lastResult = result
+		}
+		return &batchResult{result: lastResult, affected: total}, nil
+	}
 	if b.kind == dmlInsert && b.batch > 0 && len(b.insertRows) > b.batch {
 		var (
 			total      int64
@@ -375,6 +427,9 @@ func (b *DMLBuilder) ToSql(dialects ...Dialect) (string, []any, error) {
 	var dialect = DialectMySQL
 	if len(dialects) > 0 && dialects[0] != "" {
 		dialect = dialects[0]
+	}
+	if b.kind == dmlUpdate && len(b.batchUpdateRows) > 0 {
+		return "", nil, fmt.Errorf("gooq: batch update renders multiple SQL, use Exec")
 	}
 	rc := newRenderContext(b.ctx, dialect)
 	switch b.kind {
@@ -477,8 +532,17 @@ func valueOf(row []columnValue, column string) any {
 	return nil
 }
 
+func isInStrings(list []string, target string) bool {
+	for _, v := range list {
+		if v == target {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *DMLBuilder) renderUpdate(rc *renderContext) (string, []any, error) {
-	if len(b.data) == 0 {
+	if len(b.setValues) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
 	}
 	b.registerAliases(rc)
@@ -500,6 +564,61 @@ func (b *DMLBuilder) renderUpdate(rc *renderContext) (string, []any, error) {
 		sqlStr += returning
 	}
 	return sqlStr, rc.args, nil
+}
+
+func (b *DMLBuilder) renderBatchUpdate(dialect Dialect) ([]string, [][]any, error) {
+	keys := b.updateKeys
+	if len(keys) == 0 && b.table.Meta() != nil {
+		for _, fm := range b.table.Meta().Fields {
+			if fm.Primary {
+				keys = append(keys, fm.ColumnName)
+			}
+		}
+	}
+	if len(keys) == 0 {
+		return nil, nil, fmt.Errorf("gooq: batch update requires primary key or Keys(...)")
+	}
+	var (
+		sqls  []string
+		argss [][]any
+	)
+	for _, row := range b.batchUpdateRows {
+		var (
+			setCols []string
+			setArgs []any
+			where   []string
+			whereA  []any
+		)
+		for _, cv := range row {
+			if isInStrings(keys, cv.column) {
+				where = append(where, cv.column)
+				whereA = append(whereA, cv.value)
+			} else {
+				setCols = append(setCols, cv.column)
+				setArgs = append(setArgs, cv.value)
+			}
+		}
+		if len(where) == 0 || len(setCols) == 0 {
+			continue
+		}
+		rc := newRenderContext(b.ctx, dialect)
+		placeholders := make([]string, len(setCols))
+		for i := range setCols {
+			placeholders[i] = fmt.Sprintf("%s = %s", setCols[i], rc.addArg(setArgs[i]))
+		}
+		whereParts := make([]string, len(where))
+		for i := range where {
+			whereParts[i] = fmt.Sprintf("%s = %s", where[i], rc.addArg(whereA[i]))
+		}
+		sqls = append(sqls, fmt.Sprintf(
+			"UPDATE %s SET %s WHERE %s",
+			b.table.TableName(),
+			strings.Join(placeholders, ", "),
+			strings.Join(whereParts, " AND "),
+		))
+		argss = append(argss, rc.args)
+	}
+	return sqls, argss, nil
 }
 
 func (b *DMLBuilder) renderDelete(rc *renderContext) (string, []any, error) {
@@ -552,14 +671,9 @@ func (b *DMLBuilder) renderWhere(rc *renderContext) string {
 }
 
 func (b *DMLBuilder) renderSets(rc *renderContext) string {
-	keys := make([]string, 0, len(b.data))
-	for col := range b.data {
-		keys = append(keys, col)
-	}
-	sort.Strings(keys)
 	var sets []string
-	for _, col := range keys {
-		sets = append(sets, fmt.Sprintf(`%s = %s`, col, rc.addArg(b.data[col])))
+	for _, cv := range b.setValues {
+		sets = append(sets, fmt.Sprintf(`%s = %s`, cv.column, rc.addArg(cv.value)))
 	}
 	return strings.Join(sets, ", ")
 }

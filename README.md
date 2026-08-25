@@ -114,7 +114,10 @@ var User = &UserTable{
 | `Insert(t)` + `Columns(fields...).Values(vals...)` | positional columns/values, repeated `Values` for batch |
 | `Batch(size)` | chunked execution for batch inserts, `RowsAffected` aggregated |
 | `InsertFrom(t, subquery)` | INSERT ... SELECT |
-| `Update(t)` | `Set(field, value)` / `Data(do)` partial update |
+| `Update(t)` + `Set(field, value)` | chained single-field updates |
+| `Update(t)` + `Record(entity)` | non-zero fields become SET (gorm-style) |
+| `Update(t)` + `Data(map)` | map full update |
+| `Update(t)` + `Records([]entity)` | batch update by primary key (or `Keys(...)`), `RowsAffected` aggregated |
 | `Update ... Join` | multi-table UPDATE (MySQL `JOIN`, PG/SQLite `FROM`) |
 | `Delete(t)` | soft-delete tables auto-rewrite to `UPDATE deleted_at`; `Unscoped()` for real DELETE |
 | `Returning(fields...)` | PG/SQLite `RETURNING` (MySQL error at render) |
