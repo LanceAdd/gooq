@@ -110,7 +110,9 @@ var User = &UserTable{
 
 | Operation | Notes |
 | --- | --- |
-| `Insert(t, data)` | single / batch (`[]map`/`[]struct`), auto-skips auto-increment columns |
+| `Insert(t)` + `Record(entity)` / `Records([]entity)` | entity struct literals, zero values skipped, auto-skips auto-increment columns |
+| `Insert(t)` + `Columns(fields...).Values(vals...)` | positional columns/values, repeated `Values` for batch |
+| `Batch(size)` | chunked execution for batch inserts, `RowsAffected` aggregated |
 | `InsertFrom(t, subquery)` | INSERT ... SELECT |
 | `Update(t)` | `Set(field, value)` / `Data(do)` partial update |
 | `Update ... Join` | multi-table UPDATE (MySQL `JOIN`, PG/SQLite `FROM`) |
@@ -175,7 +177,8 @@ err := gooq.Select(CountFunc(User.ID)).From(User).
     UseDB(gdb.DB()).Scan(ctx, &count)
 
 // DML.
-_, err = gooq.Insert(User, gooq.Map{"name": "john"}).UseDB(gdb.DB()).Exec(ctx)
+_, err = gooq.Insert(User).Record(model.User{Name: "john"}).UseDB(gdb.DB()).Exec(ctx)
+_, err = gooq.Insert(User).Columns(User.Name, User.Level).Values("john", 2).UseDB(gdb.DB()).Exec(ctx)
 
 // Transaction: UseTX binds the tx connection; commit makes it visible outside.
 tx, _ := db.Begin(ctx)

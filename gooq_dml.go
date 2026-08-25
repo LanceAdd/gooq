@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/text/gstr"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
@@ -28,13 +29,20 @@ type upsertClause struct {
 	doNothing    bool // 冲突时不做任何操作。
 }
 
+type columnValue struct {
+	column string
+	value  any
+}
+
 type DMLBuilder struct {
 	ctx           context.Context
 	table         Table
 	kind          dmlKind
 	data          map[string]any
-	dataList      []map[string]any // 批量 INSERT 数据。
-	selectBuilder *SelectBuilder   // INSERT ... SELECT 数据源。
+	insertColumns []string        // Columns 设置的列（当前组）。
+	insertRows    [][]columnValue // INSERT 行数据（保序列值对）。
+	batch         int             // INSERT 分批大小（0 不分批）。
+	selectBuilder *SelectBuilder  // INSERT ... SELECT 数据源。
 	conditions    []Expression
 	unscoped      bool
 	upsert        *upsertClause
@@ -43,32 +51,12 @@ type DMLBuilder struct {
 	executor      executor      // 执行器（UseDB/UseTX 绑定；nil 时仅离线渲染）。
 }
 
-func Insert(t Table, data any) *DMLBuilder {
-	b := &DMLBuilder{
+func Insert(t Table) *DMLBuilder {
+	return &DMLBuilder{
 		ctx:   context.Background(),
 		table: t,
 		kind:  dmlInsert,
-		data:  make(map[string]any),
 	}
-	switch v := data.(type) {
-	case []map[string]any:
-		for _, row := range v {
-			b.dataList = append(b.dataList, row)
-		}
-	case []any:
-		for _, row := range v {
-			b.dataList = append(b.dataList, gconv.Map(row))
-		}
-	default:
-		if isSliceValue(v) {
-			for _, row := range toSlice(v) {
-				b.dataList = append(b.dataList, gconv.Map(row))
-			}
-		} else {
-			b.data = gconv.Map(v)
-		}
-	}
-	return b
 }
 
 func InsertFrom(t Table, sub *SelectBuilder) *DMLBuilder {
@@ -80,18 +68,93 @@ func InsertFrom(t Table, sub *SelectBuilder) *DMLBuilder {
 	}
 }
 
-func isSliceValue(v any) bool {
-	rv := reflect.ValueOf(v)
-	return rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array
+func (b *DMLBuilder) Columns(fields ...any) *DMLBuilder {
+	for _, f := range fields {
+		if field, ok := f.(interface{ ColumnName() string }); ok {
+			b.insertColumns = append(b.insertColumns, field.ColumnName())
+		}
+	}
+	return b
 }
 
-func toSlice(v any) []any {
-	rv := reflect.ValueOf(v)
-	result := make([]any, rv.Len())
-	for i := 0; i < rv.Len(); i++ {
-		result[i] = rv.Index(i).Interface()
+func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
+	if len(b.insertColumns) == 0 {
+		return b
 	}
-	return result
+	row := make([]columnValue, len(b.insertColumns))
+	for i, col := range b.insertColumns {
+		row[i] = columnValue{column: col, value: values[i]}
+	}
+	b.insertRows = append(b.insertRows, row)
+	return b
+}
+
+func (b *DMLBuilder) Record(data any) *DMLBuilder {
+	b.insertRows = append(b.insertRows, recordToRow(b.table, data))
+	return b
+}
+
+func (b *DMLBuilder) Records(data any) *DMLBuilder {
+	rv := reflect.ValueOf(data)
+	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+		for i := 0; i < rv.Len(); i++ {
+			b.insertRows = append(b.insertRows, recordToRow(b.table, rv.Index(i).Interface()))
+		}
+	}
+	return b
+}
+
+func (b *DMLBuilder) Batch(size int) *DMLBuilder {
+	b.batch = size
+	return b
+}
+
+func recordToRow(t Table, data any) []columnValue {
+	rv := reflect.ValueOf(data)
+	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return nil
+	}
+	if t.Meta() == nil {
+		return nil
+	}
+	autoIncr := autoIncrementColumn(t)
+	rt := rv.Type()
+	var row []columnValue
+	for _, fm := range t.Meta().Fields {
+		if fm.ColumnName == autoIncr {
+			continue
+		}
+		for i := 0; i < rt.NumField(); i++ {
+			f := rt.Field(i)
+			if f.PkgPath != "" || !fieldMatchesColumn(f, fm.ColumnName) {
+				continue
+			}
+			fv := rv.Field(i)
+			if fv.IsZero() {
+				break
+			}
+			row = append(row, columnValue{column: fm.ColumnName, value: fv.Interface()})
+			break
+		}
+	}
+	return row
+}
+
+func fieldMatchesColumn(f reflect.StructField, column string) bool {
+	for _, tag := range []string{"orm", "json"} {
+		if v := f.Tag.Get(tag); v != "" {
+			if strings.Split(v, ",")[0] == column {
+				return true
+			}
+		}
+	}
+	return gstr.CaseSnake(f.Name) == column
 }
 
 func (b *DMLBuilder) Clone() *DMLBuilder {
@@ -99,14 +162,18 @@ func (b *DMLBuilder) Clone() *DMLBuilder {
 	newB.conditions = append([]Expression(nil), b.conditions...)
 	newB.joins = cloneJoins(b.joins)
 	newB.returning = append([]Expression(nil), b.returning...)
+	newB.insertColumns = append([]string(nil), b.insertColumns...)
+	if b.insertRows != nil {
+		newB.insertRows = make([][]columnValue, len(b.insertRows))
+		for i, row := range b.insertRows {
+			newB.insertRows[i] = append([]columnValue(nil), row...)
+		}
+	}
 	if b.data != nil {
 		newB.data = make(map[string]any, len(b.data))
 		for k, v := range b.data {
 			newB.data[k] = v
 		}
-	}
-	if b.dataList != nil {
-		newB.dataList = append([]map[string]any(nil), b.dataList...)
 	}
 	if b.upsert != nil {
 		newUpsert := *b.upsert
@@ -233,11 +300,52 @@ func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
 	if b.executor == nil {
 		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Exec")
 	}
-	sqlStr, args, err := b.ToSql(b.dmlDialect())
+	dialect := b.dmlDialect()
+	if b.kind == dmlInsert && b.batch > 0 && len(b.insertRows) > b.batch {
+		var (
+			total      int64
+			lastResult sql.Result
+		)
+		for start := 0; start < len(b.insertRows); start += b.batch {
+			end := start + b.batch
+			if end > len(b.insertRows) {
+				end = len(b.insertRows)
+			}
+			chunk := *b
+			chunk.insertRows = b.insertRows[start:end]
+			sqlStr, args, err := chunk.ToSql(dialect)
+			if err != nil {
+				return nil, err
+			}
+			result, err := b.executor.Exec(ctx, sqlStr, args...)
+			if err != nil {
+				return nil, err
+			}
+			if n, err := result.RowsAffected(); err == nil {
+				total += n
+			}
+			lastResult = result
+		}
+		return &batchResult{result: lastResult, affected: total}, nil
+	}
+	sqlStr, args, err := b.ToSql(dialect)
 	if err != nil {
 		return nil, err
 	}
 	return b.executor.Exec(ctx, sqlStr, args...)
+}
+
+type batchResult struct {
+	result   sql.Result
+	affected int64
+}
+
+func (r *batchResult) LastInsertId() (int64, error) {
+	return r.result.LastInsertId()
+}
+
+func (r *batchResult) RowsAffected() (int64, error) {
+	return r.affected, nil
 }
 
 func (b *DMLBuilder) Scan(ctx context.Context, dest any) error {
@@ -315,77 +423,28 @@ func (b *DMLBuilder) renderInsertFrom(rc *renderContext) (string, []any, error) 
 }
 
 func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
-	if len(b.dataList) > 0 {
-		return b.renderInsertBatch(rc)
-	}
-	var (
-		columns  []string
-		autoIncr = autoIncrementColumn(b.table)
-	)
-	for col := range b.data {
-		if col == autoIncr {
-			continue
-		}
-		columns = append(columns, col)
-	}
-	if len(columns) == 0 {
+	if len(b.insertRows) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert data is empty")
 	}
-	sort.Strings(columns)
-	values := make([]string, len(columns))
-	for i, col := range columns {
-		values[i] = rc.addArg(b.data[col])
+	columns := make([]string, len(b.insertRows[0]))
+	for i, cv := range b.insertRows[0] {
+		columns[i] = cv.column
 	}
-	insertKeyword := "INSERT"
-	if b.upsert != nil && b.upsert.doNothing && rc.dialect == DialectMySQL {
-		insertKeyword = "INSERT IGNORE"
-	}
-	var sqlStr = fmt.Sprintf(
-		"%s INTO %s (%s) VALUES (%s)",
-		insertKeyword,
-		b.table.TableName(),
-		strings.Join(columns, ", "),
-		strings.Join(values, ", "),
-	)
-	if b.upsert != nil && !(b.upsert.doNothing && rc.dialect == DialectMySQL) {
-		sqlStr += renderUpsertClause(rc, b.upsert, rc.dialect)
-	}
-	if returning, err := b.renderReturning(rc); err != nil {
-		return "", nil, err
-	} else if returning != "" {
-		sqlStr += returning
-	}
-	return sqlStr, rc.args, nil
-}
-
-func (b *DMLBuilder) renderInsertBatch(rc *renderContext) (string, []any, error) {
-	var (
-		columnSet = make(map[string]bool)
-		autoIncr  = autoIncrementColumn(b.table)
-	)
-	for _, row := range b.dataList {
-		for col := range row {
-			if col != autoIncr {
-				columnSet[col] = true
-			}
-		}
-	}
-	columns := make([]string, 0, len(columnSet))
-	for col := range columnSet {
-		columns = append(columns, col)
-	}
-	sort.Strings(columns)
 	if len(columns) == 0 {
-		return "", nil, fmt.Errorf("gooq: insert batch data is empty")
+		return "", nil, fmt.Errorf("gooq: insert columns is empty")
 	}
-	sort.Strings(columns)
-	var rows []string
-	for _, row := range b.dataList {
-		placeholders := make([]string, len(columns))
-		for i, col := range columns {
-			placeholders[i] = rc.addArg(row[col])
+	rows := make([]string, len(b.insertRows))
+	for i, row := range b.insertRows {
+		if len(row) != len(columns) {
+			return "", nil, fmt.Errorf(
+				"gooq: insert values count %d mismatch columns count %d", len(row), len(columns),
+			)
 		}
-		rows = append(rows, "("+strings.Join(placeholders, ", ")+")")
+		placeholders := make([]string, len(columns))
+		for j, col := range columns {
+			placeholders[j] = rc.addArg(valueOf(row, col))
+		}
+		rows[i] = "(" + strings.Join(placeholders, ", ") + ")"
 	}
 	insertKeyword := "INSERT"
 	if b.upsert != nil && b.upsert.doNothing && rc.dialect == DialectMySQL {
@@ -407,6 +466,15 @@ func (b *DMLBuilder) renderInsertBatch(rc *renderContext) (string, []any, error)
 		sqlStr += returning
 	}
 	return sqlStr, rc.args, nil
+}
+
+func valueOf(row []columnValue, column string) any {
+	for _, cv := range row {
+		if cv.column == column {
+			return cv.value
+		}
+	}
+	return nil
 }
 
 func (b *DMLBuilder) renderUpdate(rc *renderContext) (string, []any, error) {
@@ -484,9 +552,14 @@ func (b *DMLBuilder) renderWhere(rc *renderContext) string {
 }
 
 func (b *DMLBuilder) renderSets(rc *renderContext) string {
+	keys := make([]string, 0, len(b.data))
+	for col := range b.data {
+		keys = append(keys, col)
+	}
+	sort.Strings(keys)
 	var sets []string
-	for col, val := range b.data {
-		sets = append(sets, fmt.Sprintf(`%s = %s`, col, rc.addArg(val)))
+	for _, col := range keys {
+		sets = append(sets, fmt.Sprintf(`%s = %s`, col, rc.addArg(b.data[col])))
 	}
 	return strings.Join(sets, ", ")
 }

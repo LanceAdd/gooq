@@ -110,7 +110,9 @@ var User = &UserTable{
 
 | 操作 | 说明 |
 | --- | --- |
-| `Insert(t, data)` | 单行 / 批量（`[]map`/`[]struct`），自动跳过自增列 |
+| `Insert(t)` + `Record(实体)` / `Records([]实体)` | 实体结构体字面量，零值字段跳过，自动跳过自增列 |
+| `Insert(t)` + `Columns(字段...).Values(值...)` | 列值位置匹配，多次 `Values` 即批量 |
+| `Batch(size)` | 批量插入分批执行，`RowsAffected` 聚合 |
 | `InsertFrom(t, 子查询)` | INSERT ... SELECT |
 | `Update(t)` | `Set(字段, 值)` / `Data(do)` 部分更新 |
 | `Update ... Join` | 多表 UPDATE（MySQL `JOIN`、PG/SQLite `FROM`） |
@@ -175,7 +177,8 @@ err := gooq.Select(CountFunc(User.ID)).From(User).
     UseDB(gdb.DB()).Scan(ctx, &count)
 
 // 写操作。
-_, err = gooq.Insert(User, gooq.Map{"name": "john"}).UseDB(gdb.DB()).Exec(ctx)
+_, err = gooq.Insert(User).Record(model.User{Name: "john"}).UseDB(gdb.DB()).Exec(ctx)
+_, err = gooq.Insert(User).Columns(User.Name, User.Level).Values("john", 2).UseDB(gdb.DB()).Exec(ctx)
 
 // 事务：UseTX 绑定事务连接，提交后外部可见。
 tx, _ := db.Begin(ctx)
