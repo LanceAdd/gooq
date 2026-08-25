@@ -195,6 +195,13 @@ sql, args, _ := gooq.Select(User.ID).From(User).Where(User.ID.Eq(1)).ToSql(gooq.
 
 `Scan` maps results with gdb's existing struct conversion (`orm`/`json` tags); `UseDB` can be re-bound for multi-database / read-write splitting. Calling `Scan`/`Exec` without a bound database returns an explicit error.
 
+Convenience executions:
+
+```go
+count, _ := gooq.SelectFrom(User).Where(User.Status.Eq("vip")).UseDB(gdb.DB()).Count(ctx)   // auto COUNT(*)
+exists, _ := gooq.Select(User.ID).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx) // SELECT EXISTS(...)
+```
+
 Row-level typed reads (the field type `T` is consumed at compile time):
 
 ```go

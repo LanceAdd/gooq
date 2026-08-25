@@ -505,6 +505,36 @@ func (b *SelectBuilder) Row(ctx context.Context) (Record, error) {
 	return Record(record), nil
 }
 
+func (b *SelectBuilder) Count(ctx context.Context) (int64, error) {
+	if b.executor == nil {
+		return 0, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Count")
+	}
+	countBuilder := b.Clone()
+	countBuilder.fields = []Expression{Raw("COUNT(*)")}
+	sql, args, err := countBuilder.ToSql(b.dialect())
+	if err != nil {
+		return 0, err
+	}
+	value, err := b.executor.GetValue(ctx, sql, args...)
+	if err != nil {
+		return 0, err
+	}
+	return value.Int64(), nil
+}
+
+func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
+	if b.executor == nil {
+		return false, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Exists")
+	}
+	dialect := b.dialect()
+	subSQL, subArgs := b.renderSelect(newRenderContext(b.ctx, dialect))
+	value, err := b.executor.GetValue(ctx, fmt.Sprintf("SELECT EXISTS (%s)", subSQL), subArgs...)
+	if err != nil {
+		return false, err
+	}
+	return value.Bool(), nil
+}
+
 func (b *SelectBuilder) dialect() Dialect {
 	if b.executor != nil {
 		return autoDialect(b.executor)

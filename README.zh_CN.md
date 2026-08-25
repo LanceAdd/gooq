@@ -195,6 +195,13 @@ sql, args, _ := gooq.Select(User.ID).From(User).Where(User.ID.Eq(1)).ToSql(gooq.
 
 `Scan` 复用 gdb 现有 struct 转换（`orm`/`json` tag）；`UseDB` 可重新绑定以支持多库/读写分离；未绑定数据库时调用 `Scan`/`Exec` 返回明确错误。
 
+执行便捷方法：
+
+```go
+count, _ := gooq.SelectFrom(User).Where(User.Status.Eq("vip")).UseDB(gdb.DB()).Count(ctx)   // 自动补全 COUNT(*)
+exists, _ := gooq.Select(User.ID).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx) // SELECT EXISTS(...)
+```
+
 行级类型化读取（字段类型 T 在编译期被消费）：
 
 ```go
