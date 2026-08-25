@@ -99,6 +99,7 @@ var User = &UserTable{
 ## Expressions & Functions
 
 - **Arithmetic**: `field.Mul(2)` / package-level `Add/Sub/Mul/Div/Negate` (nested supported).
+- **Type cast**: `field.Cast(LocalType)` / package-level `Cast(expr, LocalType)` (type names mapped per dialect: MySQL `SIGNED`, PG `BIGINT`, SQLite `INTEGER`).
 - **Conditional**: `Case().When(cond).Then(v).Else(v).End().As("alias")`.
 - **Function library (30+)**: string (`Concat/Substring/Upper/Lower/Trim/Replace/Length`), math (`Abs/Round/Ceil/Floor/Mod`), date (`CurDate/DateAdd/DateDiff`), aggregate (`Count/Sum/Avg/Min/Max/CountDistinct`), general (`Coalesce/IfNull/Now`).
 - **Window functions**: `Rank/RowNumber/DenseRank/Ntile/Lag/Lead` + `Over(partitionBy, orderBy)` + `OverFrame`.

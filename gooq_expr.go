@@ -176,3 +176,22 @@ func (d *distinctExpr) render(rc *renderContext) (string, []any) {
 func Distinct(e Expression) Expression {
 	return &distinctExpr{expr: e}
 }
+
+type castExpr struct {
+	expr      Expression
+	localType LocalType
+}
+
+func (c *castExpr) Condition() (string, []any) {
+	return c.render(newRenderContext(context.Background(), DialectMySQL))
+}
+
+func (c *castExpr) render(rc *renderContext) (string, []any) {
+	sql, args := rc.render(c.expr)
+	return fmt.Sprintf("CAST(%s AS %s)", sql, castTypeOf(rc, c.localType)), args
+}
+
+// Cast 将表达式转换为目标类型（类型名按方言映射）。
+func Cast(e Expression, t LocalType) Expression {
+	return &castExpr{expr: e, localType: t}
+}

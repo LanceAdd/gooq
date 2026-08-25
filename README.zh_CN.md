@@ -99,6 +99,7 @@ var User = &UserTable{
 ## 表达式与函数
 
 - **算术**：`字段.Mul(2)` / 包级 `Add/Sub/Mul/Div/Negate`（支持嵌套）。
+- **类型转换**：`字段.Cast(LocalType)` / 包级 `Cast(表达式, LocalType)`（类型名按方言映射，MySQL `SIGNED`、PG `BIGINT`、SQLite `INTEGER` 等）。
 - **条件表达式**：`Case().When(条件).Then(v).Else(v).End().As("别名")`。
 - **函数库（30+）**：字符串（`Concat/Substring/Upper/Lower/Trim/Replace/Length`）、数学（`Abs/Round/Ceil/Floor/Mod`）、日期（`CurDate/DateAdd/DateDiff`）、聚合（`Count/Sum/Avg/Min/Max/CountDistinct`）、通用（`Coalesce/IfNull/Now`）。
 - **窗口函数**：`Rank/RowNumber/DenseRank/Ntile/Lag/Lead` + `Over(partitionBy, orderBy)` + `OverFrame`。

@@ -300,6 +300,10 @@ func (f Field[T]) IsNotNull() Expression {
 	return buildFieldCondition(toAnyField(f), opIsNotNull, nil)
 }
 
+func (f Field[T]) Cast(localType LocalType) Expression {
+	return &castExpr{expr: f, localType: localType}
+}
+
 func (f Field[T]) Add(v T) Expression {
 	return &arithExpr{op: arithAdd, left: f, right: v}
 }

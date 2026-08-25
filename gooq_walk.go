@@ -91,6 +91,11 @@ func walkExpression(e Expression, dialect Dialect, visit func(e Expression) erro
 		if err := walkExpression(v.expr, dialect, visit); err != nil {
 			return err
 		}
+	case *castExpr:
+		if err := visit(v); err != nil {
+			return err
+		}
+		return walkExpression(v.expr, dialect, visit)
 	case Fn:
 		if err := visit(v); err != nil {
 			return err

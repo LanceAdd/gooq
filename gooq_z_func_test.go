@@ -217,6 +217,29 @@ func TestDsl_OperatorFunc(t *testing.T) {
 	})
 }
 
+func TestDsl_Cast(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, _, err := Select(testUser.Age.Cast(LocalTypeString)).From(testUser).ToSql(DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT CAST(`user`.`age` AS CHAR) FROM `user` WHERE `user`.`deleted_at` IS NULL")
+
+		sql, _, err = Select(Cast(testUser.Age, LocalTypeInt64)).From(testUser).ToSql(DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT CAST("user"."age" AS BIGINT) FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, args, err := Select(testUser.ID).From(testUser).
+			Where(Eq(testUser.Age.Cast(LocalTypeString), Str("18"))).
+			ToSql(DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE CAST("user"."age" AS TEXT) = '18' AND "user"."deleted_at" IS NULL`)
+		t.Assert(len(args), 0)
+
+		sql, _, err = Select(testUser.CreatedAt.Cast(LocalTypeDatetime)).From(testUser).ToSql(DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT CAST(`user`.`created_at` AS DATETIME) FROM `user` WHERE `user`.`deleted_at` IS NULL")
+	})
+}
+
 func TestDsl_Placeholder_Dialects(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, args, err := Select(testUser.ID).From(testUser).
