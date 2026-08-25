@@ -465,8 +465,8 @@ func (b *DMLBuilder) renderInsertFrom(rc *renderContext) (string, []any, error) 
 	subSQL, _ := b.selectBuilder.renderSelect(rc)
 	var sqlStr = fmt.Sprintf(
 		"INSERT INTO %s (%s) %s",
-		b.table.TableName(),
-		strings.Join(columns, ", "),
+		rc.quote(b.table.TableName()),
+		strings.Join(quoteColumns(rc, columns), ", "),
 		subSQL,
 	)
 	if returning, err := b.renderReturning(rc); err != nil {
@@ -508,8 +508,8 @@ func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
 	var sqlStr = fmt.Sprintf(
 		"%s INTO %s (%s) VALUES %s",
 		insertKeyword,
-		b.table.TableName(),
-		strings.Join(columns, ", "),
+		rc.quote(b.table.TableName()),
+		strings.Join(quoteColumns(rc, columns), ", "),
 		strings.Join(rows, ", "),
 	)
 	if b.upsert != nil && !(b.upsert.doNothing && rc.dialect == DialectMySQL) {
@@ -521,6 +521,14 @@ func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
 		sqlStr += returning
 	}
 	return sqlStr, rc.args, nil
+}
+
+func quoteColumns(rc *renderContext, columns []string) []string {
+	result := make([]string, len(columns))
+	for i, c := range columns {
+		result[i] = rc.quote(c)
+	}
+	return result
 }
 
 func valueOf(row []columnValue, column string) any {
@@ -609,23 +617,23 @@ func (b *DMLBuilder) renderBatchDML(dialect Dialect) ([]string, [][]any, error) 
 			if softField != nil && !b.unscoped {
 				sqlStr = fmt.Sprintf(
 					"UPDATE %s SET %s = %s",
-					b.table.TableName(),
-					softField.ColumnName,
+					rc.quote(b.table.TableName()),
+					rc.quote(softField.ColumnName),
 					rc.addArg(time.Now()),
 				)
 			} else {
-				sqlStr = "DELETE FROM " + b.table.TableName()
+				sqlStr = "DELETE FROM " + rc.quote(b.table.TableName())
 			}
 		default:
 			placeholders := make([]string, len(setCols))
 			for i := range setCols {
-				placeholders[i] = fmt.Sprintf("%s = %s", setCols[i], rc.addArg(setArgs[i]))
+				placeholders[i] = fmt.Sprintf("%s = %s", rc.quote(setCols[i]), rc.addArg(setArgs[i]))
 			}
-			sqlStr = fmt.Sprintf("UPDATE %s SET %s", b.table.TableName(), strings.Join(placeholders, ", "))
+			sqlStr = fmt.Sprintf("UPDATE %s SET %s", rc.quote(b.table.TableName()), strings.Join(placeholders, ", "))
 		}
 		whereParts := make([]string, len(where))
 		for i := range where {
-			whereParts[i] = fmt.Sprintf("%s = %s", where[i], rc.addArg(whereA[i]))
+			whereParts[i] = fmt.Sprintf("%s = %s", rc.quote(where[i]), rc.addArg(whereA[i]))
 		}
 		sqls = append(sqls, sqlStr+" WHERE "+strings.Join(whereParts, " AND "))
 		argss = append(argss, rc.args)
@@ -638,8 +646,8 @@ func (b *DMLBuilder) renderDelete(rc *renderContext) (string, []any, error) {
 		if softField := b.table.Meta().SoftDeleteField(); softField != nil {
 			sqlStr := fmt.Sprintf(
 				"UPDATE %s SET %s = %s",
-				b.table.TableName(),
-				softField.ColumnName,
+				rc.quote(b.table.TableName()),
+				rc.quote(softField.ColumnName),
 				rc.addArg(time.Now()),
 			)
 			if where := b.renderWhere(rc); where != "" {
@@ -653,7 +661,7 @@ func (b *DMLBuilder) renderDelete(rc *renderContext) (string, []any, error) {
 			return sqlStr, rc.args, nil
 		}
 	}
-	var sqlStr = "DELETE FROM " + b.table.TableName()
+	var sqlStr = "DELETE FROM " + rc.quote(b.table.TableName())
 	if where := b.renderWhere(rc); where != "" {
 		sqlStr += " WHERE " + where
 	}
@@ -685,7 +693,7 @@ func (b *DMLBuilder) renderWhere(rc *renderContext) string {
 func (b *DMLBuilder) renderSets(rc *renderContext) string {
 	var sets []string
 	for _, cv := range b.setValues {
-		sets = append(sets, fmt.Sprintf(`%s = %s`, cv.column, rc.addArg(cv.value)))
+		sets = append(sets, fmt.Sprintf(`%s = %s`, rc.quote(cv.column), rc.addArg(cv.value)))
 	}
 	return strings.Join(sets, ", ")
 }
@@ -722,12 +730,17 @@ func (b *DMLBuilder) renderJoinOn(rc *renderContext, j *joinClause) string {
 }
 
 func (b *DMLBuilder) registerAliases(rc *renderContext) {
+	multiTable := len(b.joins) > 0
 	if b.table.Alias() != "" {
 		rc.registerAlias(b.table.TableName(), b.table.Alias())
+	} else if multiTable {
+		rc.registerAlias(b.table.TableName(), b.table.TableName())
 	}
 	for _, j := range b.joins {
 		if j.table.Alias() != "" {
 			rc.registerAlias(j.table.TableName(), j.table.Alias())
+		} else {
+			rc.registerAlias(j.table.TableName(), j.table.TableName())
 		}
 	}
 }
@@ -769,22 +782,22 @@ func renderUpsertClause(rc *renderContext, clause *upsertClause, dialect Dialect
 		if clause.doNothing {
 			return fmt.Sprintf(
 				" ON CONFLICT (%s) DO NOTHING",
-				strings.Join(clause.conflictCols, ", "),
+				strings.Join(quoteColumns(rc, clause.conflictCols), ", "),
 			)
 		}
 		var sets []string
 		for col, val := range clause.updateMap {
-			sets = append(sets, fmt.Sprintf(`%s = %s`, col, rc.addArg(val)))
+			sets = append(sets, fmt.Sprintf(`%s = %s`, rc.quote(col), rc.addArg(val)))
 		}
 		return fmt.Sprintf(
 			" ON CONFLICT (%s) DO UPDATE SET %s",
-			strings.Join(clause.conflictCols, ", "),
+			strings.Join(quoteColumns(rc, clause.conflictCols), ", "),
 			strings.Join(sets, ", "),
 		)
 	default:
 		var sets []string
 		for col := range clause.updateMap {
-			sets = append(sets, fmt.Sprintf(`%s = VALUES(%s)`, col, col))
+			sets = append(sets, fmt.Sprintf(`%s = VALUES(%s)`, rc.quote(col), rc.quote(col)))
 		}
 		return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", ")
 	}

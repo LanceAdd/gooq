@@ -48,9 +48,9 @@ func (f Field[T]) Condition() (string, []any) {
 func (f Field[T]) render(rc *renderContext) (string, []any) {
 	var sql string
 	if prefix := rc.aliasFor(f.tableName); prefix != "" {
-		sql = prefix + "." + f.columnName
+		sql = rc.quote(prefix) + "." + rc.quote(f.columnName)
 	} else {
-		sql = f.columnName
+		sql = rc.quote(f.columnName)
 	}
 	if f.alias != "" {
 		sql += " AS " + f.alias

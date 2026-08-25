@@ -788,10 +788,16 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 	return sql.String(), rc.args
 }
 
-// registerAliases 收集全部表的别名映射。
+// registerAliases 收集全部表的别名映射；多表（JOIN）场景下无别名的表注册表名自映射，
+// 使字段渲染自动带表名前缀（避免同名列冲突）。
 func (b *SelectBuilder) registerAliases(rc *renderContext) {
-	if b.from != nil && b.from.Alias() != "" {
-		rc.registerAlias(b.from.TableName(), b.from.Alias())
+	multiTable := len(b.joins) > 0
+	if b.from != nil {
+		if b.from.Alias() != "" {
+			rc.registerAlias(b.from.TableName(), b.from.Alias())
+		} else if multiTable {
+			rc.registerAlias(b.from.TableName(), b.from.TableName())
+		}
 		// 派生表无表名（TableName 为空）：注册别名自映射，支撑 t.Field("col") 的前缀渲染。
 		if sub, ok := b.from.(*SelectBuilder); ok {
 			rc.registerAlias(sub.Alias(), sub.Alias())
@@ -800,9 +806,11 @@ func (b *SelectBuilder) registerAliases(rc *renderContext) {
 	for _, j := range b.joins {
 		if j.table.Alias() != "" {
 			rc.registerAlias(j.table.TableName(), j.table.Alias())
-			if sub, ok := j.table.(*SelectBuilder); ok {
-				rc.registerAlias(sub.Alias(), sub.Alias())
-			}
+		} else {
+			rc.registerAlias(j.table.TableName(), j.table.TableName())
+		}
+		if sub, ok := j.table.(*SelectBuilder); ok {
+			rc.registerAlias(sub.Alias(), sub.Alias())
 		}
 	}
 }
@@ -818,7 +826,7 @@ func renderTableName(rc *renderContext, t Table) string {
 		subSQL, _ := sub.renderSelect(rc)
 		return "(" + subSQL + ") AS " + sub.alias
 	}
-	var sql = t.TableName()
+	var sql = rc.quote(t.TableName())
 	if t.Alias() != "" {
 		sql += " AS " + t.Alias()
 	}

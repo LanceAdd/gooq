@@ -29,7 +29,7 @@ sql, args, err := gooq.Select(User.ID, User.Name).
     Order(User.ID.Desc()).
     Limit(10).
     ToSql(gooq.DialectMySQL)
-// sql:  SELECT id, name FROM user WHERE age > ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 10
+// sql:  SELECT `id`, `name` FROM `user` WHERE `age` > ? AND `deleted_at` IS NULL ORDER BY `id` DESC LIMIT 10
 // args: []any{18}
 ```
 
