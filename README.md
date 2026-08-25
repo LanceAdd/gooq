@@ -88,7 +88,7 @@ var User = &UserTable{
 | Combining | `AND(...)` / `OR(...)` / `NOT(...)` |
 | Subqueries | `IN (SELECT ...)` / scalar subquery / derived table (`As("t")`) |
 | EXISTS | `Exists(sub)` / `NotExists(sub)` |
-| JOIN | `LeftJoin/RightJoin/InnerJoin/FullJoin(o).On(...)` |
+| JOIN | `LeftJoin/RightJoin/InnerJoin/FullJoin(o).On(...)` / `LeftJoinLateral/InnerJoinLateral` (with On) / `CrossJoinLateral` (no On; InnerLateral maps to CROSS on SQLite) |
 | Group extensions | `GroupRollup/GroupCube/GroupingSets` (dialect-aware) |
 | Ordering / paging | `Order(field.Desc()/Asc().NullsFirst()/NullsLast())` / `Group` / `Having` / `Limit` / `Offset` / `Page` |
 | Set operations | `Union/UnionAll/Intersect/Except` |

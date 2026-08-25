@@ -24,13 +24,19 @@ const (
 	joinRight
 	joinInner
 	joinFull
+	joinLeftLateral
+	joinInnerLateral
+	joinCrossLateral
 )
 
 var joinKeyword = map[joinType]string{
-	joinLeft:  "LEFT JOIN",
-	joinRight: "RIGHT JOIN",
-	joinInner: "INNER JOIN",
-	joinFull:  "FULL JOIN",
+	joinLeft:         "LEFT JOIN",
+	joinRight:        "RIGHT JOIN",
+	joinInner:        "INNER JOIN",
+	joinFull:         "FULL JOIN",
+	joinLeftLateral:  "LEFT JOIN LATERAL",
+	joinInnerLateral: "INNER JOIN LATERAL",
+	joinCrossLateral: "CROSS JOIN LATERAL",
 }
 
 type joinClause struct {
@@ -353,6 +359,18 @@ func (b *SelectBuilder) InnerJoin(t Table) *JoinBuilder[*SelectBuilder] {
 
 func (b *SelectBuilder) FullJoin(t Table) *JoinBuilder[*SelectBuilder] {
 	return b.addJoin(joinFull, t)
+}
+
+func (b *SelectBuilder) LeftJoinLateral(t Table) *JoinBuilder[*SelectBuilder] {
+	return b.addJoin(joinLeftLateral, t)
+}
+
+func (b *SelectBuilder) InnerJoinLateral(t Table) *JoinBuilder[*SelectBuilder] {
+	return b.addJoin(joinInnerLateral, t)
+}
+
+func (b *SelectBuilder) CrossJoinLateral(t Table) *SelectBuilder {
+	return b.addJoin(joinCrossLateral, t).parent
 }
 
 func (b *SelectBuilder) addJoin(joinType joinType, t Table) *JoinBuilder[*SelectBuilder] {
@@ -689,8 +707,12 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 	sql.WriteString(" FROM ")
 	sql.WriteString(b.renderTable(rc, b.from))
 	for _, j := range b.joins {
+		keyword := joinKeyword[j.joinType]
+		if j.joinType == joinInnerLateral && rc.dialect == DialectSQLite {
+			keyword = "CROSS JOIN LATERAL"
+		}
 		sql.WriteString(" ")
-		sql.WriteString(joinKeyword[j.joinType])
+		sql.WriteString(keyword)
 		sql.WriteString(" ")
 		sql.WriteString(b.renderTable(rc, j.table))
 		if len(j.on) > 0 {

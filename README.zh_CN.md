@@ -88,7 +88,7 @@ var User = &UserTable{
 | 组合 | `AND(...)` / `OR(...)` / `NOT(...)` |
 | 子查询 | `IN (SELECT ...)` / 标量子查询 / 派生表（`As("t")`） |
 | EXISTS | `Exists(sub)` / `NotExists(sub)` |
-| JOIN | `LeftJoin/RightJoin/InnerJoin/FullJoin(o).On(...)` |
+| JOIN | `LeftJoin/RightJoin/InnerJoin/FullJoin(o).On(...)` / `LeftJoinLateral/InnerJoinLateral`（可 On）/ `CrossJoinLateral`（无 On，SQLite 下 InnerLateral 映射为 CROSS） |
 | 分组扩展 | `GroupRollup/GroupCube/GroupingSets`（方言感知） |
 | 排序/分页 | `Order(字段.Desc()/Asc().NullsFirst()/NullsLast())` / `Group` / `Having` / `Limit` / `Offset` / `Page` |
 | 集合操作 | `Union/UnionAll/Intersect/Except` |

@@ -104,6 +104,39 @@ func TestDsl_Select_Join(t *testing.T) {
 	})
 }
 
+func TestDsl_Select_Lateral(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		u := testUser.As("u")
+		lt := Select(CountFunc(testUserRole.UserID).As("cnt")).
+			From(testUserRole).Where(testUserRole.UserID.EqExpr(u.ID)).As("lt")
+
+		sql, _, err := Select(u.ID, lt.Field("cnt")).From(u).
+			LeftJoinLateral(lt).On(Raw("1 = 1")).
+			ToSql(DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS u LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt ON 1 = 1 WHERE "u"."deleted_at" IS NULL`)
+
+		sql, _, err = Select(u.ID, lt.Field("cnt")).From(u).
+			InnerJoinLateral(lt).On(Raw("1 = 1")).
+			ToSql(DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `u`.`id`, `lt`.`cnt` FROM `user` AS u INNER JOIN LATERAL (SELECT COUNT(`user_role`.`user_id`) AS cnt FROM `user_role` WHERE `user_role`.`user_id` = `u`.`id`) AS lt ON 1 = 1 WHERE `u`.`deleted_at` IS NULL")
+
+		// SQLite：INNER JOIN LATERAL 语法不支持，映射为 CROSS JOIN LATERAL。
+		sql, _, err = Select(u.ID, lt.Field("cnt")).From(u).
+			InnerJoinLateral(lt).On(Raw("1 = 1")).
+			ToSql(DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS u CROSS JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt ON 1 = 1 WHERE "u"."deleted_at" IS NULL`)
+
+		sql, _, err = Select(u.ID, lt.Field("cnt")).From(u).
+			CrossJoinLateral(lt).
+			ToSql(DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS u CROSS JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt WHERE "u"."deleted_at" IS NULL`)
+	})
+}
+
 func TestDsl_Select_SelfJoin(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		// 自连接：同一表的两个别名实例，字段随实例解析各自前缀。
