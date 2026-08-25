@@ -110,7 +110,7 @@ func (b *DMLBuilder) Records(data any) *DMLBuilder {
 		if len(row) == 0 {
 			continue
 		}
-		if b.kind == dmlUpdate {
+		if b.kind == dmlUpdate || b.kind == dmlDelete {
 			b.batchUpdateRows = append(b.batchUpdateRows, row)
 		} else {
 			b.insertRows = append(b.insertRows, row)
@@ -329,13 +329,13 @@ func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
 		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Exec")
 	}
 	dialect := b.dmlDialect()
-	if b.kind == dmlUpdate && len(b.batchUpdateRows) > 0 {
-		sqls, argss, err := b.renderBatchUpdate(dialect)
+	if (b.kind == dmlUpdate || b.kind == dmlDelete) && len(b.batchUpdateRows) > 0 {
+		sqls, argss, err := b.renderBatchDML(dialect)
 		if err != nil {
 			return nil, err
 		}
 		if len(sqls) == 0 {
-			return nil, fmt.Errorf("gooq: batch update has no valid records")
+			return nil, fmt.Errorf("gooq: batch delete/update has no valid records")
 		}
 		var (
 			total      int64
@@ -428,8 +428,8 @@ func (b *DMLBuilder) ToSql(dialects ...Dialect) (string, []any, error) {
 	if len(dialects) > 0 && dialects[0] != "" {
 		dialect = dialects[0]
 	}
-	if b.kind == dmlUpdate && len(b.batchUpdateRows) > 0 {
-		return "", nil, fmt.Errorf("gooq: batch update renders multiple SQL, use Exec")
+	if (b.kind == dmlUpdate || b.kind == dmlDelete) && len(b.batchUpdateRows) > 0 {
+		return "", nil, fmt.Errorf("gooq: batch delete/update renders multiple SQL, use Exec")
 	}
 	rc := newRenderContext(b.ctx, dialect)
 	switch b.kind {
@@ -566,7 +566,7 @@ func (b *DMLBuilder) renderUpdate(rc *renderContext) (string, []any, error) {
 	return sqlStr, rc.args, nil
 }
 
-func (b *DMLBuilder) renderBatchUpdate(dialect Dialect) ([]string, [][]any, error) {
+func (b *DMLBuilder) renderBatchDML(dialect Dialect) ([]string, [][]any, error) {
 	keys := b.updateKeys
 	if len(keys) == 0 && b.table.Meta() != nil {
 		for _, fm := range b.table.Meta().Fields {
@@ -576,7 +576,7 @@ func (b *DMLBuilder) renderBatchUpdate(dialect Dialect) ([]string, [][]any, erro
 		}
 	}
 	if len(keys) == 0 {
-		return nil, nil, fmt.Errorf("gooq: batch update requires primary key or Keys(...)")
+		return nil, nil, fmt.Errorf("gooq: batch delete/update requires primary key or Keys(...)")
 	}
 	var (
 		sqls  []string
@@ -598,24 +598,36 @@ func (b *DMLBuilder) renderBatchUpdate(dialect Dialect) ([]string, [][]any, erro
 				setArgs = append(setArgs, cv.value)
 			}
 		}
-		if len(where) == 0 || len(setCols) == 0 {
+		if len(where) == 0 || (b.kind == dmlUpdate && len(setCols) == 0) {
 			continue
 		}
 		rc := newRenderContext(b.ctx, dialect)
-		placeholders := make([]string, len(setCols))
-		for i := range setCols {
-			placeholders[i] = fmt.Sprintf("%s = %s", setCols[i], rc.addArg(setArgs[i]))
+		var sqlStr string
+		switch b.kind {
+		case dmlDelete:
+			softField := b.table.Meta().SoftDeleteField()
+			if softField != nil && !b.unscoped {
+				sqlStr = fmt.Sprintf(
+					"UPDATE %s SET %s = %s",
+					b.table.TableName(),
+					softField.ColumnName,
+					rc.addArg(time.Now()),
+				)
+			} else {
+				sqlStr = "DELETE FROM " + b.table.TableName()
+			}
+		default:
+			placeholders := make([]string, len(setCols))
+			for i := range setCols {
+				placeholders[i] = fmt.Sprintf("%s = %s", setCols[i], rc.addArg(setArgs[i]))
+			}
+			sqlStr = fmt.Sprintf("UPDATE %s SET %s", b.table.TableName(), strings.Join(placeholders, ", "))
 		}
 		whereParts := make([]string, len(where))
 		for i := range where {
 			whereParts[i] = fmt.Sprintf("%s = %s", where[i], rc.addArg(whereA[i]))
 		}
-		sqls = append(sqls, fmt.Sprintf(
-			"UPDATE %s SET %s WHERE %s",
-			b.table.TableName(),
-			strings.Join(placeholders, ", "),
-			strings.Join(whereParts, " AND "),
-		))
+		sqls = append(sqls, sqlStr+" WHERE "+strings.Join(whereParts, " AND "))
 		argss = append(argss, rc.args)
 	}
 	return sqls, argss, nil

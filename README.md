@@ -119,7 +119,8 @@ var User = &UserTable{
 | `Update(t)` + `Data(map)` | map full update |
 | `Update(t)` + `Records([]entity)` | batch update by primary key (or `Keys(...)`), `RowsAffected` aggregated |
 | `Update ... Join` | multi-table UPDATE (MySQL `JOIN`, PG/SQLite `FROM`) |
-| `Delete(t)` | soft-delete tables auto-rewrite to `UPDATE deleted_at`; `Unscoped()` for real DELETE |
+| `Delete(t)` + `Where(...)` | soft-delete tables auto-rewrite to `UPDATE deleted_at`; `Unscoped()` for real DELETE |
+| `Delete(t)` + `Records([]entity)` | batch delete by primary key (or `Keys(...)`), soft delete honored |
 | `Returning(fields...)` | PG/SQLite `RETURNING` (MySQL error at render) |
 | Upsert | `OnConflictKey(...)` + `DoUpdate(...)` / `DoNothing()` (MySQL `INSERT IGNORE`/`ON DUPLICATE KEY UPDATE`, PG `ON CONFLICT`) |
 | Soft delete | auto `deleted_at IS NULL`; explicit column reference overrides; `Unscoped()` bypasses |
