@@ -33,6 +33,7 @@ var {{.TplTableNameCamelCase}} = &{{.TplTableNameCamelCase}}Table{
 func (t *{{.TplTableNameCamelCase}}Table) As(alias string) *{{.TplTableNameCamelCase}}Table {
 	newT := *t
 	newT.TableBase = t.TableBase.As(alias)
+{{.TplGooqFieldAliasAssigns}}
 	return &newT
 }
 
@@ -40,5 +41,6 @@ func (t *{{.TplTableNameCamelCase}}Table) As(alias string) *{{.TplTableNameCamel
 func (t *{{.TplTableNameCamelCase}}Table) Clone() *{{.TplTableNameCamelCase}}Table {
 	newT := *t
 	newT.TableBase = t.TableBase.Clone()
+{{.TplGooqFieldAliasAssigns}}
 	return &newT
 }
