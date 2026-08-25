@@ -18,33 +18,33 @@ type {{.TplTableNameCamelCase}}Table struct {
 {{.TplGooqFields}}
 }
 
-func new{{.TplTableNameCamelCase}}Table() *{{.TplTableNameCamelCase}}Table {
-	t := &{{.TplTableNameCamelCase}}Table{TableBase: {{.TplGooqRef}}NewTableBase(&{{.TplGooqRef}}TableMeta{
-		TableName: "{{.TplTableName}}",
-		Schema:    "{{.TplTableSchema}}",
-		Fields: []{{.TplGooqRef}}FieldMeta{
+// {{.TplTableNameCamelCase}}Meta is the static metadata of table {{.TplTableName}}.
+var {{.TplTableNameCamelCase}}Meta = &{{.TplGooqRef}}TableMeta{
+	TableName: "{{.TplTableName}}",
+	Schema:    "{{.TplTableSchema}}",
+	Fields: []{{.TplGooqRef}}FieldMeta{
 {{.TplGooqFieldMetas}}
-		},
-	})}
+	},
+}
+
+func new{{.TplTableNameCamelCase}}Table(alias string) *{{.TplTableNameCamelCase}}Table {
+	t := &{{.TplTableNameCamelCase}}Table{TableBase: {{.TplGooqRef}}NewTableBase({{.TplTableNameCamelCase}}Meta)}
+	if alias != "" {
+		t.TableBase = t.TableBase.As(alias)
+	}
 {{.TplGooqFieldAssigns}}
 	return t
 }
 
 // {{.TplTableNameCamelCase}} is the globally accessible table object for table {{.TplTableName}}.
-var {{.TplTableNameCamelCase}} = new{{.TplTableNameCamelCase}}Table()
+var {{.TplTableNameCamelCase}} = new{{.TplTableNameCamelCase}}Table("")
 
 // As returns a copy of the table object with the given alias.
 func (t *{{.TplTableNameCamelCase}}Table) As(alias string) *{{.TplTableNameCamelCase}}Table {
-	newT := *t
-	newT.TableBase = t.TableBase.As(alias)
-{{.TplGooqFieldAliasAssigns}}
-	return &newT
+	return new{{.TplTableNameCamelCase}}Table(alias)
 }
 
 // Clone returns a copy of the table object without alias.
 func (t *{{.TplTableNameCamelCase}}Table) Clone() *{{.TplTableNameCamelCase}}Table {
-	newT := *t
-	newT.TableBase = t.TableBase.Clone()
-{{.TplGooqFieldAliasAssigns}}
-	return &newT
+	return new{{.TplTableNameCamelCase}}Table("")
 }

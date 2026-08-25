@@ -59,13 +59,12 @@ func generateTableContent(
 	ctx context.Context, db gdb.DB, tableName, dirPathTable string, fieldMap map[string]*gdb.TableField,
 ) (string, error) {
 	var (
-		fieldsLines      []string
-		metaLines        []string
-		assignLines      []string
-		aliasAssignLines []string
-		imports          = make([]string, 0, 4)
-		hasStdTime       bool
-		hasUUID          bool
+		fieldsLines []string
+		metaLines   []string
+		assignLines []string
+		imports     = make([]string, 0, 4)
+		hasStdTime  bool
+		hasUUID     bool
 	)
 	// 包内生成（TplPackageName == "gooq"）时无需包前缀与自引用 import。
 	gooqRef := "gooq."
@@ -101,7 +100,7 @@ func generateTableContent(
 			"\t%-20s %sField[%s]", camelName, gooqRef, goType,
 		))
 		metaLines = append(metaLines, fmt.Sprintf(
-			"\t\t\t{ColumnName: %q, LocalType: %sLocalType(%q)%s%s%s%s},",
+			"\t\t{ColumnName: %q, LocalType: %sLocalType(%q)%s%s%s%s},",
 			fieldName, gooqRef, localType,
 			boolSuffix("Primary", primary),
 			boolSuffix("AutoIncrement", autoIncrement),
@@ -110,9 +109,6 @@ func generateTableContent(
 		))
 		assignLines = append(assignLines, fmt.Sprintf(
 			"\tt.%s = %sNewFieldAt[%s](t.TableBase, %q)", camelName, gooqRef, goType, fieldName,
-		))
-		aliasAssignLines = append(aliasAssignLines, fmt.Sprintf(
-			"\tnewT.%s.BindTable(newT.TableBase)", camelName,
 		))
 	}
 	if hasStdTime {
@@ -130,17 +126,16 @@ func generateTableContent(
 	}
 	tplView.ClearAssigns()
 	tplView.Assigns(gview.Params{
-		"TplPackageName":           tplPackageName,
-		"TplGooqRef":               gooqRef,
-		"TplGooqImport":            tplGooqImport,
-		"TplTableNameCamelCase":    formatFieldName(tableName, FieldNameCaseCamel),
-		"TplTableName":             tableName,
-		"TplTableSchema":           currentSchema(ctx, db),
-		"TplGooqFields":            strings.Join(fieldsLines, "\n"),
-		"TplGooqFieldMetas":        strings.Join(metaLines, "\n"),
-		"TplGooqFieldAssigns":      strings.Join(assignLines, "\n"),
-		"TplGooqFieldAliasAssigns": strings.Join(aliasAssignLines, "\n"),
-		"TplGooqImports":           strings.Join(imports, "\n"),
+		"TplPackageName":        tplPackageName,
+		"TplGooqRef":            gooqRef,
+		"TplGooqImport":         tplGooqImport,
+		"TplTableNameCamelCase": formatFieldName(tableName, FieldNameCaseCamel),
+		"TplTableName":          tableName,
+		"TplTableSchema":        currentSchema(ctx, db),
+		"TplGooqFields":         strings.Join(fieldsLines, "\n"),
+		"TplGooqFieldMetas":     strings.Join(metaLines, "\n"),
+		"TplGooqFieldAssigns":   strings.Join(assignLines, "\n"),
+		"TplGooqImports":        strings.Join(imports, "\n"),
 	})
 	return tplView.ParseContent(ctx, tplContent)
 }

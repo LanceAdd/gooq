@@ -21,18 +21,23 @@ type testUserTable struct {
 	DeletedAt Field[time.Time]
 }
 
-func newTestUserTable() *testUserTable {
-	t := &testUserTable{TableBase: NewTableBase(&TableMeta{
-		TableName: "user",
-		Fields: []FieldMeta{
-			{ColumnName: "id", LocalType: LocalTypeInt64, Primary: true, AutoIncrement: true},
-			{ColumnName: "name", LocalType: LocalTypeString},
-			{ColumnName: "age", LocalType: LocalTypeInt},
-			{ColumnName: "status", LocalType: LocalTypeString},
-			{ColumnName: "created_at", LocalType: LocalTypeDatetime},
-			{ColumnName: "deleted_at", LocalType: LocalTypeDatetime, SoftDelete: true},
-		},
-	})}
+var testUserMeta = &TableMeta{
+	TableName: "user",
+	Fields: []FieldMeta{
+		{ColumnName: "id", LocalType: LocalTypeInt64, Primary: true, AutoIncrement: true},
+		{ColumnName: "name", LocalType: LocalTypeString},
+		{ColumnName: "age", LocalType: LocalTypeInt},
+		{ColumnName: "status", LocalType: LocalTypeString},
+		{ColumnName: "created_at", LocalType: LocalTypeDatetime},
+		{ColumnName: "deleted_at", LocalType: LocalTypeDatetime, SoftDelete: true},
+	},
+}
+
+func newTestUserTable(alias string) *testUserTable {
+	t := &testUserTable{TableBase: NewTableBase(testUserMeta)}
+	if alias != "" {
+		t.TableBase = t.TableBase.As(alias)
+	}
 	t.ID = NewFieldAt[int64](t.TableBase, "id")
 	t.Name = NewFieldAt[string](t.TableBase, "name")
 	t.Age = NewFieldAt[int](t.TableBase, "age")
@@ -42,30 +47,14 @@ func newTestUserTable() *testUserTable {
 	return t
 }
 
-var testUser = newTestUserTable()
+var testUser = newTestUserTable("")
 
 func (t *testUserTable) As(alias string) *testUserTable {
-	newT := *t
-	newT.TableBase = t.TableBase.As(alias)
-	newT.ID.BindTable(newT.TableBase)
-	newT.Name.BindTable(newT.TableBase)
-	newT.Age.BindTable(newT.TableBase)
-	newT.Status.BindTable(newT.TableBase)
-	newT.CreatedAt.BindTable(newT.TableBase)
-	newT.DeletedAt.BindTable(newT.TableBase)
-	return &newT
+	return newTestUserTable(alias)
 }
 
 func (t *testUserTable) Clone() *testUserTable {
-	newT := *t
-	newT.TableBase = t.TableBase.Clone()
-	newT.ID.BindTable(newT.TableBase)
-	newT.Name.BindTable(newT.TableBase)
-	newT.Age.BindTable(newT.TableBase)
-	newT.Status.BindTable(newT.TableBase)
-	newT.CreatedAt.BindTable(newT.TableBase)
-	newT.DeletedAt.BindTable(newT.TableBase)
-	return &newT
+	return newTestUserTable("")
 }
 
 type testRoleTable struct {
@@ -76,16 +65,21 @@ type testRoleTable struct {
 	DeletedAt Field[time.Time]
 }
 
-func newTestRoleTable() *testRoleTable {
-	t := &testRoleTable{TableBase: NewTableBase(&TableMeta{
-		TableName: "role",
-		Fields: []FieldMeta{
-			{ColumnName: "id", LocalType: LocalTypeInt64, Primary: true},
-			{ColumnName: "name", LocalType: LocalTypeString, Unique: true},
-			{ColumnName: "remark", LocalType: LocalTypeString},
-			{ColumnName: "deleted_at", LocalType: LocalTypeDatetime, SoftDelete: true},
-		},
-	})}
+var testRoleMeta = &TableMeta{
+	TableName: "role",
+	Fields: []FieldMeta{
+		{ColumnName: "id", LocalType: LocalTypeInt64, Primary: true},
+		{ColumnName: "name", LocalType: LocalTypeString, Unique: true},
+		{ColumnName: "remark", LocalType: LocalTypeString},
+		{ColumnName: "deleted_at", LocalType: LocalTypeDatetime, SoftDelete: true},
+	},
+}
+
+func newTestRoleTable(alias string) *testRoleTable {
+	t := &testRoleTable{TableBase: NewTableBase(testRoleMeta)}
+	if alias != "" {
+		t.TableBase = t.TableBase.As(alias)
+	}
 	t.ID = NewFieldAt[int64](t.TableBase, "id")
 	t.Name = NewFieldAt[string](t.TableBase, "name")
 	t.Remark = NewFieldAt[string](t.TableBase, "remark")
@@ -93,26 +87,14 @@ func newTestRoleTable() *testRoleTable {
 	return t
 }
 
-var testRole = newTestRoleTable()
+var testRole = newTestRoleTable("")
 
 func (t *testRoleTable) As(alias string) *testRoleTable {
-	newT := *t
-	newT.TableBase = t.TableBase.As(alias)
-	newT.ID.BindTable(newT.TableBase)
-	newT.Name.BindTable(newT.TableBase)
-	newT.Remark.BindTable(newT.TableBase)
-	newT.DeletedAt.BindTable(newT.TableBase)
-	return &newT
+	return newTestRoleTable(alias)
 }
 
 func (t *testRoleTable) Clone() *testRoleTable {
-	newT := *t
-	newT.TableBase = t.TableBase.Clone()
-	newT.ID.BindTable(newT.TableBase)
-	newT.Name.BindTable(newT.TableBase)
-	newT.Remark.BindTable(newT.TableBase)
-	newT.DeletedAt.BindTable(newT.TableBase)
-	return &newT
+	return newTestRoleTable("")
 }
 
 type testUserRoleTable struct {
@@ -122,39 +104,34 @@ type testUserRoleTable struct {
 	RoleID Field[int64]
 }
 
-func newTestUserRoleTable() *testUserRoleTable {
-	t := &testUserRoleTable{TableBase: NewTableBase(&TableMeta{
-		TableName: "user_role",
-		Fields: []FieldMeta{
-			{ColumnName: "id", LocalType: LocalTypeInt64, Primary: true},
-			{ColumnName: "user_id", LocalType: LocalTypeInt64},
-			{ColumnName: "role_id", LocalType: LocalTypeInt64},
-		},
-	})}
+var testUserRoleMeta = &TableMeta{
+	TableName: "user_role",
+	Fields: []FieldMeta{
+		{ColumnName: "id", LocalType: LocalTypeInt64, Primary: true},
+		{ColumnName: "user_id", LocalType: LocalTypeInt64},
+		{ColumnName: "role_id", LocalType: LocalTypeInt64},
+	},
+}
+
+func newTestUserRoleTable(alias string) *testUserRoleTable {
+	t := &testUserRoleTable{TableBase: NewTableBase(testUserRoleMeta)}
+	if alias != "" {
+		t.TableBase = t.TableBase.As(alias)
+	}
 	t.ID = NewFieldAt[int64](t.TableBase, "id")
 	t.UserID = NewFieldAt[int64](t.TableBase, "user_id")
 	t.RoleID = NewFieldAt[int64](t.TableBase, "role_id")
 	return t
 }
 
-var testUserRole = newTestUserRoleTable()
+var testUserRole = newTestUserRoleTable("")
 
 func (t *testUserRoleTable) As(alias string) *testUserRoleTable {
-	newT := *t
-	newT.TableBase = t.TableBase.As(alias)
-	newT.ID.BindTable(newT.TableBase)
-	newT.UserID.BindTable(newT.TableBase)
-	newT.RoleID.BindTable(newT.TableBase)
-	return &newT
+	return newTestUserRoleTable(alias)
 }
 
 func (t *testUserRoleTable) Clone() *testUserRoleTable {
-	newT := *t
-	newT.TableBase = t.TableBase.Clone()
-	newT.ID.BindTable(newT.TableBase)
-	newT.UserID.BindTable(newT.TableBase)
-	newT.RoleID.BindTable(newT.TableBase)
-	return &newT
+	return newTestUserRoleTable("")
 }
 
 // schemaUserTable 是带 schema 的最小测试表（schema 渲染专用）。
@@ -164,32 +141,29 @@ type schemaUserTable struct {
 	Name Field[string]
 }
 
-func newSchemaUserTable() *schemaUserTable {
-	t := &schemaUserTable{TableBase: NewTableBase(&TableMeta{
-		TableName: "user",
-		Schema:    "public",
-		Fields: []FieldMeta{
-			{ColumnName: "id", LocalType: LocalTypeInt64, Primary: true},
-			{ColumnName: "name", LocalType: LocalTypeString},
-		},
-	})}
+var schemaUserMeta = &TableMeta{
+	TableName: "user",
+	Schema:    "public",
+	Fields: []FieldMeta{
+		{ColumnName: "id", LocalType: LocalTypeInt64, Primary: true},
+		{ColumnName: "name", LocalType: LocalTypeString},
+	},
+}
+
+func newSchemaUserTable(alias string) *schemaUserTable {
+	t := &schemaUserTable{TableBase: NewTableBase(schemaUserMeta)}
+	if alias != "" {
+		t.TableBase = t.TableBase.As(alias)
+	}
 	t.ID = NewFieldAt[int64](t.TableBase, "id")
 	t.Name = NewFieldAt[string](t.TableBase, "name")
 	return t
 }
 
 func (t *schemaUserTable) As(alias string) *schemaUserTable {
-	newT := *t
-	newT.TableBase = t.TableBase.As(alias)
-	newT.ID.BindTable(newT.TableBase)
-	newT.Name.BindTable(newT.TableBase)
-	return &newT
+	return newSchemaUserTable(alias)
 }
 
 func (t *schemaUserTable) Clone() *schemaUserTable {
-	newT := *t
-	newT.TableBase = t.TableBase.Clone()
-	newT.ID.BindTable(newT.TableBase)
-	newT.Name.BindTable(newT.TableBase)
-	return &newT
+	return newSchemaUserTable("")
 }

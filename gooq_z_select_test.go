@@ -57,7 +57,7 @@ func TestDsl_Select_AllFields_FieldsEx(t *testing.T) {
 
 func TestDsl_Schema(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		su := newSchemaUserTable()
+		su := newSchemaUserTable("")
 
 		sql, _, err := Select(su.ID, su.Name).From(su).Where(su.ID.Eq(1)).ToSql(DialectPgsql)
 		t.AssertNil(err)

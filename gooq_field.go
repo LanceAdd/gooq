@@ -21,10 +21,6 @@ func NewFieldAt[T any](t *TableBase, column string) Field[T] {
 	return Field[T]{table: t, tableName: t.meta.TableName, columnName: column}
 }
 
-func (f *Field[T]) BindTable(t *TableBase) {
-	f.table = t
-}
-
 func (f Field[T]) TableName() string {
 	return f.tableName
 }
