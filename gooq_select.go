@@ -532,6 +532,7 @@ func (b *SelectBuilder) validate(dialect Dialect) error {
 		switch b.groupExt {
 		case groupExtCube, groupExtGroupingSets:
 			return fmt.Errorf("gooq: GROUP BY %s is not supported by dialect mysql", groupExtKeyword(b.groupExt))
+		default:
 		}
 	}
 	visit := func(e Expression) error {
@@ -586,8 +587,9 @@ func groupExtKeyword(k groupExtKind) string {
 		return "CUBE"
 	case groupExtGroupingSets:
 		return "GROUPING SETS"
+	default:
+		return ""
 	}
-	return ""
 }
 
 func (b *SelectBuilder) renderGroupExt(rc *renderContext) string {
@@ -612,8 +614,9 @@ func (b *SelectBuilder) renderGroupExt(rc *renderContext) string {
 			setParts = append(setParts, "("+strings.Join(fields, ", ")+")")
 		}
 		return "GROUPING SETS(" + strings.Join(setParts, ", ") + ")"
+	default:
+		return ""
 	}
-	return ""
 }
 
 func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
@@ -736,10 +739,10 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 			sql.WriteString(rc.dialectInfo.RenderLimit(rc, b.limit, b.offset))
 		} else {
 			sql.WriteString(" LIMIT ")
-			fmt.Fprintf(&sql, "%d", b.limit)
+			_, _ = fmt.Fprintf(&sql, "%d", b.limit)
 			if b.offset > 0 {
 				sql.WriteString(" OFFSET ")
-				fmt.Fprintf(&sql, "%d", b.offset)
+				_, _ = fmt.Fprintf(&sql, "%d", b.offset)
 			}
 		}
 	}
@@ -749,6 +752,7 @@ func (b *SelectBuilder) renderSelect(rc *renderContext) (string, []any) {
 			sql.WriteString(" FOR UPDATE")
 		case lockInShareMode:
 			sql.WriteString(" " + rc.shareLockKeyword())
+		default:
 		}
 	}
 	return sql.String(), rc.args
