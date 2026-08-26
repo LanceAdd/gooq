@@ -1,28 +1,75 @@
 # gooq
 
-`gooq` 是 GoFrame 的类型化 SQL 查询 DSL，灵感来自 [jOOQ](https://www.jooq.org/)。
+`gooq` 是面向 [GoFrame](https://goframe.org) 的类型安全 SQL 查询 DSL，灵感来自 [jOOQ](https://www.jooq.org/)。
 
-它以类型安全的方式构建 SQL——`Select`/`From`/条件/子查询/函数/离线渲染，不依赖任何数据库实例。生成的 SQL 由调用方自选执行方式（标准库 `database/sql`、`gdb` 等）。
+- **类型安全** — `Field[T]` 在编译期携带列类型，`User.Age.Gt(18)` 编译通过，`User.Age.Gt("x")` 直接报错。
+- **离线渲染** — `ToSql(dialect)` 在任何环境产出 SQL + 参数，不连库；执行方式任选（标准库、gdb、gooq 内置融合执行）。
+- **方言感知** — 内置 MySQL / PostgreSQL / SQLite，驱动可通过 `RegisterDialect` 增量覆盖渲染细节。
+- **运行时零猜测** — 软删除自动条件、自增列跳过、全列派生全部来自生成期静态化的 `TableMeta`。
 
-## 特性
-
-- **纯 SQL 构建器**：渲染不连库，`ToSql(dialect)` 离线产出 SQL + 参数。
-- **类型化字段**：`Field[T]` 在编译期携带列类型，比较方法（`Eq(v T)`、`Gt(v T)` 等）编译期拦截类型不匹配；表达式操作数（子查询、列比较、`Raw`）走显式 `EqExpr`/`InExpr` 方法。
-- **条件一等对象**：条件可独立构建、复用、动态组装，配合 `AND(...)`/`OR(...)`/`NOT(...)`。
-- **方言注册表**：内置 MySQL/PG/SQLite；驱动通过 `RegisterDialect` 注册方言以覆盖渲染细节。
-- **离线设计**：软删除自动条件、自增列跳过、`AllFields()` 全列派生全部来自 `TableMeta`——生成期静态化的元数据，运行时零猜测。
+下文所有示例的渲染输出均来自测试断言，可直接运行验证。
 
 ## 快速开始
 
+### 1. 生成表对象
+
+```bash
+cd cmd/ggen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
+```
+
+一次生成所有表的三类产物：`do/`（DO 结构体）、`entity/`（实体，带 `json`/`orm` tag）、`table/`（类型化表对象）。
+
+### 2. 手写表对象（或直接用生成产物）
+
 ```go
-import (
-    "github.com/gogf/gf/v2/database/gooq"
-)
+type UserTable struct {
+    *gooq.TableBase
+    ID        gooq.Field[int64]
+    Name      gooq.Field[string]
+    Age       gooq.Field[int]
+    Status    gooq.Field[string]
+    CreatedAt gooq.Field[time.Time]
+    DeletedAt gooq.Field[time.Time] // 标记为软删列
+}
 
-// 类型化表对象（由 ggen 生成，或参考 gooq_example_table.go）。
-var User = ... // UserTable{ID: Field[int64], Name: Field[string], ...}
+var UserMeta = &gooq.TableMeta{
+    TableName: "user",
+    Fields: []gooq.FieldMeta{
+        {ColumnName: "id", LocalType: gooq.LocalTypeInt64, Primary: true, AutoIncrement: true},
+        {ColumnName: "name", LocalType: gooq.LocalTypeString},
+        {ColumnName: "age", LocalType: gooq.LocalTypeInt},
+        {ColumnName: "status", LocalType: gooq.LocalTypeString},
+        {ColumnName: "created_at", LocalType: gooq.LocalTypeDatetime},
+        {ColumnName: "deleted_at", LocalType: gooq.LocalTypeDatetime, SoftDelete: true},
+    },
+}
 
-// 离线构建 SQL。
+// 构造函数模式：字段经 NewFieldAt 绑定实例，As/Clone 一行重建。
+func newUserTable(alias string) *UserTable {
+    t := &UserTable{TableBase: gooq.NewTableBase(UserMeta)}
+    if alias != "" {
+        t.TableBase = t.TableBase.As(alias)
+    }
+    t.ID = gooq.NewFieldAt[int64](t.TableBase, "id")
+    t.Name = gooq.NewFieldAt[string](t.TableBase, "name")
+    t.Age = gooq.NewFieldAt[int](t.TableBase, "age")
+    t.Status = gooq.NewFieldAt[string](t.TableBase, "status")
+    t.CreatedAt = gooq.NewFieldAt[time.Time](t.TableBase, "created_at")
+    t.DeletedAt = gooq.NewFieldAt[time.Time](t.TableBase, "deleted_at")
+    return t
+}
+
+var User = newUserTable("") // 包级表对象
+
+func (t *UserTable) As(alias string) *UserTable    { return newUserTable(alias) } // JOIN / 自连接
+func (t *UserTable) Clone() *UserTable             { return newUserTable("") }
+```
+
+### 3. 第一个查询
+
+```go
+import "github.com/lanceadd/gooq"
+
 sql, args, err := gooq.Select(User.ID, User.Name).
     From(User).
     Where(User.Age.Gt(18)).
@@ -33,120 +80,402 @@ sql, args, err := gooq.Select(User.ID, User.Name).
 // args: []any{18}
 ```
 
-SQL 的执行方式任选：
+`deleted_at IS NULL` 自动出现——软删条件来自 `TableMeta`，无需手动过滤。`ToSql()` 不传方言时默认 MySQL 渲染。
+
+### 4. 执行
 
 ```go
-// 标准库
+// 标准库或任意驱动。
 rows, _ := db.Query(sql, args...)
 
-// 或 gdb
-result, _ := gdb.Instance().GetAll(ctx, sql, args...)
+// 或 gdb 融合：绑定数据库直接扫描。
+users := []model.User{}
+err := gooq.Select(User.AllFields()).From(User).
+    UseDB(gdb.DB()).
+    Where(User.Age.Gt(18)).
+    Scan(ctx, &users)
 ```
 
-## 表对象
+## 查询
 
-类型化表对象由 `ggen` 工具（`database/gooq/cmd/ggen`）从数据库表结构生成，也可用 `TableBase` + `TableMeta` 手写：
+### 基础
 
 ```go
-type UserTable struct {
-    *gooq.TableBase
-    ID        gooq.Field[int64]
-    Name      gooq.Field[string]
-    Age       gooq.Field[int]
-    DeletedAt gooq.Field[*gtime.Time]
-}
+// 全列 / 差集 / 别名 / 去重
+gooq.Select(User.AllFields()).From(User)                                     // SELECT `user`.`id`, `user`.`name`, ...
+gooq.Select(User.ID).From(User).FieldsEx(User.CreatedAt, User.DeletedAt)     // 差集：其余列
+gooq.Select(User.Name.As("nickname")).From(User)                             // SELECT `user`.`name` AS nickname
+gooq.Select(User.ID).From(User).Distinct()                                   // SELECT DISTINCT ...
 
-var User = &UserTable{
-    TableBase: gooq.NewTableBase(&gooq.TableMeta{
-        TableName: "user",
-        Fields: []gooq.FieldMeta{
-            {ColumnName: "id", LocalType: gooq.LocalTypeInt64, Primary: true, AutoIncrement: true},
-            {ColumnName: "name", LocalType: gooq.LocalTypeString},
-            {ColumnName: "deleted_at", LocalType: gooq.LocalTypeDatetime, SoftDelete: true},
-        },
-    }),
-    ID:        gooq.NewField[int64]("user", "id"),
-    Name:      gooq.NewField[string]("user", "name"),
-    Age:       gooq.NewField[int]("user", "age"),
-    DeletedAt: gooq.NewField[*gtime.Time]("user", "deleted_at"),
-}
+// 分页
+gooq.Select(User.ID).From(User).Limit(10)              // ... LIMIT 10
+gooq.Select(User.ID).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
+gooq.Select(User.ID).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（页码从 1 起）
+
+// 排序（NullsFirst/NullsLast 仅 PG 渲染）
+gooq.Select(User.ID).From(User).Order(User.Age.Desc(), User.ID.Asc()).ToSql(gooq.DialectPgsql)
+// SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL ORDER BY "user"."age" DESC, "user"."id" ASC
+gooq.Select(User.ID).From(User).Order(User.Age.Desc().NullsLast()).ToSql(gooq.DialectPgsql)
+// ... ORDER BY "user"."age" DESC NULLS LAST
 ```
 
-- `As(alias)` 返回带别名的副本（用于 JOIN 与自连接）；`Clone()` 返回无别名副本。
-- `AllFields()` 从 `TableMeta` 派生全列 `[]Field[any]`——可直接 `Select(User.AllFields())`，也可组合：`Select(u.AllFields(), o.Amount)`。
-- `TableMeta` 静态承载列元数据（主键/自增/软删/唯一/注释），供软删除自动条件、自增列跳过、`FieldsEx` 差集使用。
-- **Schema 限定**：`TableMeta.Schema` 非空时渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；ggen 仅 PG 生成 schema（`current_schema()`），MySQL/SQLite 留空。
-- 生成代码为构造函数模式：静态元数据独立为 `UserMeta` 变量，`newUserTable(alias)` 构造时字段经 `NewFieldAt[T](TableBase, 列名)` 绑定实例；`As`/`Clone` 即重新构造（各一行），无逐字段重绑；`NewField(table, column)` 为无表场景逃生舱。
+### 条件
 
-## 查询 DSL
+```go
+// 字段操作符：值类型 T 编译期强约束。
+User.Age.Gt(18)                       // `user`.`age` > ?
+User.Age.Between(18, 60)              // `user`.`age` BETWEEN ? AND ?
+User.Status.In("vip", "admin")        // `user`.`status` IN (?, ?)
+User.Name.Like("j%")                  // `user`.`name` LIKE ?
+User.DeletedAt.IsNull()               // `user`.`deleted_at` IS NULL
 
-| 能力 | 示例 |
-| --- | --- |
-| 入口 | `Select(字段...).From(t)` / `SelectFrom(t)` |
-| 字段 | `Fields(...)` / `FieldsEx(...)`（集合差集）/ `字段.As("别名")` / `AllFields()` |
-| 条件 | `Where(条件...)`（默认 AND）/ `And(...)` / `Or(...)` |
-| 字段操作符 | `Eq/Ne/Gt/Gte/Lt/Lte/Like/NotLike/In/NotIn/Between/IsNull/IsNotNull`（值类型强约束） |
-| 表达式操作符 | `EqExpr/NeExpr/GtExpr/.../BetweenExpr`（子查询、列比较、`Raw`） |
-| 组合 | `AND(...)` / `OR(...)` / `NOT(...)` |
-| 子查询 | `IN (SELECT ...)` / 标量子查询 / 派生表（`As("t")`） |
-| EXISTS | `Exists(sub)` / `NotExists(sub)` |
-| JOIN | `LeftJoin/RightJoin/InnerJoin/FullJoin(o).On(...)` / `LeftJoinLateral/InnerJoinLateral`（可 On）/ `CrossJoinLateral`（无 On，SQLite 下 InnerLateral 映射为 CROSS） |
-| 分组扩展 | `GroupRollup/GroupCube/GroupingSets`（方言感知） |
-| 排序/分页 | `Order(字段.Desc()/Asc().NullsFirst()/NullsLast())` / `Group` / `Having` / `Limit` / `Offset` / `Page` |
-| 集合操作 | `Union/UnionAll/Intersect/Except` |
-| CTE | `With(name, sub).From(Cte(name))` / `WithRecursive` |
-| 行锁 | `LockForUpdate()` / `LockInShareMode()` |
-| 去重 | `Distinct()` |
+// 表达式操作数（列比较、子查询、Raw）走 EqExpr 系列。
+OrderItem.UserID.EqExpr(User.ID)      // `order_item`.`user_id` = `user`.`id`
+User.ID.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
 
-## 表达式与函数
+// 组合：AND / OR / NOT。
+gooq.Select(User.ID).From(User).
+    Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
+    And(User.Name.Like("j%")).
+    ToSql(gooq.DialectMySQL)
+// ... WHERE (`user`.`age` < ? OR `user`.`status` = ?) AND `user`.`name` LIKE ? AND `user`.`deleted_at` IS NULL
+// args: []any{18, "vip", "j%"}
 
-- **算术**：`字段.Mul(2)` / 包级 `Add/Sub/Mul/Div/Negate`（支持嵌套）。
-- **类型转换**：`字段.Cast(LocalType)` / 包级 `Cast(表达式, LocalType)`（类型名按方言映射，MySQL `SIGNED`、PG `BIGINT`、SQLite `INTEGER` 等）。
-- **条件表达式**：`Case().When(条件).Then(v).Else(v).End().As("别名")`。
-- **函数库（30+）**：字符串（`Concat/Substring/Upper/Lower/Trim/Replace/Length`）、数学（`Abs/Round/Ceil/Floor/Mod`）、日期（`CurDate/DateAdd/DateDiff`）、聚合（`Count/Sum/Avg/Min/Max/CountDistinct`）、通用（`Coalesce/IfNull/Now`）。
-- **窗口函数**：`Rank/RowNumber/DenseRank/Ntile/Lag/Lead` + `Over(partitionBy, orderBy)` + `OverFrame`。
-- **字符串聚合**：`GroupConcatFunc`（按方言渲染 GROUP_CONCAT / STRING_AGG）。
-- **自定义操作符**：`OperatorFunc(name, impl, drivers...)` 注册 + `Func(name, args...)` 调用。
-- **Raw**：`Raw(sql, args...)` 结构化 SQL，支持参数绑定。
+// 动态组装：Clone 复用基准构建器。
+base := gooq.Select(User.ID).From(User)
+q1 := base.Clone().Where(User.Age.Gt(18))
+q2 := base.Clone().Where(User.Status.Eq("vip")) // 互不干扰
+```
 
-## 写操作（DML）
+### JOIN
 
-| 操作 | 说明 |
-| --- | --- |
-| `Insert(t)` + `Record(实体)` / `Records([]实体)` | 实体结构体字面量，零值字段跳过，自动跳过自增列 |
-| `Insert(t)` + `Columns(字段...).Values(值...)` | 列值位置匹配，多次 `Values` 即批量 |
-| `Batch(size)` | 批量插入分批执行，`RowsAffected` 聚合 |
-| `InsertFrom(t, 子查询)` | INSERT ... SELECT |
-| `Update(t)` + `Set(字段, 值)` | 单字段链式更新 |
-| `Update(t)` + `Record(实体)` | 非零字段转为 SET（gorm 风格） |
-| `Update(t)` + `Data(map)` | map 全量更新 |
-| `Update(t)` + `Records([]实体)` | 按主键（或 `Keys(...)`）批量更新，`RowsAffected` 聚合 |
-| `Update ... Join` | 多表 UPDATE（MySQL `JOIN`、PG/SQLite `FROM`） |
-| `Delete(t)` + `Where(...)` | 软删表自动转 `UPDATE deleted_at`；`Unscoped()` 真 DELETE |
-| `Delete(t)` + `Records([]实体)` | 按主键（或 `Keys(...)`）批量删除，软删同样生效 |
-| `Returning(字段...)` | PG/SQLite `RETURNING`（MySQL 渲染报错） |
-| Upsert | `OnConflictKey(...)` + `DoUpdate(...)` / `DoNothing()`（MySQL `INSERT IGNORE`/`ON DUPLICATE KEY UPDATE`，PG `ON CONFLICT`） |
-| 软删除 | 自动 `deleted_at IS NULL`；显式引用列名接管；`Unscoped()` 绕过 |
+```go
+u := User.As("u")
+ur := UserRole.As("ur")
+r := Role.As("r")
+
+gooq.Select(u.ID, r.Name).From(u).
+    InnerJoin(ur).On(ur.UserID.EqExpr(u.ID)).
+    InnerJoin(r).On(r.ID.EqExpr(ur.RoleID)).
+    Where(r.Name.Eq("admin")).
+    ToSql(gooq.DialectMySQL)
+// SELECT `u`.`id`, `r`.`name` FROM `user` AS u INNER JOIN `user_role` AS ur ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS r ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL
+
+// 自连接：同一表的两个别名实例。
+u1 := User.As("u1")
+u2 := User.As("u2")
+gooq.Select(u1.ID, u2.ID).From(u1).InnerJoin(u2).On(u1.ID.EqExpr(u2.ID))
+// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS u1 INNER JOIN `user` AS u2 ON `u1`.`id` = `u2`.`id`
+
+// LATERAL 派生表（InnerLateral 在 SQLite 下映射为 CROSS JOIN LATERAL）。
+lt := gooq.Select(gooq.CountFunc(UserRole.UserID).As("cnt")).
+    From(UserRole).Where(UserRole.UserID.EqExpr(u.ID)).As("lt")
+gooq.Select(u.ID, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).ToSql(gooq.DialectPgsql)
+// ... LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt ON 1 = 1 ...
+```
+
+### 子查询
+
+```go
+sub := gooq.Select(Role.ID).From(Role).Where(Role.Name.Eq("admin"))
+
+gooq.Select(User.ID).From(User).Where(User.ID.InExpr(sub))
+// ... WHERE `user`.`id` IN (SELECT `role`.`id` FROM `role` WHERE `role`.`name` = ? AND `role`.`deleted_at` IS NULL) ...
+
+gooq.Select(User.ID).From(User).Where(gooq.Exists(sub))
+// ... WHERE EXISTS (SELECT ...) ...
+gooq.Select(User.ID).From(User).Where(gooq.NotExists(sub))
+
+// 派生表。
+gooq.Select(User.ID).From(
+    gooq.Select(User.ID).From(User).Where(User.Age.Gt(18)).As("t"),
+)
+// SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS t
+
+// 相关子查询：子查询内引用外层别名。
+u := User.As("u")
+ur := UserRole.As("ur")
+gooq.Select(u.ID).From(u).Where(gooq.Exists(
+    gooq.Select(ur.UserID).From(ur).Where(ur.UserID.EqExpr(u.ID)),
+))
+// ... WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS ur WHERE `ur`.`user_id` = `u`.`id`) ...
+```
+
+### 分组聚合
+
+```go
+gooq.Select(User.Status, gooq.CountFunc(User.ID)).
+    From(User).
+    Group(User.Status).
+    Having(gooq.Gt(gooq.CountFunc(User.ID), 2)).
+    ToSql(gooq.DialectMySQL)
+// SELECT `user`.`status`, COUNT(`user`.`id`) FROM `user` WHERE `user`.`deleted_at` IS NULL GROUP BY `user`.`status` HAVING COUNT(`user`.`id`) > ?
+// args: []any{2}
+
+// 分组扩展（方言感知：Rollup 支持 MySQL/PG，Cube/GroupingSets 仅 PG，MySQL 渲染报错）。
+gooq.Select(User.Status).From(User).GroupRollup(User.Status).ToSql(gooq.DialectMySQL)
+// ... GROUP BY `user`.`status` WITH ROLLUP
+gooq.Select(User.Status).From(User).GroupCube(User.Status).ToSql(gooq.DialectPgsql)
+// ... GROUP BY CUBE("user"."status")
+```
+
+### 集合操作与 CTE
+
+```go
+gooq.Select(User.ID).From(User).Where(User.Age.Eq(1)).
+    UnionAll(gooq.Select(User.ID).From(User).Where(User.Age.Eq(2)))
+// ... UNION ALL ...
+
+gooq.Select(User.ID).From(User).
+    Intersect(gooq.Select(User.ID).From(User)).
+    Except(gooq.Select(User.ID).From(User))
+// ... INTERSECT ... EXCEPT ...
+
+// CTE / 递归 CTE。
+gooq.With("adults", gooq.Select(User.ID).From(User).Where(User.Age.Gt(18))).
+    Fields(gooq.Cte("adults").Field("id")).From(gooq.Cte("adults")).ToSql(gooq.DialectPgsql)
+// WITH adults AS (SELECT "user"."id" FROM "user" WHERE "user"."age" > $1 AND "user"."deleted_at" IS NULL) SELECT "adults"."id" FROM "adults"
+
+gooq.WithRecursive("t", gooq.Select(User.ID).From(User).Where(User.ID.Eq(1)))
+// WITH RECURSIVE t AS (...)
+```
+
+### 表达式与函数
+
+```go
+// 字符串 / 数学 / 日期 / 聚合 / 通用。
+gooq.ConcatFunc(User.Name, gooq.Str(","), User.Status)   // CONCAT(`user`.`name`, ',', `user`.`status`)
+gooq.CoalesceFunc(User.Name, gooq.Str("unknown"))        // COALESCE(`user`.`name`, 'unknown')
+gooq.SubstringFunc(User.Name, 1, 3)                      // SUBSTRING(`user`.`name`, ?, ?)
+gooq.DateDiffFunc(User.CreatedAt, gooq.NowFunc())        // DATEDIFF(`user`.`created_at`, NOW())
+gooq.CountDistinctFunc(User.Status)                      // COUNT(DISTINCT `user`.`status`)
+
+// 日期格式化跨方言：同一种写法，三个库各自渲染。
+gooq.Select(gooq.DateFormatFunc(User.CreatedAt, "%Y-%m-%d")).From(User).ToSql(gooq.DialectMySQL)
+// SELECT DATE_FORMAT(`user`.`created_at`, '%Y-%m-%d') FROM ...
+gooq.Select(gooq.DateFormatFunc(User.CreatedAt, "%Y-%m-%d")).From(User).ToSql(gooq.DialectPgsql)
+// SELECT TO_CHAR("user"."created_at", 'YYYY-MM-DD') FROM ...
+gooq.Select(gooq.DateFormatFunc(User.CreatedAt, "%Y-%m-%d")).From(User).ToSql(gooq.DialectSQLite)
+// SELECT strftime('%Y-%m-%d', "user"."created_at") FROM ...
+
+// 字符串聚合（MySQL GROUP_CONCAT / PG STRING_AGG / SQLite GROUP_CONCAT）。
+gooq.GroupConcatFunc(gooq.GroupConcatOptions{
+    Field: User.Name, Separator: "-", OrderBy: []gooq.OrderClause{User.Name.Asc()},
+}).ToSql(...)  // GROUP_CONCAT(`user`.`name` ORDER BY `user`.`name` ASC SEPARATOR '-')
+
+// 窗口函数。
+gooq.RankFunc().Over([]gooq.Expression{User.Status}, []gooq.OrderClause{User.Age.Desc()}).As("r")
+// RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r
+gooq.RowNumberFunc().Over(nil, []gooq.OrderClause{User.ID.Asc()})
+// ROW_NUMBER() OVER (ORDER BY `user`.`id` ASC)
+gooq.SumFunc(User.Age).OverFrame(
+    []gooq.Expression{User.Status},
+    []gooq.OrderClause{User.ID.Asc()},
+    gooq.RowsFrame("UNBOUNDED PRECEDING", "CURRENT ROW"),
+)
+// SUM(`user`.`age`) OVER (PARTITION BY `user`.`status` ORDER BY `user`.`id` ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+
+// CASE 条件表达式。
+gooq.Case().When(User.Age.Gt(60)).Then(gooq.Str("old")).
+    When(User.Age.Gt(18)).Then(gooq.Str("adult")).
+    Else(gooq.Str("young")).End().As("bucket")
+// CASE WHEN `user`.`age` > ? THEN 'old' WHEN `user`.`age` > ? THEN 'adult' ELSE 'young' END AS bucket
+
+// 算术与类型转换。
+User.Age.Mul(2)                                 // (`user`.`age` * ?)
+gooq.Add(User.Age, gooq.Mul(2, User.Age))       // (`user`.`age` + (? * `user`.`age`))
+gooq.Negate(User.Age)                           // (-`user`.`age`)
+User.Age.Cast(gooq.LocalTypeString)             // CAST(`user`.`age` AS CHAR)（PG: BIGINT / SQLite: TEXT）
+
+// Raw：结构化 SQL，参数绑定。
+gooq.Raw("JSON_EXTRACT(data, ?)", "$.name")
+gooq.Select(User.ID).From(User).Where(gooq.Raw("age > ?", 18))
+
+// 自定义操作符：注册 + 调用。
+gooq.OperatorFunc("JSON_EXTRACT", func(ctx context.Context, args ...any) (string, []any, error) {
+    return fmt.Sprintf("JSON_EXTRACT(%s, %s)", args[0], args[1]), nil, nil
+}, "mysql")
+gooq.Select(gooq.Func("JSON_EXTRACT", User.Name, gooq.Str("$.key"))).From(User)
+// SELECT JSON_EXTRACT(`user`.`name`, '$.key') FROM ...
+```
+
+### 行锁
+
+```go
+gooq.Select(User.ID).From(User).LockForUpdate().ToSql(gooq.DialectMySQL)   // ... FOR UPDATE
+gooq.Select(User.ID).From(User).LockInShareMode().ToSql(gooq.DialectMySQL) // ... LOCK IN SHARE MODE
+gooq.Select(User.ID).From(User).LockInShareMode().ToSql(gooq.DialectPgsql) // ... FOR SHARE
+gooq.Select(User.ID).From(User).LockForUpdate().ToSql(gooq.DialectSQLite)  // SQLite 忽略
+```
+
+## 写操作
+
+### 插入
+
+```go
+// 实体记录：零值字段与自增列自动跳过。
+gooq.Insert(User).Record(model.User{Name: "john", Age: 18})
+// INSERT INTO `user` (`name`, `age`) VALUES (?, ?)
+
+// 列值对应 + 多次 Values 批量。
+gooq.Insert(User).Columns(User.Name, User.Age).Values("a", 1).Values("b", 2)
+// INSERT INTO `user` (`name`, `age`) VALUES (?, ?), (?, ?)
+
+// Record 与 Columns/Values 可混用。
+gooq.Insert(User).Record(model.User{Name: "a", Age: 1}).Columns(User.Name, User.Age).Values("b", 2)
+
+// 批量执行：分批提交，RowsAffected 聚合。
+gooq.Insert(User).Records([]model.User{{Name: "a"}, {Name: "b"}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
+
+// INSERT ... SELECT。
+gooq.InsertFrom(User, gooq.Select(User.Name).From(User).Where(User.Age.Gt(18)))
+// INSERT INTO `user` (`name`) SELECT `user`.`name` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL
+```
+
+### 更新
+
+```go
+// 链式 Set。
+gooq.Update(User).Set(User.Name, "x").Set(User.Age, 20).Where(User.ID.Eq(1))
+// UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?
+
+// 实体记录：非零字段转为 SET（gorm 风格）。
+gooq.Update(User).Record(model.User{Name: "x", Age: 20})
+// UPDATE `user` SET `name` = ?, `age` = ?
+
+// map 全量更新。
+gooq.Update(User).Data(map[string]any{"age": 1, "name": "x"})
+// UPDATE `user` SET `age` = ?, `name` = ?
+
+// 按主键批量（或 Keys(...) 自定义键），RowsAffected 聚合。
+gooq.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
+// UPDATE `user` SET `name` = ? WHERE `id` = ?  ×2
+
+// 多表更新（MySQL JOIN / PG+SQLite FROM）。
+u := User.As("u"); r := Role.As("r")
+gooq.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.ID.EqExpr(u.ID)).ToSql(gooq.DialectMySQL)
+// UPDATE `user` AS u INNER JOIN `role` AS r ON `r`.`id` = `u`.`id` SET `status` = ?
+gooq.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.ID.EqExpr(u.ID)).ToSql(gooq.DialectPgsql)
+// UPDATE "user" AS u SET "status" = $1 FROM "role" AS r WHERE "r"."id" = "u"."id"
+```
+
+### 删除
+
+```go
+// 软删表：DELETE 自动转 UPDATE deleted_at。
+gooq.Delete(User).Where(User.ID.Eq(1))
+// UPDATE `user` SET `deleted_at` = ? WHERE `user`.`id` = ?
+
+// Unscoped()：真删除。
+gooq.Delete(User).Unscoped().Where(User.ID.Eq(1))
+// DELETE FROM `user` WHERE `user`.`id` = ?
+
+// 非软删表直接 DELETE。
+gooq.Delete(UserRole).Where(UserRole.ID.Eq(1))
+// DELETE FROM `user_role` WHERE `user_role`.`id` = ?
+
+// 按主键批量删除（软删同样生效）。
+gooq.Delete(User).Records([]model.User{{Id: 1}, {Id: 2}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
+```
+
+### Upsert 与 Returning
+
+```go
+// MySQL：ON DUPLICATE KEY UPDATE。
+gooq.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
+    OnConflictKey(User.ID).DoUpdate(User.Name, "x").ToSql(gooq.DialectMySQL)
+// INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)
+
+// MySQL：INSERT IGNORE。
+gooq.Insert(User).Columns(User.Name).Values("a").DoNothing().ToSql(gooq.DialectMySQL)
+// INSERT IGNORE INTO `user` (`name`) VALUES (?)
+
+// PG：ON CONFLICT。
+gooq.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
+    OnConflictKey(User.ID).DoUpdate(User.Name, "x").ToSql(gooq.DialectPgsql)
+// INSERT INTO "user" ("name", "age") VALUES ($1, $2) ON CONFLICT ("id") DO UPDATE SET "name" = $3
+gooq.Insert(User).Columns(User.Name).Values("a").
+    OnConflictKey(User.ID).DoNothing().ToSql(gooq.DialectPgsql)
+// INSERT INTO "user" ("name") VALUES ($1) ON CONFLICT ("id") DO NOTHING
+
+// Returning：PG / SQLite（MySQL 渲染报错）。
+gooq.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).
+    Returning(User.ID).ToSql(gooq.DialectPgsql)
+// UPDATE "user" SET "status" = $1 WHERE "user"."id" = $2 RETURNING "user"."id"
+```
+
+## 执行（gooq + gdb 融合）
+
+```go
+// 查询 + 扫描到 struct 切片 / 标量。
+users := []model.User{}
+err := gooq.Select(User.AllFields()).From(User).
+    UseDB(gdb.DB()).Where(User.Age.Gt(18)).Order(User.ID.Desc()).Limit(10).
+    Scan(ctx, &users)
+
+count := int64(0)
+err = gooq.Select(gooq.CountFunc(User.ID)).From(User).UseDB(gdb.DB()).Scan(ctx, &count)
+
+// 写操作。
+_, err = gooq.Insert(User).Record(model.User{Name: "john"}).UseDB(gdb.DB()).Exec(ctx)
+_, err = gooq.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).UseDB(gdb.DB()).Exec(ctx)
+
+// 事务：UseTX 绑定事务连接。
+tx, _ := gdb.DB().Begin(ctx)
+_, err = gooq.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).UseTX(tx).Exec(ctx)
+tx.Commit()
+
+// 便捷方法：Count 自动补全 COUNT(*)，Exists 包装 SELECT EXISTS(...)。
+total, err := gooq.SelectFrom(User).Where(User.Status.Eq("vip")).UseDB(gdb.DB()).Count(ctx)
+exists, err := gooq.Select(User.ID).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx)
+
+// 行级类型化读取：类型 T 在编译期被消费。
+row, err := gooq.Select(User.ID, User.Name, User.Age).From(User).
+    Where(User.Name.Eq("john")).UseDB(gdb.DB()).Row(ctx)
+id := gooq.Get(row, User.ID)      // int64
+name := gooq.Get(row, User.Name)  // string
+
+// 方言从 gdb 驱动名自动推导；UseDB 可重新绑定以支持多库/读写分离。
+```
+
+### 缓存
+
+```go
+// 全局注入缓存适配器（如 gredis 实现）。
+gooq.SetCacheAdapter(redisAdapter)
+gooq.SetHashCacheAdapter(redisHashAdapter)
+
+// 查询走缓存：未命中执行并回填；缓存故障不阻断主查询。
+err := gooq.Select(User.AllFields()).From(User).
+    Cache(gooq.CacheOption{Duration: time.Minute}).
+    UseDB(gdb.DB()).Scan(ctx, &users)
+
+// 分页缓存：同条件同排序跨页共享 key（自定义 Name 优先）。
+err = gooq.SelectFrom(User).Where(User.Status.Eq("vip")).
+    Order(User.ID.Desc()).
+    PageCache(gooq.CacheOption{Name: "users:vip"}).
+    UseDB(gdb.DB()).Page(1, 10).Scan(ctx, &page)
+```
 
 ## 方言
 
-| 方言 | 占位符 | 引号 | 分页 | 共享锁 |
-| --- | --- | --- | --- | --- |
-| mysql | `?` | `` ` `` | LIMIT | LOCK IN SHARE MODE |
-| pgsql | `$n` | `"` | LIMIT | FOR SHARE |
-| sqlite | `?` | `"` | LIMIT | — |
+| 方言 | 占位符 | 引号 | 分页 |
+| --- | --- | --- | --- |
+| mysql | `?` | `` ` `` | LIMIT |
+| pgsql | `$n` | `"` | LIMIT |
+| sqlite | `?` | `"` | LIMIT |
 
-未注册方言回退默认渲染；驱动可 `RegisterDialect` 增量覆盖内置方言。
+- 未注册方言回退默认渲染；驱动可 `RegisterDialect` 增量覆盖内置方言。
+- 带 schema 的表渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；ggen 仅对 PG 填充 schema（`current_schema()`）。
+- 方言敏感行为均内置处理：分页（LIMIT/OFFSET）、`NullsFirst/NullsLast`（仅 PG）、行锁（`FOR UPDATE`/`LOCK IN SHARE MODE`/`FOR SHARE`）、LATERAL 映射（SQLite `INNER JOIN LATERAL` → `CROSS JOIN LATERAL`）、Upsert 语法、`DATE_FORMAT`/`TO_CHAR`/`strftime`、`GROUP_CONCAT`/`STRING_AGG`。
 
 ## ggen（代码生成工具）
 
-`cmd/ggen` 连接数据库后一次性生成所有表的三类产物：`do/`（DO 结构体）、`entity/`（带 `json`/`orm` tag 的实体，`time.Time`）、`table/`（gooq 类型化表对象）：
-
 ```bash
-cd cmd/ggen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db"
+cd cmd/ggen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-- 参数：`-l/--link`（数据库连接，必填）、`-p/--path`（输出目录，默认 `internal`）、`-t/--tpl`（导出内置模板到 `./template` 便于定制后退出；生成时本地模板优先于内置模板）。
+- `-l/--link` 数据库连接（必填）；`-p/--path` 输出目录（默认 `internal`）；`-t/--tpl` 导出内置模板到 `./template` 便于定制（本地模板优先于内置模板）。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；Go 命名规范（`id` → `ID`）。
 - 内置驱动：mysql/pgsql/sqlite；其他驱动取消 `internal/cmd/cmd.go` 中 import 注释启用。
 
@@ -158,61 +487,6 @@ cd cmd/ggen && go test ./...       # ggen 端到端（sqlite）
 cd test && go test ./...           # 集成测试（真实 MySQL，使用 test/generate 产物）
 ```
 
-`test/generate/` 存放 ggen 从 MySQL `test` 库生成的产物（连接配置见 `test/generate_test.go`）；重新生成：
+## License
 
-```bash
-cd cmd/ggen && go run . -l "mysql:root:xxx@tcp(127.0.0.1:3306)/test?loc=Local&parseTime=true" -p ../test/generate
-```
-
-## 执行（gooq + gdb 融合）
-
-`gooq` 构建 SQL 并可直接对 `gdb` 执行——`UseDB`/`UseTX` 绑定数据库后 `Scan`/`Exec`；方言从 gdb 驱动名自动推导，离线 `ToSql` 路径保留：
-
-```go
-// 查询 + 映射到 struct 切片。
-users := []model.User{}
-err := gooq.Select(User.AllFields()).From(User).
-    UseDB(gdb.DB()).
-    Where(User.Age.Gt(18)).
-    Order(User.ID.Desc()).
-    Limit(10).
-    Scan(ctx, &users)
-
-// 标量（COUNT 等）。
-count := int64(0)
-err := gooq.Select(CountFunc(User.ID)).From(User).
-    UseDB(gdb.DB()).Scan(ctx, &count)
-
-// 写操作。
-_, err = gooq.Insert(User).Record(model.User{Name: "john"}).UseDB(gdb.DB()).Exec(ctx)
-_, err = gooq.Insert(User).Columns(User.Name, User.Level).Values("john", 2).UseDB(gdb.DB()).Exec(ctx)
-
-// 事务：UseTX 绑定事务连接，提交后外部可见。
-tx, _ := db.Begin(ctx)
-_, err = gooq.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).UseTX(tx).Exec(ctx)
-tx.Commit()
-
-// 离线路径不变（不绑定数据库，仅渲染）。
-sql, args, _ := gooq.Select(User.ID).From(User).Where(User.ID.Eq(1)).ToSql(gooq.DialectMySQL)
-```
-
-`Scan` 复用 gdb 现有 struct 转换（`orm`/`json` tag）；`UseDB` 可重新绑定以支持多库/读写分离；未绑定数据库时调用 `Scan`/`Exec` 返回明确错误。
-
-执行便捷方法：
-
-```go
-count, _ := gooq.SelectFrom(User).Where(User.Status.Eq("vip")).UseDB(gdb.DB()).Count(ctx)   // 自动补全 COUNT(*)
-exists, _ := gooq.Select(User.ID).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx) // SELECT EXISTS(...)
-```
-
-行级类型化读取（字段类型 T 在编译期被消费）：
-
-```go
-row, err := gooq.Select(User.ID, User.Name, User.Age).From(User).
-    Where(User.Name.Eq("john")).UseDB(gdb.DB()).Row(ctx)
-id := gooq.Get(row, User.ID)     // int64 —— 类型来自 Field[int64]
-name := gooq.Get(row, User.Name) // string
-age := gooq.Get(row, User.Age)   // int
-```
-
-缓存：配置 `Cache` 选项并注入全局 `CacheAdapter` 后，`Scan` 走缓存读取（未命中执行并回填；缓存故障不阻断主查询）。
+MIT

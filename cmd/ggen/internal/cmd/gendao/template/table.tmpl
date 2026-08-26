@@ -27,17 +27,17 @@ var {{.TplTableNameCamelCase}}Meta = &{{.TplGooqRef}}TableMeta{
 	},
 }
 
-func new{{.TplTableNameCamelCase}}Table(alias string) *{{.TplTableNameCamelCase}}Table {
+func new{{.TplTableNameCamelCase}}Table(alias ...string) *{{.TplTableNameCamelCase}}Table {
 	t := &{{.TplTableNameCamelCase}}Table{TableBase: {{.TplGooqRef}}NewTableBase({{.TplTableNameCamelCase}}Meta)}
-	if alias != "" {
-		t.TableBase = t.TableBase.As(alias)
+	if len(alias) > 0 {
+		t.TableBase = t.TableBase.As(alias[0])
 	}
 {{.TplGooqFieldAssigns}}
 	return t
 }
 
 // {{.TplTableNameCamelCase}} is the globally accessible table object for table {{.TplTableName}}.
-var {{.TplTableNameCamelCase}} = new{{.TplTableNameCamelCase}}Table("")
+var {{.TplTableNameCamelCase}} = new{{.TplTableNameCamelCase}}Table()
 
 // As returns a copy of the table object with the given alias.
 func (t *{{.TplTableNameCamelCase}}Table) As(alias string) *{{.TplTableNameCamelCase}}Table {
@@ -46,5 +46,5 @@ func (t *{{.TplTableNameCamelCase}}Table) As(alias string) *{{.TplTableNameCamel
 
 // Clone returns a copy of the table object without alias.
 func (t *{{.TplTableNameCamelCase}}Table) Clone() *{{.TplTableNameCamelCase}}Table {
-	return new{{.TplTableNameCamelCase}}Table("")
+	return new{{.TplTableNameCamelCase}}Table()
 }
