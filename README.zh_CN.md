@@ -339,13 +339,14 @@ gooq.InsertFrom(User, gooq.Select(User.Name).From(User).Where(User.Age.Gt(18)))
 gooq.Update(User).Set(User.Name, "x").Set(User.Age, 20).Where(User.ID.Eq(1))
 // UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?
 
-// 实体记录：非零字段转为 SET（gorm 风格）。
-gooq.Update(User).Record(model.User{Name: "x", Age: 20})
-// UPDATE `user` SET `name` = ?, `age` = ?
-
 // map 全量更新。
 gooq.Update(User).Data(map[string]any{"age": 1, "name": "x"})
 // UPDATE `user` SET `age` = ?, `name` = ?
+
+// 表达式值渲染为 SQL 片段（字段算术、Raw 等）。
+gooq.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.ID.Eq(1))
+// UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?
+// （单条 Record 更新不支持，使用 Set/Data + Where）
 
 // 按主键批量（或 Keys(...) 自定义键），RowsAffected 聚合。
 gooq.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)

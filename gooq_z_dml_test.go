@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/test/gtest"
+	"github.com/gogf/gf/v2/text/gstr"
 )
 
 type testUserRecord struct {
@@ -98,17 +99,39 @@ func TestDsl_Update_Set(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, "UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?")
 		t.AssertEQ(args, []any{"x", 20, int64(1)})
+
+		// Set 表达式值：字段算术渲染为 SQL 片段。
+		sql, args, err = Update(testUser).
+			Set(testUser.Age, testUser.Age.Add(1)).
+			Where(testUser.ID.Eq(1)).
+			ToSql(DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?")
+		t.AssertEQ(args, []any{1, int64(1)})
+
+		// Set 表达式值：Raw 渲染为 SQL 片段。
+		sql, args, err = Update(testUser).
+			Set(testUser.Age, Raw("age + 1")).
+			Where(testUser.ID.Eq(1)).
+			ToSql(DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "UPDATE `user` SET `age` = age + 1 WHERE `user`.`id` = ?")
+		t.AssertEQ(args, []any{int64(1)})
 	})
 }
 
 func TestDsl_Update_Record_Data(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		sql, args, err := Update(testUser).Record(testUserRecord{Name: "x", Age: 20}).ToSql(DialectMySQL)
-		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` SET `name` = ?, `age` = ?")
-		t.AssertEQ(args, []any{"x", 20})
+		// Update/Delete 单条 Record 不支持：使用 Set/Data + Where。
+		_, _, err := Update(testUser).Record(testUserRecord{Id: 5, Name: "x", Age: 20}).ToSql(DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(gstr.Contains(err.Error(), "not supported"), true)
 
-		sql, args, err = Update(testUser).Data(map[string]any{"age": 1, "name": "x"}).ToSql(DialectMySQL)
+		_, _, err = Delete(testUser).Record(testUserRecord{Id: 5}).ToSql(DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(gstr.Contains(err.Error(), "not supported"), true)
+
+		sql, args, err := Update(testUser).Data(map[string]any{"age": 1, "name": "x"}).ToSql(DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "UPDATE `user` SET `age` = ?, `name` = ?")
 		t.AssertEQ(args, []any{1, "x"})

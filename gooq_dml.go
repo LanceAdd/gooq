@@ -48,6 +48,7 @@ type DMLBuilder struct {
 	upsert          *upsertClause
 	joins           []*joinClause // UPDATE 多表 JOIN 子句。
 	returning       []Expression  // RETURNING/OUTPUT 返回列。
+	recordUpdate    bool          // Record 误用于 Update/Delete 的标记（渲染时报错，防静默无效）。
 	executor        executor      // 执行器（UseDB/UseTX 绑定；nil 时仅离线渲染）。
 }
 
@@ -88,11 +89,11 @@ func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
 }
 
 func (b *DMLBuilder) Record(data any) *DMLBuilder {
-	row := recordToRow(b.table, data, b.kind == dmlInsert)
-	if b.kind == dmlUpdate {
-		b.setValues = append(b.setValues, row...)
+	if b.kind == dmlUpdate || b.kind == dmlDelete {
+		b.recordUpdate = true
 		return b
 	}
+	row := recordToRow(b.table, data, b.kind == dmlInsert)
 	b.insertRows = append(b.insertRows, row)
 	return b
 }
@@ -595,6 +596,9 @@ func isInStrings(list []string, target string) bool {
 }
 
 func (b *DMLBuilder) renderUpdate(rc *renderContext) (string, []any, error) {
+	if b.recordUpdate {
+		return "", nil, fmt.Errorf("gooq: Update/Delete Record is not supported, use Set/Data with Where or Delete with Where")
+	}
 	if len(b.setValues) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
 	}
@@ -671,7 +675,7 @@ func (b *DMLBuilder) renderBatchDML(dialect Dialect) ([]string, [][]any, error) 
 		default:
 			placeholders := make([]string, len(setCols))
 			for i := range setCols {
-				placeholders[i] = fmt.Sprintf("%s = %s", rc.quote(setCols[i]), rc.addArg(setArgs[i]))
+				placeholders[i] = renderSetValue(rc, setCols[i], setArgs[i])
 			}
 			sqlStr = fmt.Sprintf("UPDATE %s SET %s", tableNameSQL(rc, b.table), strings.Join(placeholders, ", "))
 		}
@@ -686,6 +690,9 @@ func (b *DMLBuilder) renderBatchDML(dialect Dialect) ([]string, [][]any, error) 
 }
 
 func (b *DMLBuilder) renderDelete(rc *renderContext) (string, []any, error) {
+	if b.recordUpdate {
+		return "", nil, fmt.Errorf("gooq: Update/Delete Record is not supported, use Set/Data with Where or Delete with Where")
+	}
 	if !b.unscoped && b.table.Meta() != nil {
 		if softField := b.table.Meta().SoftDeleteField(); softField != nil {
 			sqlStr := fmt.Sprintf(
@@ -737,9 +744,18 @@ func (b *DMLBuilder) renderWhere(rc *renderContext) string {
 func (b *DMLBuilder) renderSets(rc *renderContext) string {
 	var sets []string
 	for _, cv := range b.setValues {
-		sets = append(sets, fmt.Sprintf(`%s = %s`, rc.quote(cv.column), rc.addArg(cv.value)))
+		sets = append(sets, renderSetValue(rc, cv.column, cv.value))
 	}
 	return strings.Join(sets, ", ")
+}
+
+// renderSetValue 渲染 SET 值：表达式渲染为 SQL 片段，普通值作为参数。
+func renderSetValue(rc *renderContext, column string, value any) string {
+	if expr, ok := value.(Expression); ok {
+		valSQL, _ := rc.render(expr)
+		return fmt.Sprintf("%s = %s", rc.quote(column), valSQL)
+	}
+	return fmt.Sprintf("%s = %s", rc.quote(column), rc.addArg(value))
 }
 
 func (b *DMLBuilder) renderJoinClauses(rc *renderContext) string {

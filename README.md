@@ -340,13 +340,14 @@ gooq.InsertFrom(User, gooq.Select(User.Name).From(User).Where(User.Age.Gt(18)))
 gooq.Update(User).Set(User.Name, "x").Set(User.Age, 20).Where(User.ID.Eq(1))
 // UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?
 
-// Entity records: non-zero fields become SET (gorm-style).
-gooq.Update(User).Record(model.User{Name: "x", Age: 20})
-// UPDATE `user` SET `name` = ?, `age` = ?
-
 // Map full update.
 gooq.Update(User).Data(map[string]any{"age": 1, "name": "x"})
 // UPDATE `user` SET `age` = ?, `name` = ?
+
+// Expression values render as SQL fragments (field arithmetic, Raw, etc.).
+gooq.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.ID.Eq(1))
+// UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?
+// (single-record Update via Record is not supported; use Set/Data + Where)
 
 // Batch by primary key (or Keys(...)), RowsAffected aggregated.
 gooq.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
