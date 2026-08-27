@@ -370,6 +370,34 @@ func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
 		}
 		return &batchResult{result: lastResult, affected: total}, nil
 	}
+	// 行间列集合不一致时按列分组拆分多条 INSERT（缺失列走表默认值，避免 NULL 补位
+	// 触发 NOT NULL 报错）；单组（列一致）走单条 SQL。
+	if b.kind == dmlInsert {
+		groups := groupInsertRows(b.insertRows)
+		if len(groups) > 1 {
+			var (
+				total      int64
+				lastResult sql.Result
+			)
+			for _, group := range groups {
+				chunk := *b
+				chunk.insertRows = group
+				sqlStr, args, err := chunk.ToSql(dialect)
+				if err != nil {
+					return nil, err
+				}
+				result, err := b.executor.Exec(ctx, sqlStr, args...)
+				if err != nil {
+					return nil, err
+				}
+				if n, err := result.RowsAffected(); err == nil {
+					total += n
+				}
+				lastResult = result
+			}
+			return &batchResult{result: lastResult, affected: total}, nil
+		}
+	}
 	sqlStr, args, err := b.ToSql(dialect)
 	if err != nil {
 		return nil, err
@@ -471,20 +499,23 @@ func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
 	if len(b.insertRows) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert data is empty")
 	}
-	columns := make([]string, len(b.insertRows[0]))
-	for i, cv := range b.insertRows[0] {
-		columns[i] = cv.column
+	// 列并集：按首行顺序，后续行的额外列追加；某行缺失的列补 NULL
+	// （Rows 入口按行跳过零值字段，行间非零字段集合可能不同）。
+	var columns []string
+	seen := make(map[string]bool)
+	for _, row := range b.insertRows {
+		for _, cv := range row {
+			if !seen[cv.column] {
+				seen[cv.column] = true
+				columns = append(columns, cv.column)
+			}
+		}
 	}
 	if len(columns) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert columns is empty")
 	}
 	rows := make([]string, len(b.insertRows))
 	for i, row := range b.insertRows {
-		if len(row) != len(columns) {
-			return "", nil, fmt.Errorf(
-				"gooq: insert values count %d mismatch columns count %d", len(row), len(columns),
-			)
-		}
 		placeholders := make([]string, len(columns))
 		for j, col := range columns {
 			placeholders[j] = rc.addArg(valueOf(row, col))
@@ -511,6 +542,30 @@ func (b *DMLBuilder) renderInsert(rc *renderContext) (string, []any, error) {
 		sqlStr += returning
 	}
 	return sqlStr, rc.args, nil
+}
+
+// groupInsertRows 按列集合分组：同组内每行列集一致（可直接渲染，无 NULL 补位）；
+// 组间列集不同 → 拆分多条 INSERT（缺失列走表默认值）。
+func groupInsertRows(rows [][]columnValue) [][][]columnValue {
+	groupMap := make(map[string][][]columnValue)
+	var order []string
+	for _, row := range rows {
+		cols := make([]string, len(row))
+		for i, cv := range row {
+			cols[i] = cv.column
+		}
+		sort.Strings(cols)
+		key := strings.Join(cols, ",")
+		if _, ok := groupMap[key]; !ok {
+			order = append(order, key)
+		}
+		groupMap[key] = append(groupMap[key], row)
+	}
+	groups := make([][][]columnValue, len(order))
+	for i, key := range order {
+		groups[i] = groupMap[key]
+	}
+	return groups
 }
 
 func quoteColumns(rc *renderContext, columns []string) []string {
