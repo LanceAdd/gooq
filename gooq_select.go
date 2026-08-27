@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 )
@@ -80,7 +81,6 @@ const (
 )
 
 type SelectBuilder struct {
-	ctx          context.Context
 	fields       []Expression   // SELECT 字段。
 	from         Table          // FROM 表或派生表。
 	joins        []*joinClause  // JOIN 子句。
@@ -181,17 +181,12 @@ func (b *SelectBuilder) Clone() *SelectBuilder {
 }
 
 func Select(fields ...any) *SelectBuilder {
-	b := &SelectBuilder{ctx: context.Background()}
+	b := &SelectBuilder{}
 	return b.Fields(fields...)
 }
 
 func SelectFrom(t Table) *SelectBuilder {
 	return Select().From(t)
-}
-
-func (b *SelectBuilder) Ctx(ctx context.Context) *SelectBuilder {
-	b.ctx = ctx
-	return b
 }
 
 func (b *SelectBuilder) Fields(fields ...any) *SelectBuilder {
@@ -451,7 +446,7 @@ func (c *cteTable) Field(column string) Field[any] {
 }
 
 func (b *SelectBuilder) Condition() (string, []any) {
-	return b.render(newRenderContext(b.ctx, DialectMySQL))
+	return b.render(newRenderContext(DialectMySQL))
 }
 
 func (b *SelectBuilder) render(rc *renderContext) (string, []any) {
@@ -482,7 +477,7 @@ func (b *SelectBuilder) Scan(ctx context.Context, dest any) error {
 	if err != nil {
 		return err
 	}
-	if b.cacheOption != nil {
+	if b.cacheOption != nil || b.pageCacheOpt != nil {
 		if adapter := GetCacheAdapter(); adapter != nil {
 			return b.scanWithCache(ctx, adapter, dialect, sql, args, dest)
 		}
@@ -493,7 +488,15 @@ func (b *SelectBuilder) Scan(ctx context.Context, dest any) error {
 func (b *SelectBuilder) scanWithCache(
 	ctx context.Context, adapter CacheAdapter, dialect Dialect, sql string, args []any, dest any,
 ) error {
-	key, err := b.cacheKey(dialect)
+	var (
+		key string
+		err error
+	)
+	if b.pageCacheOpt != nil {
+		key, err = b.pageCacheKey(dialect)
+	} else {
+		key, err = b.cacheKey(dialect)
+	}
 	if err != nil {
 		return err
 	}
@@ -504,7 +507,14 @@ func (b *SelectBuilder) scanWithCache(
 		return err
 	}
 	if bytes, err := json.Marshal(dest); err == nil {
-		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
+		ttl := time.Duration(0)
+		if b.cacheOption != nil {
+			ttl = b.cacheOption.Duration
+		}
+		if b.pageCacheOpt != nil {
+			ttl = b.pageCacheOpt.Duration
+		}
+		_ = adapter.Set(ctx, key, bytes, ttl)
 	}
 	return nil
 }
@@ -525,6 +535,28 @@ func (b *SelectBuilder) Row(ctx context.Context) (Record, error) {
 		return nil, nil
 	}
 	return Record(record), nil
+}
+
+func (b *SelectBuilder) Rows(ctx context.Context) (Result, error) {
+	if b.executor == nil {
+		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Rows")
+	}
+	sql, args, err := b.ToSql(b.dialect())
+	if err != nil {
+		return nil, err
+	}
+	result, err := b.executor.GetAll(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	rows := make(Result, len(result))
+	for i, record := range result {
+		rows[i] = Record(record)
+	}
+	return rows, nil
 }
 
 func (b *SelectBuilder) Count(ctx context.Context) (int64, error) {
@@ -549,7 +581,7 @@ func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Exists")
 	}
 	dialect := b.dialect()
-	subSQL, subArgs := b.renderSelect(newRenderContext(b.ctx, dialect))
+	subSQL, subArgs := b.renderSelect(newRenderContext(dialect))
 	value, err := b.executor.GetValue(ctx, fmt.Sprintf("SELECT EXISTS (%s)", subSQL), subArgs...)
 	if err != nil {
 		return false, err
@@ -574,7 +606,7 @@ func (b *SelectBuilder) ToSql(dialects ...Dialect) (string, []any, error) {
 	if err := b.validate(dialect); err != nil {
 		return "", nil, err
 	}
-	rc := newRenderContext(b.ctx, dialect)
+	rc := newRenderContext(dialect)
 	sql, args := b.renderSelect(rc)
 	return sql, args, nil
 }

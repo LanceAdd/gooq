@@ -8,7 +8,6 @@
 package gooq
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -208,7 +207,7 @@ func TestDsl_Raw(t *testing.T) {
 
 func TestDsl_OperatorFunc(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		OperatorFunc("JSON_EXTRACT", func(ctx context.Context, args ...any) (string, []any, error) {
+		OperatorFunc("JSON_EXTRACT", func(args ...any) (string, []any, error) {
 			return fmt.Sprintf("JSON_EXTRACT(%s, %s)", args[0], args[1]), nil, nil
 		}, "mysql")
 		sql, _, err := Select(Func("JSON_EXTRACT", testUser.Name, Str("$.key"))).From(testUser).ToSql(DialectMySQL)

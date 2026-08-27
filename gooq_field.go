@@ -1,7 +1,6 @@
 package gooq
 
 import (
-	"context"
 	"fmt"
 	"strings"
 )
@@ -47,7 +46,7 @@ func (f Field[T]) Asc() OrderClause {
 }
 
 func (f Field[T]) Condition() (string, []any) {
-	return f.render(newRenderContext(context.Background(), DialectMySQL))
+	return f.render(newRenderContext(DialectMySQL))
 }
 
 func (f Field[T]) render(rc *renderContext) (string, []any) {
@@ -136,7 +135,7 @@ type fieldCondition struct {
 }
 
 func (c *fieldCondition) Condition() (string, []any) {
-	return c.render(newRenderContext(context.Background(), DialectMySQL))
+	return c.render(newRenderContext(DialectMySQL))
 }
 
 func (c *fieldCondition) render(rc *renderContext) (string, []any) {

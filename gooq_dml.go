@@ -34,7 +34,6 @@ type columnValue struct {
 }
 
 type DMLBuilder struct {
-	ctx             context.Context
 	table           Table
 	kind            dmlKind
 	insertColumns   []string        // Columns 设置的列（当前组）。
@@ -54,7 +53,6 @@ type DMLBuilder struct {
 
 func Insert(t Table) *DMLBuilder {
 	return &DMLBuilder{
-		ctx:   context.Background(),
 		table: t,
 		kind:  dmlInsert,
 	}
@@ -62,7 +60,6 @@ func Insert(t Table) *DMLBuilder {
 
 func InsertFrom(t Table, sub *SelectBuilder) *DMLBuilder {
 	return &DMLBuilder{
-		ctx:           context.Background(),
 		table:         t,
 		kind:          dmlInsertFrom,
 		selectBuilder: sub,
@@ -215,7 +212,6 @@ func (b *DMLBuilder) Clone() *DMLBuilder {
 
 func Update(t Table) *DMLBuilder {
 	return &DMLBuilder{
-		ctx:   context.Background(),
 		table: t,
 		kind:  dmlUpdate,
 	}
@@ -223,15 +219,9 @@ func Update(t Table) *DMLBuilder {
 
 func Delete(t Table) *DMLBuilder {
 	return &DMLBuilder{
-		ctx:   context.Background(),
 		table: t,
 		kind:  dmlDelete,
 	}
-}
-
-func (b *DMLBuilder) Ctx(ctx context.Context) *DMLBuilder {
-	b.ctx = ctx
-	return b
 }
 
 func (b *DMLBuilder) Data(data map[string]any) *DMLBuilder {
@@ -431,7 +421,7 @@ func (b *DMLBuilder) ToSql(dialects ...Dialect) (string, []any, error) {
 	if (b.kind == dmlUpdate || b.kind == dmlDelete) && len(b.batchUpdateRows) > 0 {
 		return "", nil, fmt.Errorf("gooq: batch delete/update renders multiple SQL, use Exec")
 	}
-	rc := newRenderContext(b.ctx, dialect)
+	rc := newRenderContext(dialect)
 	switch b.kind {
 	case dmlInsert:
 		return b.renderInsert(rc)
@@ -608,7 +598,7 @@ func (b *DMLBuilder) renderBatchDML(dialect Dialect) ([]string, [][]any, error) 
 		if len(where) == 0 || (b.kind == dmlUpdate && len(setCols) == 0) {
 			continue
 		}
-		rc := newRenderContext(b.ctx, dialect)
+		rc := newRenderContext(dialect)
 		var sqlStr string
 		switch b.kind {
 		case dmlDelete:

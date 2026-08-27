@@ -1,9 +1,5 @@
 package gooq
 
-import (
-	"context"
-)
-
 type Expression interface {
 	Condition() (where string, args []any)
 }
@@ -13,28 +9,18 @@ type expr interface {
 }
 
 type renderContext struct {
-	ctx         context.Context
 	dialect     Dialect
 	dialectInfo *DialectInfo // 方言元数据（注册表解析）。
-	driverName  string       // 操作符驱动名（由方言推断）。
 	args        []any
 	argIndex    int
 }
 
-func newRenderContext(ctx context.Context, dialect Dialect) *renderContext {
-	rc := &renderContext{
-		ctx:     ctx,
-		dialect: dialect,
-	}
+func newRenderContext(dialect Dialect) *renderContext {
+	rc := &renderContext{dialect: dialect}
 	if dialect != "" {
-		rc.driverName = string(dialect)
 		rc.dialectInfo = getDialectInfo(string(dialect))
 	}
 	return rc
-}
-
-func (rc *renderContext) driver() string {
-	return rc.driverName
 }
 
 func (rc *renderContext) quote(ident string) string {

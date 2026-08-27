@@ -7,34 +7,33 @@
 package gooq
 
 import (
-	"context"
 	"fmt"
 	"strings"
 )
 
 func init() {
-	OperatorFunc(FuncDateFormat, func(ctx context.Context, args ...any) (string, []any, error) {
+	OperatorFunc(FuncDateFormat, func(args ...any) (string, []any, error) {
 		if len(args) != 2 {
 			return "", nil, fmt.Errorf("DATE_FORMAT expects 2 arguments")
 		}
 		return fmt.Sprintf(`DATE_FORMAT(%s, %s)`, args[0], args[1]), nil, nil
 	})
-	OperatorFunc(FuncCount, func(ctx context.Context, args ...any) (string, []any, error) {
+	OperatorFunc(FuncCount, func(args ...any) (string, []any, error) {
 		return fmt.Sprintf(`COUNT(%s)`, args[0]), nil, nil
 	})
-	OperatorFunc(FuncSum, func(ctx context.Context, args ...any) (string, []any, error) {
+	OperatorFunc(FuncSum, func(args ...any) (string, []any, error) {
 		return fmt.Sprintf(`SUM(%s)`, args[0]), nil, nil
 	})
-	OperatorFunc(FuncCoalesce, func(ctx context.Context, args ...any) (string, []any, error) {
+	OperatorFunc(FuncCoalesce, func(args ...any) (string, []any, error) {
 		return "COALESCE(" + strings.Join(toStrings(args), ", ") + ")", nil, nil
 	})
-	OperatorFunc(FuncIfNull, func(ctx context.Context, args ...any) (string, []any, error) {
+	OperatorFunc(FuncIfNull, func(args ...any) (string, []any, error) {
 		return fmt.Sprintf(`IFNULL(%s, %s)`, args[0], args[1]), nil, nil
 	})
-	OperatorFunc(FuncRank, func(ctx context.Context, args ...any) (string, []any, error) {
+	OperatorFunc(FuncRank, func(args ...any) (string, []any, error) {
 		return "RANK()", nil, nil
 	})
-	OperatorFunc(FuncNow, func(ctx context.Context, args ...any) (string, []any, error) {
+	OperatorFunc(FuncNow, func(args ...any) (string, []any, error) {
 		return "NOW()", nil, nil
 	})
 }

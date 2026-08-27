@@ -7,12 +7,11 @@
 package gooq
 
 import (
-	"context"
 	"fmt"
 )
 
 func init() {
-	OperatorFunc(FuncDateFormat, func(ctx context.Context, args ...any) (string, []any, error) {
+	OperatorFunc(FuncDateFormat, func(args ...any) (string, []any, error) {
 		if len(args) != 2 {
 			return "", nil, fmt.Errorf("DATE_FORMAT expects 2 arguments")
 		}

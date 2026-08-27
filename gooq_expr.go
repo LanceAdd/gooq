@@ -1,7 +1,6 @@
 package gooq
 
 import (
-	"context"
 	"fmt"
 	"strings"
 )
@@ -54,7 +53,7 @@ func (e *caseExpr) As(alias string) Expression {
 }
 
 func (e *caseExpr) Condition() (string, []any) {
-	return e.render(newRenderContext(context.Background(), DialectMySQL))
+	return e.render(newRenderContext(DialectMySQL))
 }
 
 func (e *caseExpr) render(rc *renderContext) (string, []any) {
@@ -110,7 +109,7 @@ type arithExpr struct {
 }
 
 func (a *arithExpr) Condition() (string, []any) {
-	return a.render(newRenderContext(context.Background(), DialectMySQL))
+	return a.render(newRenderContext(DialectMySQL))
 }
 
 func (a *arithExpr) render(rc *renderContext) (string, []any) {
@@ -131,7 +130,7 @@ type negateExpr struct {
 }
 
 func (n *negateExpr) Condition() (string, []any) {
-	return n.render(newRenderContext(context.Background(), DialectMySQL))
+	return n.render(newRenderContext(DialectMySQL))
 }
 
 func (n *negateExpr) render(rc *renderContext) (string, []any) {
@@ -164,7 +163,7 @@ type distinctExpr struct {
 }
 
 func (d *distinctExpr) Condition() (string, []any) {
-	return d.render(newRenderContext(context.Background(), DialectMySQL))
+	return d.render(newRenderContext(DialectMySQL))
 }
 
 func (d *distinctExpr) render(rc *renderContext) (string, []any) {
@@ -183,7 +182,7 @@ type castExpr struct {
 }
 
 func (c *castExpr) Condition() (string, []any) {
-	return c.render(newRenderContext(context.Background(), DialectMySQL))
+	return c.render(newRenderContext(DialectMySQL))
 }
 
 func (c *castExpr) render(rc *renderContext) (string, []any) {

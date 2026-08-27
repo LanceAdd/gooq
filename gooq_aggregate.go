@@ -1,7 +1,6 @@
 package gooq
 
 import (
-	"context"
 	"fmt"
 	"strings"
 )
@@ -40,7 +39,7 @@ func GroupConcatFunc(options GroupConcatOptions) Expression {
 
 // Condition 实现 Expression 接口（默认 MySQL 方言渲染）。
 func (e *groupConcatExpr) Condition() (string, []any) {
-	return e.render(newRenderContext(context.Background(), DialectMySQL))
+	return e.render(newRenderContext(DialectMySQL))
 }
 
 func (e *groupConcatExpr) render(rc *renderContext) (string, []any) {

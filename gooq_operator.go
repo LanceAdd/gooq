@@ -1,11 +1,10 @@
 package gooq
 
 import (
-	"context"
 	"strings"
 )
 
-type OperatorFn func(ctx context.Context, args ...any) (sql string, argsOut []any, err error)
+type OperatorFn func(args ...any) (sql string, argsOut []any, err error)
 
 // operatorRegistry 是操作符注册表：name → driver → impl。
 var operatorRegistry = make(map[string]map[string]OperatorFn)
@@ -85,7 +84,7 @@ func (f Fn) OverFrame(partitionBy []Expression, orderBy []OrderClause, frame Win
 }
 
 func (f Fn) Condition() (string, []any) {
-	return f.render(newRenderContext(context.Background(), DialectMySQL))
+	return f.render(newRenderContext(DialectMySQL))
 }
 
 func (f Fn) render(rc *renderContext) (string, []any) {
@@ -106,14 +105,14 @@ func (f Fn) render(rc *renderContext) (string, []any) {
 	}
 	var (
 		sql    string
-		impl   = getOperator(f.name, rc.driver())
+		impl   = getOperator(f.name, string(rc.dialect))
 		opArgs = make([]any, len(argsSQL))
 	)
 	for i := range argsSQL {
 		opArgs[i] = argsSQL[i]
 	}
 	if impl != nil {
-		implSQL, implArgs, err := impl(rc.ctx, opArgs...)
+		implSQL, implArgs, err := impl(opArgs...)
 		if err == nil {
 			sql = implSQL
 			argsAll = append(argsAll, implArgs...)

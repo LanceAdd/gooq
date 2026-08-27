@@ -1,7 +1,6 @@
 package gooq
 
 import (
-	"context"
 	"fmt"
 	"strings"
 )
@@ -21,7 +20,7 @@ type groupCondition struct {
 }
 
 func (g *groupCondition) Condition() (string, []any) {
-	return g.render(newRenderContext(context.Background(), DialectMySQL))
+	return g.render(newRenderContext(DialectMySQL))
 }
 
 func (g *groupCondition) render(rc *renderContext) (string, []any) {
@@ -92,7 +91,7 @@ type existsCondition struct {
 }
 
 func (e *existsCondition) Condition() (string, []any) {
-	return e.render(newRenderContext(context.Background(), DialectMySQL))
+	return e.render(newRenderContext(DialectMySQL))
 }
 
 func (e *existsCondition) render(rc *renderContext) (string, []any) {
@@ -118,7 +117,7 @@ type exprCondition struct {
 }
 
 func (c *exprCondition) Condition() (string, []any) {
-	return c.render(newRenderContext(context.Background(), DialectMySQL))
+	return c.render(newRenderContext(DialectMySQL))
 }
 
 func (c *exprCondition) render(rc *renderContext) (string, []any) {
