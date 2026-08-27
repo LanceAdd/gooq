@@ -293,7 +293,7 @@ gooq.Raw("JSON_EXTRACT(data, ?)", "$.name")
 gooq.Select(User.ID).From(User).Where(gooq.Raw("age > ?", 18))
 
 // Custom operators: register + invoke.
-gooq.OperatorFunc("JSON_EXTRACT", func(ctx context.Context, args ...any) (string, []any, error) {
+gooq.OperatorFunc("JSON_EXTRACT", func(args ...any) (string, []any, error) {
     return fmt.Sprintf("JSON_EXTRACT(%s, %s)", args[0], args[1]), nil, nil
 }, "mysql")
 gooq.Select(gooq.Func("JSON_EXTRACT", User.Name, gooq.Str("$.key"))).From(User)
@@ -447,16 +447,34 @@ name := gooq.Get(row, User.Name)  // string
 gooq.SetCacheAdapter(redisAdapter)
 gooq.SetHashCacheAdapter(redisHashAdapter)
 
-// Reads go through the cache: miss → execute + backfill; cache failures never block the query.
+// Single-query cache: all query methods (Scan/Row/Rows/Count/Exists) go through it.
+// Cache() with no arg or a zero option disables caching; a custom Name fixes the key
+// (useful for manual invalidation).
 err := gooq.Select(User.AllFields()).From(User).
     Cache(gooq.CacheOption{Duration: time.Minute}).
     UseDB(gdb.DB()).Scan(ctx, &users)
 
-// Page caching: same condition + ordering shares one key across pages (custom Name wins).
-err = gooq.SelectFrom(User).Where(User.Status.Eq("vip")).
+// Composite query: count runs first, rows after; count=0 short-circuits without querying rows.
+rows, total, err := gooq.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.ID.Desc()).
-    PageCache(gooq.CacheOption{Name: "users:vip"}).
-    UseDB(gdb.DB()).Page(1, 10).Scan(ctx, &page)
+    Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
+
+// PageCache caches the composite query as one hash record (fields "count" and "rows").
+// Requires SetHashCacheAdapter; the key includes limit/offset so each page is cached
+// independently. RowsField/CountField override the field names; Force caches empty
+// results (count=0) which are skipped by default.
+rows, total, err = gooq.SelectFrom(User).Where(User.Status.Eq("vip")).
+    Order(User.ID.Desc()).
+    PageCache(gooq.CacheOption{Duration: time.Minute}).
+    Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
+
+// ScanAndCount is the typed variant: scans data into dest and returns the total.
+// It shares the same data cache (unified Result JSON, field "rows") with RowsAndCount.
+var vips []User
+total, err = gooq.SelectFrom(User).Where(User.Status.Eq("vip")).
+    Order(User.ID.Desc()).
+    PageCache(gooq.CacheOption{Duration: time.Minute}).
+    Page(1, 10).UseDB(gdb.DB()).ScanAndCount(ctx, &vips)
 ```
 
 ## Dialects

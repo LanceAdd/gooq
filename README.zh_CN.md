@@ -292,7 +292,7 @@ gooq.Raw("JSON_EXTRACT(data, ?)", "$.name")
 gooq.Select(User.ID).From(User).Where(gooq.Raw("age > ?", 18))
 
 // 自定义操作符：注册 + 调用。
-gooq.OperatorFunc("JSON_EXTRACT", func(ctx context.Context, args ...any) (string, []any, error) {
+gooq.OperatorFunc("JSON_EXTRACT", func(args ...any) (string, []any, error) {
     return fmt.Sprintf("JSON_EXTRACT(%s, %s)", args[0], args[1]), nil, nil
 }, "mysql")
 gooq.Select(gooq.Func("JSON_EXTRACT", User.Name, gooq.Str("$.key"))).From(User)
@@ -445,16 +445,32 @@ name := gooq.Get(row, User.Name)  // string
 gooq.SetCacheAdapter(redisAdapter)
 gooq.SetHashCacheAdapter(redisHashAdapter)
 
-// 查询走缓存：未命中执行并回填；缓存故障不阻断主查询。
+// 单查询缓存：所有查询方法（Scan/Row/Rows/Count/Exists）均走缓存。
+// Cache() 无参或零值 option 不开启；自定义 Name 固定 key（便于手动失效）。
 err := gooq.Select(User.AllFields()).From(User).
     Cache(gooq.CacheOption{Duration: time.Minute}).
     UseDB(gdb.DB()).Scan(ctx, &users)
 
-// 分页缓存：同条件同排序跨页共享 key（自定义 Name 优先）。
-err = gooq.SelectFrom(User).Where(User.Status.Eq("vip")).
+// 复合查询：count 先行、rows 后查，count=0 短路不查 rows。
+rows, total, err := gooq.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.ID.Desc()).
-    PageCache(gooq.CacheOption{Name: "users:vip"}).
-    UseDB(gdb.DB()).Page(1, 10).Scan(ctx, &page)
+    Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
+
+// PageCache 缓存复合查询为一条 hash 记录（field 为 "count" 与 "rows"）。
+// 需要 SetHashCacheAdapter；key 含 limit/offset，各页独立缓存。
+// RowsField/CountField 可覆盖 field 名；Force 开启后 count=0 也会缓存（默认跳过空结果）。
+rows, total, err = gooq.SelectFrom(User).Where(User.Status.Eq("vip")).
+    Order(User.ID.Desc()).
+    PageCache(gooq.CacheOption{Duration: time.Minute}).
+    Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
+
+// ScanAndCount 是类型化变体：数据扫入 dest 并返回总数。
+// 与 RowsAndCount 共享同一份数据缓存（统一存 Result JSON，数据 field 默认 "rows"）。
+var vips []User
+total, err = gooq.SelectFrom(User).Where(User.Status.Eq("vip")).
+    Order(User.ID.Desc()).
+    PageCache(gooq.CacheOption{Duration: time.Minute}).
+    Page(1, 10).UseDB(gdb.DB()).ScanAndCount(ctx, &vips)
 ```
 
 ## 方言

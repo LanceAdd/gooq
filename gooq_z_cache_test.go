@@ -33,67 +33,69 @@ func TestDsl_CacheKey(t *testing.T) {
 
 		b1 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Cache(CacheOption{})
 		b2 := SelectFrom(cacheTestUser).Where(userLevel.Eq(2)).Cache(CacheOption{})
-		k1, err := b1.cacheKey(DialectMySQL)
+		sql1, args1, err := b1.ToSql(DialectMySQL)
 		t.AssertNil(err)
-		k2, err := b2.cacheKey(DialectMySQL)
+		sql2, args2, err := b2.ToSql(DialectMySQL)
+		t.AssertNil(err)
+		k1, err := b1.cacheKey("scan", sql1, args1)
+		t.AssertNil(err)
+		k2, err := b2.cacheKey("scan", sql2, args2)
 		t.AssertNil(err)
 		t.AssertNE(k1, k2) // 同 SQL 不同参数：key 不同。
 
 		b3 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Cache(CacheOption{Name: "users:admins"})
-		k3, err := b3.cacheKey(DialectMySQL)
+		k3, err := b3.cacheKey("scan", sql1, args1)
 		t.AssertNil(err)
 		t.Assert(k3, "users:admins") // Name 优先。
 
 		b4 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Cache(CacheOption{})
-		k4, err := b4.cacheKey(DialectMySQL)
+		k4, err := b4.cacheKey("scan", sql1, args1)
 		t.AssertNil(err)
 		t.Assert(k1, k4) // 同参数同 SQL：key 相同（可命中）。
 
 		// 方言参与 key：MySQL 与 PG 渲染不同，key 不同。
-		k5, err := b1.cacheKey(DialectPgsql)
+		sqlPg, argsPg, err := b1.ToSql(DialectPgsql)
+		t.AssertNil(err)
+		k5, err := b1.cacheKey("scan", sqlPg, argsPg)
 		t.AssertNil(err)
 		t.AssertNE(k1, k5)
 		_ = userID
 	})
 }
 
-// TestDsl_PageCacheKey 验证分页缓存 key：参数、排序、字段均参与哈希。
-func TestDsl_PageCacheKey(t *testing.T) {
+// TestDsl_CompositeCacheKey 验证复合查询缓存 key：limit/offset 参与哈希、fields 不参与
+// （count 与 rows 子查询共享同一 key，hash field 区分）。
+func TestDsl_CompositeCacheKey(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		userID := NewField[int64]("user", "id")
 		userName := NewField[string]("user", "name")
 		userLevel := NewField[int]("user", "level")
 
-		// 同一条件同一排序：key 相同（count 与 data 共享）。
-		b1 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userID.Desc()).
-			PageCache(CacheOption{}).Page(1, 10)
-		b2 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userID.Desc()).
-			PageCache(CacheOption{}).Page(2, 10)
-		k1, err := b1.pageCacheKey(DialectMySQL)
+		// 同一条件同一排序：不同页（LIMIT/OFFSET 差异）key 不同。
+		b1 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userID.Desc()).Page(1, 10)
+		b2 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userID.Desc()).Page(2, 10)
+		k1, err := b1.compositeCacheKey(DialectMySQL)
 		t.AssertNil(err)
-		k2, err := b2.pageCacheKey(DialectMySQL)
+		k2, err := b2.compositeCacheKey(DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(k1, k2) // 不同页（LIMIT/OFFSET 差异）同 key。
+		t.AssertNE(k1, k2)
 
 		// 不同参数：key 不同。
-		b3 := SelectFrom(cacheTestUser).Where(userLevel.Eq(2)).Order(userID.Desc()).
-			PageCache(CacheOption{}).Page(1, 10)
-		k3, err := b3.pageCacheKey(DialectMySQL)
+		b3 := SelectFrom(cacheTestUser).Where(userLevel.Eq(2)).Order(userID.Desc()).Page(1, 10)
+		k3, err := b3.compositeCacheKey(DialectMySQL)
 		t.AssertNil(err)
 		t.AssertNE(k1, k3)
 
 		// 不同排序：key 不同。
-		b4 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userName.Asc()).
-			PageCache(CacheOption{}).Page(1, 10)
-		k4, err := b4.pageCacheKey(DialectMySQL)
+		b4 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userName.Asc()).Page(1, 10)
+		k4, err := b4.compositeCacheKey(DialectMySQL)
 		t.AssertNil(err)
 		t.AssertNE(k1, k4)
 
-		// 不同字段：key 不同。
-		b5 := Select(userID, userName).From(cacheTestUser).Where(userLevel.Eq(1)).Order(userID.Desc()).
-			PageCache(CacheOption{}).Page(1, 10)
-		k5, err := b5.pageCacheKey(DialectMySQL)
+		// 不同 fields（count 与 rows 子查询 fields 不同）：key 相同。
+		b5 := Select(userID, userName).From(cacheTestUser).Where(userLevel.Eq(1)).Order(userID.Desc()).Page(1, 10)
+		k5, err := b5.compositeCacheKey(DialectMySQL)
 		t.AssertNil(err)
-		t.AssertNE(k1, k5)
+		t.Assert(k1, k5)
 	})
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/gogf/gf/v2/database/gdb"
 )
@@ -330,13 +329,23 @@ func (b *SelectBuilder) LockInShareMode() *SelectBuilder {
 	return b
 }
 
-func (b *SelectBuilder) Cache(option CacheOption) *SelectBuilder {
-	b.cacheOption = &option
+// Cache 开启单查询缓存；无参或零值 option 不开启。
+func (b *SelectBuilder) Cache(option ...CacheOption) *SelectBuilder {
+	if len(option) > 0 && option[0].valid() {
+		b.cacheOption = &option[0]
+	} else {
+		b.cacheOption = nil
+	}
 	return b
 }
 
-func (b *SelectBuilder) PageCache(option CacheOption) *SelectBuilder {
-	b.pageCacheOpt = &option
+// PageCache 开启复合查询（RowsAndCount）缓存；无参或零值 option 不开启。
+func (b *SelectBuilder) PageCache(option ...CacheOption) *SelectBuilder {
+	if len(option) > 0 && option[0].valid() {
+		b.pageCacheOpt = &option[0]
+	} else {
+		b.pageCacheOpt = nil
+	}
 	return b
 }
 
@@ -468,35 +477,24 @@ func (b *SelectBuilder) UseTX(tx gdb.TX) *SelectBuilder {
 	return b
 }
 
-func (b *SelectBuilder) Scan(ctx context.Context, dest any) error {
-	if b.executor == nil {
-		return fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Scan")
+// queryWithCache 统一缓存执行入口：cacheOption 走普通缓存；pageCacheOpt 仅 RowsAndCount 消费。
+func (b *SelectBuilder) queryWithCache(ctx context.Context, dialect Dialect, sql string, args []any, dest any, kind string) error {
+	if b.pageCacheOpt != nil {
+		return fmt.Errorf("gooq: PageCache only works with RowsAndCount")
 	}
-	dialect := b.dialect()
-	sql, args, err := b.ToSql(dialect)
-	if err != nil {
-		return err
+	if b.cacheOption == nil {
+		return scanExec(ctx, b.executor, sql, args, dest)
 	}
-	if b.cacheOption != nil || b.pageCacheOpt != nil {
-		if adapter := GetCacheAdapter(); adapter != nil {
-			return b.scanWithCache(ctx, adapter, dialect, sql, args, dest)
-		}
+	if adapter := GetCacheAdapter(); adapter != nil {
+		return b.scanWithCache(ctx, adapter, dialect, sql, args, dest, kind)
 	}
 	return scanExec(ctx, b.executor, sql, args, dest)
 }
 
 func (b *SelectBuilder) scanWithCache(
-	ctx context.Context, adapter CacheAdapter, dialect Dialect, sql string, args []any, dest any,
+	ctx context.Context, adapter CacheAdapter, dialect Dialect, sql string, args []any, dest any, kind string,
 ) error {
-	var (
-		key string
-		err error
-	)
-	if b.pageCacheOpt != nil {
-		key, err = b.pageCacheKey(dialect)
-	} else {
-		key, err = b.cacheKey(dialect)
-	}
+	key, err := b.cacheKey(kind, sql, args)
 	if err != nil {
 		return err
 	}
@@ -506,26 +504,71 @@ func (b *SelectBuilder) scanWithCache(
 	if err := scanExec(ctx, b.executor, sql, args, dest); err != nil {
 		return err
 	}
+	if isEmptyResult(dest) && !b.cacheOption.Force {
+		return nil
+	}
 	if bytes, err := json.Marshal(dest); err == nil {
-		ttl := time.Duration(0)
-		if b.cacheOption != nil {
-			ttl = b.cacheOption.Duration
-		}
-		if b.pageCacheOpt != nil {
-			ttl = b.pageCacheOpt.Duration
-		}
-		_ = adapter.Set(ctx, key, bytes, ttl)
+		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
 	}
 	return nil
+}
+
+func (b *SelectBuilder) Scan(ctx context.Context, dest any) error {
+	if b.executor == nil {
+		return fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Scan")
+	}
+	dialect := b.dialect()
+	sql, args, err := b.ToSql(dialect)
+	if err != nil {
+		return err
+	}
+	return b.queryWithCache(ctx, dialect, sql, args, dest, "scan")
+}
+
+// rowWithCache 单行缓存：Record 空结果不缓存（与 count=0 空结果策略一致）。
+func (b *SelectBuilder) rowWithCache(
+	ctx context.Context, adapter CacheAdapter, dialect Dialect, sql string, args []any,
+) (Record, error) {
+	key, err := b.cacheKey("row", sql, args)
+	if err != nil {
+		return nil, err
+	}
+	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
+		var record Record
+		if err := json.Unmarshal(bytes, &record); err != nil {
+			return nil, err
+		}
+		return record, nil
+	}
+	record, err := b.executor.GetOne(ctx, sql, args...)
+	if err != nil {
+		return nil, err
+	}
+	if record == nil && !b.cacheOption.Force {
+		return nil, nil
+	}
+	if bytes, err := json.Marshal(Record(record)); err == nil {
+		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
+	}
+	return Record(record), nil
 }
 
 func (b *SelectBuilder) Row(ctx context.Context) (Record, error) {
 	if b.executor == nil {
 		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Row")
 	}
-	sql, args, err := b.ToSql(b.dialect())
+	dialect := b.dialect()
+	sql, args, err := b.ToSql(dialect)
 	if err != nil {
 		return nil, err
+	}
+	if b.pageCacheOpt != nil {
+		return nil, fmt.Errorf("gooq: PageCache only works with RowsAndCount")
+	}
+	if b.cacheOption != nil {
+		if adapter := GetCacheAdapter(); adapter != nil {
+			return b.rowWithCache(ctx, adapter, dialect, sql, args)
+		}
 	}
 	record, err := b.executor.GetOne(ctx, sql, args...)
 	if err != nil {
@@ -537,11 +580,57 @@ func (b *SelectBuilder) Row(ctx context.Context) (Record, error) {
 	return Record(record), nil
 }
 
+// rowsWithCache 多行缓存：空结果不缓存。
+func (b *SelectBuilder) rowsWithCache(
+	ctx context.Context, adapter CacheAdapter, dialect Dialect, sql string, args []any,
+) (Result, error) {
+	key, err := b.cacheKey("rows", sql, args)
+	if err != nil {
+		return nil, err
+	}
+	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
+		var rows Result
+		if err := json.Unmarshal(bytes, &rows); err != nil {
+			return nil, err
+		}
+		return rows, nil
+	}
+	rows, err := b.rowsValue(ctx, dialect)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil && !b.cacheOption.Force {
+		return nil, nil
+	}
+	if bytes, err := json.Marshal(rows); err == nil {
+		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
+	}
+	return rows, nil
+}
+
 func (b *SelectBuilder) Rows(ctx context.Context) (Result, error) {
 	if b.executor == nil {
 		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Rows")
 	}
-	sql, args, err := b.ToSql(b.dialect())
+	dialect := b.dialect()
+	sql, args, err := b.ToSql(dialect)
+	if err != nil {
+		return nil, err
+	}
+	if b.pageCacheOpt != nil {
+		return nil, fmt.Errorf("gooq: PageCache only works with RowsAndCount")
+	}
+	if b.cacheOption != nil {
+		if adapter := GetCacheAdapter(); adapter != nil {
+			return b.rowsWithCache(ctx, adapter, dialect, sql, args)
+		}
+	}
+	return b.rowsValue(ctx, dialect)
+}
+
+// rowsValue 执行当前查询并返回全部行（Rows/RowsAndCount 共用）。
+func (b *SelectBuilder) rowsValue(ctx context.Context, dialect Dialect) (Result, error) {
+	sql, args, err := b.ToSql(dialect)
 	if err != nil {
 		return nil, err
 	}
@@ -559,13 +648,19 @@ func (b *SelectBuilder) Rows(ctx context.Context) (Result, error) {
 	return rows, nil
 }
 
-func (b *SelectBuilder) Count(ctx context.Context) (int64, error) {
-	if b.executor == nil {
-		return 0, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Count")
-	}
+// countBuilderOf 构造 COUNT(*) 子查询：清除分页与排序（计数是全量语义）。
+func (b *SelectBuilder) countBuilderOf() *SelectBuilder {
 	countBuilder := b.Clone()
 	countBuilder.fields = []Expression{Raw("COUNT(*)")}
-	sql, args, err := countBuilder.ToSql(b.dialect())
+	countBuilder.limit = 0
+	countBuilder.offset = 0
+	countBuilder.orderBy = nil
+	return countBuilder
+}
+
+// countValue 执行 COUNT(*) 查询（Count/RowsAndCount 共用）。
+func (b *SelectBuilder) countValue(ctx context.Context, dialect Dialect) (int64, error) {
+	sql, args, err := b.countBuilderOf().ToSql(dialect)
 	if err != nil {
 		return 0, err
 	}
@@ -576,17 +671,215 @@ func (b *SelectBuilder) Count(ctx context.Context) (int64, error) {
 	return value.Int64(), nil
 }
 
+// countSQL 生成 COUNT(*) 查询 SQL（Count 缓存 key 需要）。
+func (b *SelectBuilder) countSQL(dialect Dialect) (string, []any, error) {
+	return b.countBuilderOf().ToSql(dialect)
+}
+
+func (b *SelectBuilder) Count(ctx context.Context) (int64, error) {
+	if b.executor == nil {
+		return 0, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Count")
+	}
+	dialect := b.dialect()
+	sql, args, err := b.countSQL(dialect)
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	if err := b.queryWithCache(ctx, dialect, sql, args, &count, "count"); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 	if b.executor == nil {
 		return false, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Exists")
 	}
 	dialect := b.dialect()
 	subSQL, subArgs := b.renderSelect(newRenderContext(dialect))
-	value, err := b.executor.GetValue(ctx, fmt.Sprintf("SELECT EXISTS (%s)", subSQL), subArgs...)
-	if err != nil {
+	var ok bool
+	if err := b.queryWithCache(ctx, dialect, fmt.Sprintf("SELECT EXISTS (%s)", subSQL), subArgs, &ok, "exists"); err != nil {
 		return false, err
 	}
-	return value.Bool(), nil
+	return ok, nil
+}
+
+// RowsAndCount 复合查询：count 先行，count=0 短路不查 rows；
+// PageCache 开启时走 hash 缓存（count/rows 独立 field，部分命中独立处理）。
+func (b *SelectBuilder) RowsAndCount(ctx context.Context) (Result, int64, error) {
+	if b.executor == nil {
+		return nil, 0, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before RowsAndCount")
+	}
+	dialect := b.dialect()
+	if b.pageCacheOpt != nil {
+		return b.rowsAndCountWithCache(ctx, dialect)
+	}
+	count, err := b.countValue(ctx, dialect)
+	if err != nil {
+		return nil, 0, err
+	}
+	if count == 0 {
+		return nil, 0, nil
+	}
+	rows, err := b.rowsValue(ctx, dialect)
+	if err != nil {
+		return nil, 0, err
+	}
+	return rows, count, nil
+}
+
+// cacheFieldNames 解析复合缓存 field 名：数据 field 默认 "rows"（RowsAndCount/ScanAndCount 共享），
+// count 默认 "count"。
+func (b *SelectBuilder) cacheFieldNames() (dataField, countField string) {
+	dataField = b.pageCacheOpt.RowsField
+	if dataField == "" {
+		dataField = "rows"
+	}
+	countField = b.pageCacheOpt.CountField
+	if countField == "" {
+		countField = "count"
+	}
+	return
+}
+
+// compositeCacheBegin 复合缓存入口：校验 HashCacheAdapter、计算 key、一次取出整个 hash 记录。
+func (b *SelectBuilder) compositeCacheBegin(ctx context.Context, dialect Dialect) (HashCacheAdapter, string, map[string][]byte, error) {
+	adapter := GetHashCacheAdapter()
+	if adapter == nil {
+		return nil, "", nil, fmt.Errorf("gooq: PageCache requires HashCacheAdapter, use SetHashCacheAdapter")
+	}
+	key, err := b.compositeCacheKey(dialect)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	fields, err := adapter.HGetAll(ctx, key)
+	if err != nil {
+		fields = nil
+	}
+	return adapter, key, fields, nil
+}
+
+// resolveCompositeCount 处理复合缓存 count field：命中反序列化；未命中查询回填
+// （count=0 且非 Force 不缓存并短路）。short 为 true 时调用方直接返回空结果。
+func (b *SelectBuilder) resolveCompositeCount(
+	ctx context.Context, dialect Dialect, adapter HashCacheAdapter, key, countField string, fields map[string][]byte,
+) (count int64, short bool, err error) {
+	if bytes, ok := fields[countField]; ok {
+		if err := json.Unmarshal(bytes, &count); err != nil {
+			return 0, false, err
+		}
+		return count, count == 0, nil
+	}
+	count, err = b.countValue(ctx, dialect)
+	if err != nil {
+		return 0, false, err
+	}
+	if count == 0 && !b.pageCacheOpt.Force {
+		return 0, true, nil
+	}
+	if bytes, err := json.Marshal(count); err == nil {
+		_ = adapter.HSet(ctx, key, countField, bytes, b.pageCacheOpt.Duration)
+	}
+	return count, count == 0, nil
+}
+
+func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect Dialect) (Result, int64, error) {
+	dataField, countField := b.cacheFieldNames()
+	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect)
+	if err != nil {
+		return nil, 0, err
+	}
+	count, short, err := b.resolveCompositeCount(ctx, dialect, adapter, key, countField, fields)
+	if err != nil {
+		return nil, 0, err
+	}
+	if short {
+		return nil, 0, nil
+	}
+	// rows：命中直接可用；未命中查询回填。
+	if bytes, ok := fields[dataField]; ok {
+		var rows Result
+		if err := json.Unmarshal(bytes, &rows); err != nil {
+			return nil, 0, err
+		}
+		return rows, count, nil
+	}
+	rows, err := b.rowsValue(ctx, dialect)
+	if err != nil {
+		return nil, 0, err
+	}
+	if rows == nil {
+		rows = Result{}
+	}
+	if bytes, err := json.Marshal(rows); err == nil {
+		_ = adapter.HSet(ctx, key, dataField, bytes, b.pageCacheOpt.Duration)
+	}
+	return rows, count, nil
+}
+
+// ScanAndCount 复合查询：count 先行，count=0 短路；数据扫入 dest 并返回总数。
+// 与 RowsAndCount 共享同一份数据缓存（统一存 Result JSON），命中后 Structs 转换到 dest。
+func (b *SelectBuilder) ScanAndCount(ctx context.Context, dest any) (int64, error) {
+	if b.executor == nil {
+		return 0, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before ScanAndCount")
+	}
+	dialect := b.dialect()
+	if b.pageCacheOpt != nil {
+		return b.scanAndCountWithCache(ctx, dialect, dest)
+	}
+	count, err := b.countValue(ctx, dialect)
+	if err != nil {
+		return 0, err
+	}
+	if count == 0 {
+		return 0, nil
+	}
+	rows, err := b.rowsValue(ctx, dialect)
+	if err != nil {
+		return 0, err
+	}
+	if err := rows.Structs(dest); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (b *SelectBuilder) scanAndCountWithCache(ctx context.Context, dialect Dialect, dest any) (int64, error) {
+	dataField, countField := b.cacheFieldNames()
+	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect)
+	if err != nil {
+		return 0, err
+	}
+	count, short, err := b.resolveCompositeCount(ctx, dialect, adapter, key, countField, fields)
+	if err != nil {
+		return 0, err
+	}
+	if short {
+		return 0, nil
+	}
+	// 数据 field：命中直接反序列化为 Result；未命中查询回填（统一存 Result JSON）。
+	var rows Result
+	if bytes, ok := fields[dataField]; ok {
+		if err := json.Unmarshal(bytes, &rows); err != nil {
+			return 0, err
+		}
+	} else {
+		rows, err = b.rowsValue(ctx, dialect)
+		if err != nil {
+			return 0, err
+		}
+		if rows == nil {
+			rows = Result{}
+		}
+		if bytes, err := json.Marshal(rows); err == nil {
+			_ = adapter.HSet(ctx, key, dataField, bytes, b.pageCacheOpt.Duration)
+		}
+	}
+	if err := rows.Structs(dest); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (b *SelectBuilder) dialect() Dialect {

@@ -86,6 +86,15 @@ func (e *txExecutor) GetDB() gdb.DB {
 	return nil
 }
 
+// Structs 将结果扫入结构体切片（等价 gdb.Result.Structs，按 orm/json tag 映射）。
+func (r Result) Structs(pointer any) error {
+	result := make(gdb.Result, len(r))
+	for i, record := range r {
+		result[i] = gdb.Record(record)
+	}
+	return result.Structs(pointer)
+}
+
 func Get[T any](record Record, field Field[T]) T {
 	var zero T
 	if record == nil {
@@ -123,6 +132,26 @@ func scanExec(ctx context.Context, e executor, sql string, args []any, dest any)
 			return err
 		}
 		return value.Scan(dest)
+	}
+}
+
+// isEmptyResult 判断查询结果是否为空（空集合或零值标量）；struct 不判定（无空语义）。
+func isEmptyResult(v any) bool {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+		return false
+	}
+	rv = rv.Elem()
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return rv.Len() == 0
+	case reflect.Bool, reflect.String,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return rv.IsZero()
+	default:
+		return false
 	}
 }
 
