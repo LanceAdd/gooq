@@ -1,0 +1,849 @@
+package dsl
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"github.com/lanceadd/gooq"
+	"reflect"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/text/gstr"
+)
+
+type dmlKind int
+
+const (
+	dmlInsert dmlKind = iota
+	dmlInsertFrom
+	dmlUpdate
+	dmlDelete
+)
+
+type upsertClause struct {
+	conflictCols []string
+	updateMap    map[string]any
+	doNothing    bool // 冲突时不做任何操作。
+}
+
+type columnValue struct {
+	column string
+	value  any
+}
+
+type DMLBuilder struct {
+	table           gooq.Table
+	kind            dmlKind
+	insertColumns   []string        // Columns 设置的列（当前组）。
+	insertRows      [][]columnValue // INSERT 行数据（保序列值对）。
+	batch           int             // INSERT 分批大小（0 不分批）。
+	setValues       []columnValue   // UPDATE SET 列值对（保序）。
+	batchUpdateRows [][]columnValue // 批量 UPDATE 数据（每条：列值对）。
+	updateKeys      []string        // 批量 UPDATE 条件列（默认主键）。
+	selectBuilder   *SelectBuilder  // INSERT ... SELECT 数据源。
+	conditions      []gooq.Expression
+	unscoped        bool
+	upsert          *upsertClause
+	joins           []*joinClause     // UPDATE 多表 JOIN 子句。
+	returning       []gooq.Expression // RETURNING/OUTPUT 返回列。
+	recordUpdate    bool              // gooq.Record 误用于 Update/Delete 的标记（渲染时报错，防静默无效）。
+	executor        executor          // 执行器（UseDB/UseTX 绑定；nil 时仅离线渲染）。
+}
+
+func Insert(t gooq.Table) *DMLBuilder {
+	return &DMLBuilder{
+		table: t,
+		kind:  dmlInsert,
+	}
+}
+
+func InsertFrom(t gooq.Table, sub *SelectBuilder) *DMLBuilder {
+	return &DMLBuilder{
+		table:         t,
+		kind:          dmlInsertFrom,
+		selectBuilder: sub,
+	}
+}
+
+func (b *DMLBuilder) Columns(fields ...any) *DMLBuilder {
+	for _, f := range fields {
+		if field, ok := f.(interface{ ColumnName() string }); ok {
+			b.insertColumns = append(b.insertColumns, field.ColumnName())
+		}
+	}
+	return b
+}
+
+func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
+	if len(b.insertColumns) == 0 {
+		return b
+	}
+	row := make([]columnValue, len(b.insertColumns))
+	for i, col := range b.insertColumns {
+		row[i] = columnValue{column: col, value: values[i]}
+	}
+	b.insertRows = append(b.insertRows, row)
+	return b
+}
+
+func (b *DMLBuilder) Record(data any) *DMLBuilder {
+	if b.kind == dmlUpdate || b.kind == dmlDelete {
+		b.recordUpdate = true
+		return b
+	}
+	row := recordToRow(b.table, data, b.kind == dmlInsert)
+	b.insertRows = append(b.insertRows, row)
+	return b
+}
+
+func (b *DMLBuilder) Records(data any) *DMLBuilder {
+	rv := reflect.ValueOf(data)
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+		return b
+	}
+	for i := 0; i < rv.Len(); i++ {
+		row := recordToRow(b.table, rv.Index(i).Interface(), b.kind == dmlInsert)
+		if len(row) == 0 {
+			continue
+		}
+		if b.kind == dmlUpdate || b.kind == dmlDelete {
+			b.batchUpdateRows = append(b.batchUpdateRows, row)
+		} else {
+			b.insertRows = append(b.insertRows, row)
+		}
+	}
+	return b
+}
+
+func (b *DMLBuilder) Batch(size int) *DMLBuilder {
+	b.batch = size
+	return b
+}
+
+func (b *DMLBuilder) Keys(fields ...interface{ ColumnName() string }) *DMLBuilder {
+	for _, f := range fields {
+		b.updateKeys = append(b.updateKeys, f.ColumnName())
+	}
+	return b
+}
+
+func recordToRow(t gooq.Table, data any, skipAutoIncr bool) []columnValue {
+	rv := reflect.ValueOf(data)
+	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return nil
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return nil
+	}
+	if t.Meta() == nil {
+		return nil
+	}
+	autoIncr := autoIncrementColumn(t)
+	rt := rv.Type()
+	var row []columnValue
+	for _, fm := range t.Meta().Fields {
+		if skipAutoIncr && fm.ColumnName == autoIncr {
+			continue
+		}
+		for i := 0; i < rt.NumField(); i++ {
+			f := rt.Field(i)
+			if f.PkgPath != "" || !fieldMatchesColumn(f, fm.ColumnName) {
+				continue
+			}
+			fv := rv.Field(i)
+			if fv.IsZero() {
+				break
+			}
+			row = append(row, columnValue{column: fm.ColumnName, value: fv.Interface()})
+			break
+		}
+	}
+	return row
+}
+
+func fieldMatchesColumn(f reflect.StructField, column string) bool {
+	for _, tag := range []string{"orm", "json"} {
+		if v := f.Tag.Get(tag); v != "" {
+			if strings.Split(v, ",")[0] == column {
+				return true
+			}
+		}
+	}
+	return gstr.CaseSnake(f.Name) == column
+}
+
+func (b *DMLBuilder) Clone() *DMLBuilder {
+	newB := *b
+	newB.conditions = append([]gooq.Expression(nil), b.conditions...)
+	newB.joins = cloneJoins(b.joins)
+	newB.returning = append([]gooq.Expression(nil), b.returning...)
+	newB.insertColumns = append([]string(nil), b.insertColumns...)
+	newB.setValues = append([]columnValue(nil), b.setValues...)
+	newB.updateKeys = append([]string(nil), b.updateKeys...)
+	if b.insertRows != nil {
+		newB.insertRows = make([][]columnValue, len(b.insertRows))
+		for i, row := range b.insertRows {
+			newB.insertRows[i] = append([]columnValue(nil), row...)
+		}
+	}
+	if b.batchUpdateRows != nil {
+		newB.batchUpdateRows = make([][]columnValue, len(b.batchUpdateRows))
+		for i, row := range b.batchUpdateRows {
+			newB.batchUpdateRows[i] = append([]columnValue(nil), row...)
+		}
+	}
+	if b.upsert != nil {
+		newUpsert := *b.upsert
+		newUpsert.updateMap = make(map[string]any, len(b.upsert.updateMap))
+		for k, v := range b.upsert.updateMap {
+			newUpsert.updateMap[k] = v
+		}
+		newB.upsert = &newUpsert
+	}
+	if b.selectBuilder != nil {
+		newB.selectBuilder = b.selectBuilder.Clone()
+	}
+	return &newB
+}
+
+func Update(t gooq.Table) *DMLBuilder {
+	return &DMLBuilder{
+		table: t,
+		kind:  dmlUpdate,
+	}
+}
+
+func Delete(t gooq.Table) *DMLBuilder {
+	return &DMLBuilder{
+		table: t,
+		kind:  dmlDelete,
+	}
+}
+
+func (b *DMLBuilder) Data(data map[string]any) *DMLBuilder {
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		b.setValues = append(b.setValues, columnValue{column: k, value: data[k]})
+	}
+	return b
+}
+
+func (b *DMLBuilder) Set(field interface{ ColumnName() string }, v any) *DMLBuilder {
+	b.setValues = append(b.setValues, columnValue{column: field.ColumnName(), value: v})
+	return b
+}
+
+func (b *DMLBuilder) Where(conditions ...gooq.Expression) *DMLBuilder {
+	b.conditions = append(b.conditions, conditions...)
+	return b
+}
+
+func (b *DMLBuilder) LeftJoin(t gooq.Table) *JoinBuilder[*DMLBuilder] {
+	return b.addJoin(joinLeft, t)
+}
+
+func (b *DMLBuilder) RightJoin(t gooq.Table) *JoinBuilder[*DMLBuilder] {
+	return b.addJoin(joinRight, t)
+}
+
+func (b *DMLBuilder) InnerJoin(t gooq.Table) *JoinBuilder[*DMLBuilder] {
+	return b.addJoin(joinInner, t)
+}
+
+func (b *DMLBuilder) FullJoin(t gooq.Table) *JoinBuilder[*DMLBuilder] {
+	return b.addJoin(joinFull, t)
+}
+
+func (b *DMLBuilder) addJoin(joinType joinType, t gooq.Table) *JoinBuilder[*DMLBuilder] {
+	clause := &joinClause{joinType: joinType, table: t}
+	b.joins = append(b.joins, clause)
+	return &JoinBuilder[*DMLBuilder]{parent: b, clause: clause}
+}
+
+func (b *DMLBuilder) Returning(fields ...any) *DMLBuilder {
+	b.returning = append(b.returning, toExpressions(fields)...)
+	return b
+}
+
+func (b *DMLBuilder) Unscoped() *DMLBuilder {
+	b.unscoped = true
+	return b
+}
+
+func (b *DMLBuilder) OnConflictKey(fields ...interface{ ColumnName() string }) *DMLBuilder {
+	if b.upsert == nil {
+		b.upsert = &upsertClause{updateMap: make(map[string]any)}
+	}
+	for _, f := range fields {
+		b.upsert.conflictCols = append(b.upsert.conflictCols, f.ColumnName())
+	}
+	return b
+}
+
+func (b *DMLBuilder) DoNothing() *DMLBuilder {
+	if b.upsert == nil {
+		b.upsert = &upsertClause{updateMap: make(map[string]any)}
+	}
+	b.upsert.doNothing = true
+	return b
+}
+
+func (b *DMLBuilder) DoUpdate(field interface{ ColumnName() string }, v any) *DMLBuilder {
+	if b.upsert == nil {
+		b.upsert = &upsertClause{updateMap: make(map[string]any)}
+	}
+	b.upsert.updateMap[field.ColumnName()] = v
+	return b
+}
+
+func (b *DMLBuilder) UseDB(db gdb.DB) *DMLBuilder {
+	b.executor = db
+	return b
+}
+
+func (b *DMLBuilder) UseTX(tx gdb.TX) *DMLBuilder {
+	b.executor = &txExecutor{tx: tx}
+	return b
+}
+
+func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
+	if b.executor == nil {
+		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Exec")
+	}
+	dialect := b.dmlDialect()
+	if (b.kind == dmlUpdate || b.kind == dmlDelete) && len(b.batchUpdateRows) > 0 {
+		sqls, argss, err := b.renderBatchDML(dialect)
+		if err != nil {
+			return nil, err
+		}
+		if len(sqls) == 0 {
+			return nil, fmt.Errorf("gooq: batch delete/update has no valid records")
+		}
+		var (
+			total      int64
+			lastResult sql.Result
+		)
+		for i, sqlStr := range sqls {
+			result, err := b.executor.Exec(ctx, sqlStr, argss[i]...)
+			if err != nil {
+				return nil, err
+			}
+			if n, err := result.RowsAffected(); err == nil {
+				total += n
+			}
+			lastResult = result
+		}
+		return &batchResult{result: lastResult, affected: total}, nil
+	}
+	if b.kind == dmlInsert && b.batch > 0 && len(b.insertRows) > b.batch {
+		var (
+			total      int64
+			lastResult sql.Result
+		)
+		for start := 0; start < len(b.insertRows); start += b.batch {
+			end := start + b.batch
+			if end > len(b.insertRows) {
+				end = len(b.insertRows)
+			}
+			chunk := *b
+			chunk.insertRows = b.insertRows[start:end]
+			sqlStr, args, err := chunk.ToSql(dialect)
+			if err != nil {
+				return nil, err
+			}
+			result, err := b.executor.Exec(ctx, sqlStr, args...)
+			if err != nil {
+				return nil, err
+			}
+			if n, err := result.RowsAffected(); err == nil {
+				total += n
+			}
+			lastResult = result
+		}
+		return &batchResult{result: lastResult, affected: total}, nil
+	}
+	// 行间列集合不一致时按列分组拆分多条 INSERT（缺失列走表默认值，避免 NULL 补位
+	// 触发 NOT NULL 报错）；单组（列一致）走单条 SQL。
+	if b.kind == dmlInsert {
+		groups := groupInsertRows(b.insertRows)
+		if len(groups) > 1 {
+			var (
+				total      int64
+				lastResult sql.Result
+			)
+			for _, group := range groups {
+				chunk := *b
+				chunk.insertRows = group
+				sqlStr, args, err := chunk.ToSql(dialect)
+				if err != nil {
+					return nil, err
+				}
+				result, err := b.executor.Exec(ctx, sqlStr, args...)
+				if err != nil {
+					return nil, err
+				}
+				if n, err := result.RowsAffected(); err == nil {
+					total += n
+				}
+				lastResult = result
+			}
+			return &batchResult{result: lastResult, affected: total}, nil
+		}
+	}
+	sqlStr, args, err := b.ToSql(dialect)
+	if err != nil {
+		return nil, err
+	}
+	return b.executor.Exec(ctx, sqlStr, args...)
+}
+
+type batchResult struct {
+	result   sql.Result
+	affected int64
+}
+
+func (r *batchResult) LastInsertId() (int64, error) {
+	return r.result.LastInsertId()
+}
+
+func (r *batchResult) RowsAffected() (int64, error) {
+	return r.affected, nil
+}
+
+func (b *DMLBuilder) Scan(ctx context.Context, dest any) error {
+	if b.executor == nil {
+		return fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Scan")
+	}
+	if len(b.returning) == 0 {
+		return fmt.Errorf("gooq: Scan on DML requires Returning fields")
+	}
+	sqlStr, args, err := b.ToSql(b.dmlDialect())
+	if err != nil {
+		return err
+	}
+	return scanExec(ctx, b.executor, sqlStr, args, dest)
+}
+
+func (b *DMLBuilder) dmlDialect() gooq.Dialect {
+	if b.executor != nil {
+		return autoDialect(b.executor)
+	}
+	return gooq.DialectMySQL
+}
+
+// ToSql renders the SQL with the given dialect, or the default MySQL dialect
+// when the parameter is omitted.
+func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
+	var dialect = gooq.DialectMySQL
+	if len(dialects) > 0 && dialects[0] != "" {
+		dialect = dialects[0]
+	}
+	if (b.kind == dmlUpdate || b.kind == dmlDelete) && len(b.batchUpdateRows) > 0 {
+		return "", nil, fmt.Errorf("gooq: batch delete/update renders multiple SQL, use Exec")
+	}
+	rc := gooq.NewRenderContext(dialect)
+	switch b.kind {
+	case dmlInsert:
+		return b.renderInsert(rc)
+	case dmlInsertFrom:
+		return b.renderInsertFrom(rc)
+	case dmlUpdate:
+		return b.renderUpdate(rc)
+	case dmlDelete:
+		return b.renderDelete(rc)
+	default:
+		return "", nil, fmt.Errorf("gooq: unknown dml kind %d", b.kind)
+	}
+}
+
+func (b *DMLBuilder) renderInsertFrom(rc *gooq.RenderContext) (string, []any, error) {
+	// 列清单：优先子查询字段的列名，否则表全列。
+	var columns []string
+	if b.selectBuilder != nil && len(b.selectBuilder.fields) > 0 {
+		for _, f := range b.selectBuilder.fields {
+			if field, ok := f.(interface{ ColumnName() string }); ok {
+				columns = append(columns, field.ColumnName())
+			}
+		}
+	}
+	if len(columns) == 0 {
+		columns = b.table.AllColumns()
+	}
+	if len(columns) == 0 {
+		return "", nil, fmt.Errorf("gooq: insert-from columns is empty")
+	}
+	subSQL, _ := b.selectBuilder.renderSelect(rc)
+	var sqlStr = fmt.Sprintf(
+		"INSERT INTO %s (%s) %s",
+		tableNameSQL(rc, b.table),
+		strings.Join(quoteColumns(rc, columns), ", "),
+		subSQL,
+	)
+	if returning, err := b.renderReturning(rc); err != nil {
+		return "", nil, err
+	} else if returning != "" {
+		sqlStr += returning
+	}
+	return sqlStr, rc.Args(), nil
+}
+
+func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error) {
+	if len(b.insertRows) == 0 {
+		return "", nil, fmt.Errorf("gooq: insert data is empty")
+	}
+	// 列并集：按首行顺序，后续行的额外列追加；某行缺失的列补 NULL
+	// （Rows 入口按行跳过零值字段，行间非零字段集合可能不同）。
+	var columns []string
+	seen := make(map[string]bool)
+	for _, row := range b.insertRows {
+		for _, cv := range row {
+			if !seen[cv.column] {
+				seen[cv.column] = true
+				columns = append(columns, cv.column)
+			}
+		}
+	}
+	if len(columns) == 0 {
+		return "", nil, fmt.Errorf("gooq: insert columns is empty")
+	}
+	rows := make([]string, len(b.insertRows))
+	for i, row := range b.insertRows {
+		placeholders := make([]string, len(columns))
+		for j, col := range columns {
+			placeholders[j] = rc.AddArg(valueOf(row, col))
+		}
+		rows[i] = "(" + strings.Join(placeholders, ", ") + ")"
+	}
+	insertKeyword := "INSERT"
+	if b.upsert != nil && b.upsert.doNothing && rc.Dialect() == gooq.DialectMySQL {
+		insertKeyword = "INSERT IGNORE"
+	}
+	var sqlStr = fmt.Sprintf(
+		"%s INTO %s (%s) VALUES %s",
+		insertKeyword,
+		tableNameSQL(rc, b.table),
+		strings.Join(quoteColumns(rc, columns), ", "),
+		strings.Join(rows, ", "),
+	)
+	if b.upsert != nil && !(b.upsert.doNothing && rc.Dialect() == gooq.DialectMySQL) {
+		sqlStr += renderUpsertClause(rc, b.upsert, rc.Dialect())
+	}
+	if returning, err := b.renderReturning(rc); err != nil {
+		return "", nil, err
+	} else if returning != "" {
+		sqlStr += returning
+	}
+	return sqlStr, rc.Args(), nil
+}
+
+// groupInsertRows 按列集合分组：同组内每行列集一致（可直接渲染，无 NULL 补位）；
+// 组间列集不同 → 拆分多条 INSERT（缺失列走表默认值）。
+func groupInsertRows(rows [][]columnValue) [][][]columnValue {
+	groupMap := make(map[string][][]columnValue)
+	var order []string
+	for _, row := range rows {
+		cols := make([]string, len(row))
+		for i, cv := range row {
+			cols[i] = cv.column
+		}
+		sort.Strings(cols)
+		key := strings.Join(cols, ",")
+		if _, ok := groupMap[key]; !ok {
+			order = append(order, key)
+		}
+		groupMap[key] = append(groupMap[key], row)
+	}
+	groups := make([][][]columnValue, len(order))
+	for i, key := range order {
+		groups[i] = groupMap[key]
+	}
+	return groups
+}
+
+func quoteColumns(rc *gooq.RenderContext, columns []string) []string {
+	result := make([]string, len(columns))
+	for i, c := range columns {
+		result[i] = rc.Quote(c)
+	}
+	return result
+}
+
+func valueOf(row []columnValue, column string) any {
+	for _, cv := range row {
+		if cv.column == column {
+			return cv.value
+		}
+	}
+	return nil
+}
+
+func isInStrings(list []string, target string) bool {
+	for _, v := range list {
+		if v == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error) {
+	if b.recordUpdate {
+		return "", nil, fmt.Errorf("gooq: Update/Delete gooq.Record is not supported, use Set/Data with Where or Delete with Where")
+	}
+	if len(b.setValues) == 0 {
+		return "", nil, fmt.Errorf("gooq: update data is empty")
+	}
+	var sqlStr string
+	switch {
+	case len(b.joins) == 0:
+		sqlStr = fmt.Sprintf("UPDATE %s SET %s", renderTableName(rc, b.table), b.renderSets(rc))
+	case rc.Dialect() == gooq.DialectPgsql || rc.Dialect() == gooq.DialectSQLite:
+		sqlStr = fmt.Sprintf("UPDATE %s SET %s FROM %s", renderTableName(rc, b.table), b.renderSets(rc), b.renderJoinTables(rc))
+	default:
+		sqlStr = fmt.Sprintf("UPDATE %s %s SET %s", renderTableName(rc, b.table), b.renderJoinClauses(rc), b.renderSets(rc))
+	}
+	if where := b.renderWhere(rc); where != "" {
+		sqlStr += " WHERE " + where
+	}
+	if returning, err := b.renderReturning(rc); err != nil {
+		return "", nil, err
+	} else if returning != "" {
+		sqlStr += returning
+	}
+	return sqlStr, rc.Args(), nil
+}
+
+func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, error) {
+	keys := b.updateKeys
+	if len(keys) == 0 && b.table.Meta() != nil {
+		for _, fm := range b.table.Meta().Fields {
+			if fm.Primary {
+				keys = append(keys, fm.ColumnName)
+			}
+		}
+	}
+	if len(keys) == 0 {
+		return nil, nil, fmt.Errorf("gooq: batch delete/update requires primary key or Keys(...)")
+	}
+	var (
+		sqls  []string
+		argss [][]any
+	)
+	for _, row := range b.batchUpdateRows {
+		var (
+			setCols []string
+			setArgs []any
+			where   []string
+			whereA  []any
+		)
+		for _, cv := range row {
+			if isInStrings(keys, cv.column) {
+				where = append(where, cv.column)
+				whereA = append(whereA, cv.value)
+			} else {
+				setCols = append(setCols, cv.column)
+				setArgs = append(setArgs, cv.value)
+			}
+		}
+		if len(where) == 0 || (b.kind == dmlUpdate && len(setCols) == 0) {
+			continue
+		}
+		rc := gooq.NewRenderContext(dialect)
+		var sqlStr string
+		switch b.kind {
+		case dmlDelete:
+			softField := b.table.Meta().SoftDeleteField()
+			if softField != nil && !b.unscoped {
+				sqlStr = fmt.Sprintf(
+					"UPDATE %s SET %s = %s",
+					tableNameSQL(rc, b.table),
+					rc.Quote(softField.ColumnName),
+					rc.AddArg(time.Now()),
+				)
+			} else {
+				sqlStr = "DELETE FROM " + tableNameSQL(rc, b.table)
+			}
+		default:
+			placeholders := make([]string, len(setCols))
+			for i := range setCols {
+				placeholders[i] = renderSetValue(rc, setCols[i], setArgs[i])
+			}
+			sqlStr = fmt.Sprintf("UPDATE %s SET %s", tableNameSQL(rc, b.table), strings.Join(placeholders, ", "))
+		}
+		whereParts := make([]string, len(where))
+		for i := range where {
+			whereParts[i] = fmt.Sprintf("%s = %s", rc.Quote(where[i]), rc.AddArg(whereA[i]))
+		}
+		sqls = append(sqls, sqlStr+" WHERE "+strings.Join(whereParts, " AND "))
+		argss = append(argss, rc.Args())
+	}
+	return sqls, argss, nil
+}
+
+func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error) {
+	if b.recordUpdate {
+		return "", nil, fmt.Errorf("gooq: Update/Delete gooq.Record is not supported, use Set/Data with Where or Delete with Where")
+	}
+	if !b.unscoped && b.table.Meta() != nil {
+		if softField := b.table.Meta().SoftDeleteField(); softField != nil {
+			sqlStr := fmt.Sprintf(
+				"UPDATE %s SET %s = %s",
+				tableNameSQL(rc, b.table),
+				rc.Quote(softField.ColumnName),
+				rc.AddArg(time.Now()),
+			)
+			if where := b.renderWhere(rc); where != "" {
+				sqlStr += " WHERE " + where
+			}
+			if returning, err := b.renderReturning(rc); err != nil {
+				return "", nil, err
+			} else if returning != "" {
+				sqlStr += returning
+			}
+			return sqlStr, rc.Args(), nil
+		}
+	}
+	var sqlStr = "DELETE FROM " + tableNameSQL(rc, b.table)
+	if where := b.renderWhere(rc); where != "" {
+		sqlStr += " WHERE " + where
+	}
+	if returning, err := b.renderReturning(rc); err != nil {
+		return "", nil, err
+	} else if returning != "" {
+		sqlStr += returning
+	}
+	return sqlStr, rc.Args(), nil
+}
+
+func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
+	conditions := b.conditions
+	if len(b.joins) > 0 && (rc.Dialect() == gooq.DialectPgsql || rc.Dialect() == gooq.DialectSQLite) {
+		for _, j := range b.joins {
+			conditions = append(conditions, j.on...)
+		}
+	}
+	var parts []string
+	for _, c := range conditions {
+		condSQL, _ := rc.Render(c)
+		if condSQL != "" {
+			parts = append(parts, condSQL)
+		}
+	}
+	return strings.Join(parts, " AND ")
+}
+
+func (b *DMLBuilder) renderSets(rc *gooq.RenderContext) string {
+	var sets []string
+	for _, cv := range b.setValues {
+		sets = append(sets, renderSetValue(rc, cv.column, cv.value))
+	}
+	return strings.Join(sets, ", ")
+}
+
+// renderSetValue 渲染 SET 值：表达式渲染为 SQL 片段，普通值作为参数。
+func renderSetValue(rc *gooq.RenderContext, column string, value any) string {
+	if expr, ok := value.(gooq.Expression); ok {
+		valSQL, _ := rc.Render(expr)
+		return fmt.Sprintf("%s = %s", rc.Quote(column), valSQL)
+	}
+	return fmt.Sprintf("%s = %s", rc.Quote(column), rc.AddArg(value))
+}
+
+func (b *DMLBuilder) renderJoinClauses(rc *gooq.RenderContext) string {
+	var joins []string
+	for _, j := range b.joins {
+		joins = append(joins, joinKeyword[j.joinType]+" "+renderTableName(rc, j.table)+b.renderJoinOn(rc, j))
+	}
+	return strings.Join(joins, " ")
+}
+
+// renderJoinTables 渲染 FROM 表列表（PG/SQLite 的 UPDATE...FROM 语法，无 ON 条件）。
+func (b *DMLBuilder) renderJoinTables(rc *gooq.RenderContext) string {
+	var tables []string
+	for _, j := range b.joins {
+		tables = append(tables, renderTableName(rc, j.table))
+	}
+	return strings.Join(tables, ", ")
+}
+
+func (b *DMLBuilder) renderJoinOn(rc *gooq.RenderContext, j *joinClause) string {
+	if len(j.on) == 0 {
+		return ""
+	}
+	var ons []string
+	for _, c := range j.on {
+		onSQL, _ := rc.Render(c)
+		if onSQL != "" {
+			ons = append(ons, onSQL)
+		}
+	}
+	return " ON " + strings.Join(ons, " AND ")
+}
+
+func (b *DMLBuilder) renderReturning(rc *gooq.RenderContext) (string, error) {
+	if len(b.returning) == 0 {
+		return "", nil
+	}
+	var keyword string
+	if rc.DialectInfo() != nil {
+		keyword = rc.DialectInfo().Returning
+	}
+	if keyword == "" {
+		return "", fmt.Errorf("gooq: RETURNING is not supported by dialect %s", rc.Dialect())
+	}
+	var parts []string
+	for _, f := range b.returning {
+		fieldSQL, _ := rc.Render(f)
+		parts = append(parts, fieldSQL)
+	}
+	return " " + keyword + " " + strings.Join(parts, ", "), nil
+}
+
+func autoIncrementColumn(t gooq.Table) string {
+	if t.Meta() == nil {
+		return ""
+	}
+	for i := range t.Meta().Fields {
+		if t.Meta().Fields[i].AutoIncrement {
+			return t.Meta().Fields[i].ColumnName
+		}
+	}
+	return ""
+}
+
+func renderUpsertClause(rc *gooq.RenderContext, clause *upsertClause, dialect gooq.Dialect) string {
+	switch dialect {
+	case gooq.DialectPgsql:
+		if clause.doNothing {
+			return fmt.Sprintf(
+				" ON CONFLICT (%s) DO NOTHING",
+				strings.Join(quoteColumns(rc, clause.conflictCols), ", "),
+			)
+		}
+		var sets []string
+		for col, val := range clause.updateMap {
+			sets = append(sets, fmt.Sprintf(`%s = %s`, rc.Quote(col), rc.AddArg(val)))
+		}
+		return fmt.Sprintf(
+			" ON CONFLICT (%s) DO UPDATE SET %s",
+			strings.Join(quoteColumns(rc, clause.conflictCols), ", "),
+			strings.Join(sets, ", "),
+		)
+	default:
+		var sets []string
+		for col := range clause.updateMap {
+			sets = append(sets, fmt.Sprintf(`%s = VALUES(%s)`, rc.Quote(col), rc.Quote(col)))
+		}
+		return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", ")
+	}
+}

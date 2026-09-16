@@ -1,0 +1,50 @@
+// ==========================================================================
+// Code generated and maintained by gooq-gen. DO NOT EDIT.
+// ==========================================================================
+
+package {{.TplPackageName}}
+
+import (
+{{.TplGooqImport}}
+{{- if .TplGooqImports}}
+{{.TplGooqImports}}
+{{- end}}
+)
+
+// {{.TplTableNameCamelCase}}Table is the typed table object for table "{{.TplTableName}}".
+type {{.TplTableNameCamelCase}}Table struct {
+	*{{.TplGooqRef}}TableBase
+
+{{.TplGooqFields}}
+}
+
+// {{.TplTableNameCamelCase}}Meta is the static metadata of table {{.TplTableName}}.
+var {{.TplTableNameCamelCase}}Meta = &{{.TplGooqRef}}TableMeta{
+	TableName: "{{.TplTableName}}",
+	Schema:    "{{.TplTableSchema}}",
+	Fields: []{{.TplGooqRef}}FieldMeta{
+{{.TplGooqFieldMetas}}
+	},
+}
+
+func new{{.TplTableNameCamelCase}}Table(alias ...string) *{{.TplTableNameCamelCase}}Table {
+	t := &{{.TplTableNameCamelCase}}Table{TableBase: {{.TplGooqRef}}NewTableBase({{.TplTableNameCamelCase}}Meta)}
+	if len(alias) > 0 {
+		t.TableBase = t.TableBase.As(alias[0])
+	}
+{{.TplGooqFieldAssigns}}
+	return t
+}
+
+// {{.TplTableNameCamelCase}} is the globally accessible table object for table {{.TplTableName}}.
+var {{.TplTableNameCamelCase}} = new{{.TplTableNameCamelCase}}Table()
+
+// As returns a copy of the table object with the given alias.
+func (t *{{.TplTableNameCamelCase}}Table) As(alias string) *{{.TplTableNameCamelCase}}Table {
+	return new{{.TplTableNameCamelCase}}Table(alias)
+}
+
+// Clone returns a copy of the table object without alias.
+func (t *{{.TplTableNameCamelCase}}Table) Clone() *{{.TplTableNameCamelCase}}Table {
+	return new{{.TplTableNameCamelCase}}Table()
+}
