@@ -117,11 +117,15 @@ dsl.Select(User.ID).From(User).Limit(10)              // ... LIMIT 10
 dsl.Select(User.ID).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
 dsl.Select(User.ID).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（页码从 1 起）
 
-// 排序（NullsFirst/NullsLast 仅 PG 渲染）
+// 排序：方向属于表达式本身（Field.Asc()/Desc()、gooq.OrderAscExpr/DescExpr）
 dsl.Select(User.ID).From(User).Order(User.Age.Desc(), User.ID.Asc()).ToSql(gooq.DialectPgsql)
 // SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL ORDER BY "user"."age" DESC, "user"."id" ASC
-dsl.Select(User.ID).From(User).Order(User.Age.Desc().NullsLast()).ToSql(gooq.DialectPgsql)
-// ... ORDER BY "user"."age" DESC NULLS LAST
+dsl.Select(User.ID).From(User).OrderDesc(fn.Count(User.ID))       // 糖：逐条包装 DESC
+// 表达式/片段排序 —— Order 原样渲染（NULLS 等语法用 Raw 表达）
+dsl.Select(User.ID).From(User).OrderDesc(gooq.Raw("ABS(`user`.`age`)"))
+// ... ORDER BY ABS(`user`.`age`) DESC
+dsl.Select(User.ID).From(User).Order(gooq.Raw("`user`.`age` DESC NULLS LAST"))
+// ... ORDER BY `user`.`age` DESC NULLS LAST
 ```
 
 ### 条件
@@ -265,17 +269,17 @@ dsl.Select(fn.DateFormat(User.CreatedAt, "%Y-%m-%d")).From(User).ToSql(gooq.Dial
 
 // 字符串聚合（MySQL GROUP_CONCAT / PG STRING_AGG / SQLite GROUP_CONCAT）。
 fn.GroupConcat(fn.GroupConcatOptions{
-    Field: User.Name, Separator: "-", OrderBy: []gooq.OrderClause{User.Name.Asc()},
+    Field: User.Name, Separator: "-", OrderBy: []gooq.Expression{User.Name.Asc()},
 }).ToSql(...)  // GROUP_CONCAT(`user`.`name` ORDER BY `user`.`name` ASC SEPARATOR '-')
 
 // 窗口函数。
-fn.Rank().Over([]gooq.Expression{User.Status}, []gooq.OrderClause{User.Age.Desc()}).As("r")
+fn.Rank().Over([]gooq.Expression{User.Status}, []gooq.Expression{User.Age.Desc()}).As("r")
 // RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r
-fn.RowNumber().Over(nil, []gooq.OrderClause{User.ID.Asc()})
+fn.RowNumber().Over(nil, []gooq.Expression{User.ID.Asc()})
 // ROW_NUMBER() OVER (ORDER BY `user`.`id` ASC)
 fn.Sum(User.Age).OverFrame(
     []gooq.Expression{User.Status},
-    []gooq.OrderClause{User.ID.Asc()},
+    []gooq.Expression{User.ID.Asc()},
     fn.RowsFrame("UNBOUNDED PRECEDING", "CURRENT ROW"),
 )
 // SUM(`user`.`age`) OVER (PARTITION BY `user`.`status` ORDER BY `user`.`id` ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
@@ -496,7 +500,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 - 未注册方言回退默认渲染；驱动可 `RegisterDialect` 增量覆盖内置方言。
 - 带 schema 的表渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；gooq-gen 仅对 PG 填充 schema（`current_schema()`）。
-- 方言敏感行为均内置处理：分页（LIMIT/OFFSET）、`NullsFirst/NullsLast`（仅 PG）、行锁（`FOR UPDATE`/`LOCK IN SHARE MODE`/`FOR SHARE`）、LATERAL 映射（SQLite `INNER JOIN LATERAL` → `CROSS JOIN LATERAL`）、Upsert 语法、`DATE_FORMAT`/`TO_CHAR`/`strftime`、`GROUP_CONCAT`/`STRING_AGG`。
+- 方言敏感行为均内置处理：分页（LIMIT/OFFSET）、行锁（`FOR UPDATE`/`LOCK IN SHARE MODE`/`FOR SHARE`）、LATERAL 映射（SQLite `INNER JOIN LATERAL` → `CROSS JOIN LATERAL`）、Upsert 语法、`DATE_FORMAT`/`TO_CHAR`/`strftime`、`GROUP_CONCAT`/`STRING_AGG`。
 
 ## gooq-gen（代码生成工具）
 

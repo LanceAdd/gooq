@@ -118,11 +118,15 @@ dsl.Select(User.ID).From(User).Limit(10)              // ... LIMIT 10
 dsl.Select(User.ID).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
 dsl.Select(User.ID).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（1-based pages）
 
-// Ordering (NullsFirst/NullsLast render on PG only)
+// Ordering: direction is part of the expression (Field.Asc()/Desc(), gooq.OrderAscExpr/DescExpr)
 dsl.Select(User.ID).From(User).Order(User.Age.Desc(), User.ID.Asc()).ToSql(gooq.DialectPgsql)
 // SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL ORDER BY "user"."age" DESC, "user"."id" ASC
-dsl.Select(User.ID).From(User).Order(User.Age.Desc().NullsLast()).ToSql(gooq.DialectPgsql)
-// ... ORDER BY "user"."age" DESC NULLS LAST
+dsl.Select(User.ID).From(User).OrderDesc(fn.Count(User.ID))       // shorthand: wrap each with DESC
+// Order by expression / raw fragment — Order renders items as-is (NULLS etc. via Raw)
+dsl.Select(User.ID).From(User).OrderDesc(gooq.Raw("ABS(`user`.`age`)"))
+// ... ORDER BY ABS(`user`.`age`) DESC
+dsl.Select(User.ID).From(User).Order(gooq.Raw("`user`.`age` DESC NULLS LAST"))
+// ... ORDER BY `user`.`age` DESC NULLS LAST
 ```
 
 ### Conditions
@@ -266,17 +270,17 @@ dsl.Select(fn.DateFormat(User.CreatedAt, "%Y-%m-%d")).From(User).ToSql(gooq.Dial
 
 // String aggregation (MySQL GROUP_CONCAT / PG STRING_AGG / SQLite GROUP_CONCAT).
 fn.GroupConcat(fn.GroupConcatOptions{
-    Field: User.Name, Separator: "-", OrderBy: []gooq.OrderClause{User.Name.Asc()},
+    Field: User.Name, Separator: "-", OrderBy: []gooq.Expression{User.Name.Asc()},
 }).ToSql(...)  // GROUP_CONCAT(`user`.`name` ORDER BY `user`.`name` ASC SEPARATOR '-')
 
 // Window functions.
-fn.Rank().Over([]gooq.Expression{User.Status}, []gooq.OrderClause{User.Age.Desc()}).As("r")
+fn.Rank().Over([]gooq.Expression{User.Status}, []gooq.Expression{User.Age.Desc()}).As("r")
 // RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r
-fn.RowNumber().Over(nil, []gooq.OrderClause{User.ID.Asc()})
+fn.RowNumber().Over(nil, []gooq.Expression{User.ID.Asc()})
 // ROW_NUMBER() OVER (ORDER BY `user`.`id` ASC)
 fn.Sum(User.Age).OverFrame(
     []gooq.Expression{User.Status},
-    []gooq.OrderClause{User.ID.Asc()},
+    []gooq.Expression{User.ID.Asc()},
     fn.RowsFrame("UNBOUNDED PRECEDING", "CURRENT ROW"),
 )
 // SUM(`user`.`age`) OVER (PARTITION BY `user`.`status` ORDER BY `user`.`id` ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
@@ -500,7 +504,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 - Unregistered dialects fall back to default rendering; `RegisterDialect` overrides built-ins incrementally.
 - Schema-qualified tables render `schema.table.column` (alias shadows schema); gooq-gen fills schema for PG only (`current_schema()`).
-- Dialect-sensitive behavior is handled internally: pagination, `NullsFirst/NullsLast` (PG only), row locks (`FOR UPDATE`/`LOCK IN SHARE MODE`/`FOR SHARE`), LATERAL mapping (SQLite `INNER JOIN LATERAL` → `CROSS JOIN LATERAL`), upsert syntax, `DATE_FORMAT`/`TO_CHAR`/`strftime`, `GROUP_CONCAT`/`STRING_AGG`.
+- Dialect-sensitive behavior is handled internally: pagination, row locks (`FOR UPDATE`/`LOCK IN SHARE MODE`/`FOR SHARE`), LATERAL mapping (SQLite `INNER JOIN LATERAL` → `CROSS JOIN LATERAL`), upsert syntax, `DATE_FORMAT`/`TO_CHAR`/`strftime`, `GROUP_CONCAT`/`STRING_AGG`.
 
 ## gooq-gen (codegen tool)
 

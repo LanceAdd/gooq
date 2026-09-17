@@ -8,8 +8,10 @@
 package dsl
 
 import (
-	"github.com/lanceadd/gooq"
 	"testing"
+
+	"github.com/lanceadd/gooq"
+	"github.com/lanceadd/gooq/fn"
 
 	"github.com/gogf/gf/v2/test/gtest"
 )
@@ -334,19 +336,20 @@ func TestDsl_Select_Conditions(t *testing.T) {
 	})
 }
 
-func TestDsl_Select_OrderNulls(t *testing.T) {
+// TestDsl_Select_OrderRaw 验证 Raw 作为排序逃生舱：片段原样渲染（方向/NULLS 自定，不追加任何后缀）。
+func TestDsl_Select_OrderRaw(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, _, err := Select(testUser.ID).From(testUser).
-			Order(testUser.Age.Desc().NullsLast()).
-			ToSql(gooq.DialectPgsql)
-		t.AssertNil(err)
-		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL ORDER BY "user"."age" DESC NULLS LAST`)
-
-		sql, _, err = Select(testUser.ID).From(testUser).
-			Order(testUser.Age.Desc().NullsLast()).
+			Order(gooq.Raw("`user`.`age` DESC NULLS LAST")).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL ORDER BY `user`.`age` DESC")
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL ORDER BY `user`.`age` DESC NULLS LAST")
+
+		sql, _, err = Select(testUser.ID).From(testUser).
+			Order(gooq.Raw("RAND()")).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL ORDER BY RAND()")
 	})
 }
 
@@ -359,5 +362,32 @@ func TestDsl_Select_Clone(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql1, "SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL")
 		t.Assert(sql2, "SELECT `user`.`id` FROM `user` WHERE `user`.`status` = ? AND `user`.`deleted_at` IS NULL")
+	})
+}
+
+// TestDsl_Select_OrderExpr 验证表达式排序：方向打包进表达式，Order/OrderAsc/OrderDesc 参数统一为 Expression。
+func TestDsl_Select_OrderExpr(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, _, err := Select(testUser.ID).From(testUser).
+			OrderDesc(gooq.Raw("ABS(`user`.`age`)")).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL ORDER BY ABS(`user`.`age`) DESC")
+
+		// Order 原样 + 链式追加混用；字段方向来自 Field.Desc()。
+		sql, _, err = Select(testUser.ID).From(testUser).
+			Order(testUser.Age.Desc()).
+			OrderAsc(gooq.Raw("ABS(`user`.`age`)")).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL ORDER BY `user`.`age` DESC, ABS(`user`.`age`) ASC")
+
+		// 聚合排序：gooq.OrderDescExpr 包装任意表达式。
+		sql, _, err = Select(testUser.Status, fn.Count(testUser.ID)).From(testUser).
+			Group(testUser.Status).
+			Order(gooq.OrderDescExpr(fn.Count(testUser.ID))).
+			ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "user"."status", COUNT("user"."id") FROM "user" WHERE "user"."deleted_at" IS NULL GROUP BY "user"."status" ORDER BY COUNT("user"."id") DESC`)
 	})
 }

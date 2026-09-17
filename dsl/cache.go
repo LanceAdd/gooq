@@ -103,7 +103,7 @@ func (b *SelectBuilder) compositeCacheKey(dialect gooq.Dialect) (string, error) 
 		sb.WriteString("|h:" + sql + fmt.Sprintf("%v", args))
 	}
 	for _, o := range b.orderBy {
-		sql, args := o.Render(rc)
+		sql, args := rc.Render(o)
 		sb.WriteString("|o:" + sql + fmt.Sprintf("%v", args))
 	}
 	sb.WriteString("|args:" + fmt.Sprintf("%v", rc.Args()))

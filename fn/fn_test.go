@@ -166,7 +166,7 @@ func TestFn_GroupConcat(t *testing.T) {
 		t.Assert(sql, "SELECT GROUP_CONCAT(`user`.`name`) FROM `user` WHERE `user`.`deleted_at` IS NULL")
 
 		sql, _, err = dsl.Select(GroupConcat(GroupConcatOptions{
-			Field: testUser.Name, Separator: "-", OrderBy: []gooq.OrderClause{testUser.Name.Asc()},
+			Field: testUser.Name, Separator: "-", OrderBy: []gooq.Expression{testUser.Name.Asc()},
 		})).From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT GROUP_CONCAT(`user`.`name` ORDER BY `user`.`name` ASC SEPARATOR '-') FROM `user` WHERE `user`.`deleted_at` IS NULL")
@@ -191,14 +191,14 @@ func TestFn_GroupConcat(t *testing.T) {
 func TestFn_Window(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, _, err := dsl.Select(
-			Rank().Over([]gooq.Expression{testUser.Status}, []gooq.OrderClause{testUser.Age.Desc()}).
+			Rank().Over([]gooq.Expression{testUser.Status}, []gooq.Expression{testUser.Age.Desc()}).
 				As("r"),
 		).From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r FROM `user` WHERE `user`.`deleted_at` IS NULL")
 
 		sql, _, err = dsl.Select(
-			RowNumber().Over(nil, []gooq.OrderClause{testUser.ID.Asc()}),
+			RowNumber().Over(nil, []gooq.Expression{testUser.ID.Asc()}),
 		).From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT ROW_NUMBER() OVER (ORDER BY `user`.`id` ASC) FROM `user` WHERE `user`.`deleted_at` IS NULL")
@@ -206,7 +206,7 @@ func TestFn_Window(t *testing.T) {
 		sql, _, err = dsl.Select(
 			Sum(testUser.Age).OverFrame(
 				[]gooq.Expression{testUser.Status},
-				[]gooq.OrderClause{testUser.ID.Asc()},
+				[]gooq.Expression{testUser.ID.Asc()},
 				RowsFrame("UNBOUNDED PRECEDING", "CURRENT ROW"),
 			),
 		).From(testUser).ToSql(gooq.DialectMySQL)

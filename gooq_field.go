@@ -37,12 +37,12 @@ func (f Field[T]) Alias() string {
 	return f.alias
 }
 
-func (f Field[T]) Desc() OrderClause {
-	return OrderClause{field: toAnyField(f), desc: true}
+func (f Field[T]) Desc() Expression {
+	return OrderDescExpr(toAnyField(f))
 }
 
-func (f Field[T]) Asc() OrderClause {
-	return OrderClause{field: toAnyField(f), desc: false}
+func (f Field[T]) Asc() Expression {
+	return OrderAscExpr(toAnyField(f))
 }
 
 func (f Field[T]) Condition() (string, []any) {
@@ -78,38 +78,36 @@ func (f Field[T]) prefixParts() []string {
 	return strings.Split(f.tableName, ".")
 }
 
-type OrderClause struct {
-	field Field[any]
-	desc  bool
-	nulls string // "FIRST" / "LAST"（PG 渲染，MySQL/SQLite 忽略）。
+// orderDirExpr 是方向包装节点：包住排序表达式，渲染时追加 ASC/DESC（NULLS 等额外语法用 gooq.Raw 原样表达）。
+type orderDirExpr struct {
+	expr Expression
+	desc bool
 }
 
-// Field 返回排序字段。
-func (o OrderClause) Field() Field[any] {
-	return o.field
+// OrderAscExpr 包装表达式为升序排序项（字段排序用 Field.Asc() 方法）。
+func OrderAscExpr(e Expression) Expression {
+	return &orderDirExpr{expr: e}
 }
 
-func (o OrderClause) NullsFirst() OrderClause {
-	o.nulls = "FIRST"
-	return o
+// OrderDescExpr 包装表达式为降序排序项（字段排序用 Field.Desc() 方法）。
+func OrderDescExpr(e Expression) Expression {
+	return &orderDirExpr{expr: e, desc: true}
 }
 
-func (o OrderClause) NullsLast() OrderClause {
-	o.nulls = "LAST"
-	return o
+func (e *orderDirExpr) Condition() (string, []any) {
+	return e.Render(NewRenderContext(DialectMySQL))
 }
 
-func (o OrderClause) Render(rc *RenderContext) (string, []any) {
-	sql, _ := o.field.Render(rc)
-	if o.desc {
-		sql += " DESC"
-	} else {
-		sql += " ASC"
+func (e *orderDirExpr) Render(rc *RenderContext) (string, []any) {
+	sql, args := rc.Render(e.expr)
+	if e.desc {
+		return sql + " DESC", args
 	}
-	if o.nulls != "" && rc.dialect != DialectMySQL && rc.dialect != DialectSQLite {
-		sql += " NULLS " + o.nulls
-	}
-	return sql, nil
+	return sql + " ASC", args
+}
+
+func (e *orderDirExpr) SubExpressions() []Expression {
+	return []Expression{e.expr}
 }
 
 type opType int

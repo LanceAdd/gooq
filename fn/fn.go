@@ -41,13 +41,13 @@ func (f *FuncExpr) As(alias string) *FuncExpr {
 	return f
 }
 
-func (f *FuncExpr) Over(partitionBy []gooq.Expression, orderBy []gooq.OrderClause) *FuncExpr {
+func (f *FuncExpr) Over(partitionBy []gooq.Expression, orderBy []gooq.Expression) *FuncExpr {
 	f.over = &overClause{partitionBy: partitionBy, orderBy: orderBy}
 	return f
 }
 
 func (f *FuncExpr) OverFrame(
-	partitionBy []gooq.Expression, orderBy []gooq.OrderClause, frame WindowFrame,
+	partitionBy []gooq.Expression, orderBy []gooq.Expression, frame WindowFrame,
 ) *FuncExpr {
 	f.over = &overClause{partitionBy: partitionBy, orderBy: orderBy, frame: &frame}
 	return f
@@ -108,7 +108,7 @@ func (f *FuncExpr) SubExpressions() []gooq.Expression {
 
 type overClause struct {
 	partitionBy []gooq.Expression
-	orderBy     []gooq.OrderClause
+	orderBy     []gooq.Expression
 	frame       *WindowFrame
 }
 
@@ -140,7 +140,7 @@ func renderOver(rc *gooq.RenderContext, over *overClause) string {
 	if len(over.orderBy) > 0 {
 		var parts []string
 		for _, o := range over.orderBy {
-			sqlPart, _ := o.Render(rc)
+			sqlPart, _ := rc.Render(o)
 			parts = append(parts, sqlPart)
 		}
 		overParts = append(overParts, "ORDER BY "+strings.Join(parts, ", "))

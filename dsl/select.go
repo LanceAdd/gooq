@@ -90,7 +90,7 @@ type SelectBuilder struct {
 	groupExt     groupExtKind        // GROUP BY 扩展（ROLLUP/CUBE/GROUPING SETS）。
 	groupExtSets [][]gooq.Expression // 扩展分组字段（ROLLUP/CUBE 单组；GROUPING SETS 每组一个列表）。
 	having       []gooq.Expression   // HAVING 条件。
-	orderBy      []gooq.OrderClause  // ORDER BY。
+	orderBy      []gooq.Expression   // ORDER BY。
 	limit        int                 // LIMIT（0 表示不限制）。
 	offset       int                 // OFFSET。
 	distinct     bool                // DISTINCT。
@@ -154,7 +154,7 @@ func (b *SelectBuilder) Clone() *SelectBuilder {
 	newB.conditions = append([]gooq.Expression(nil), b.conditions...)
 	newB.groupBy = append([]gooq.Expression(nil), b.groupBy...)
 	newB.having = append([]gooq.Expression(nil), b.having...)
-	newB.orderBy = append([]gooq.OrderClause(nil), b.orderBy...)
+	newB.orderBy = append([]gooq.Expression(nil), b.orderBy...)
 	newB.columns = append([]string(nil), b.columns...)
 	newB.joins = cloneJoins(b.joins)
 	if b.groupExtSets != nil {
@@ -255,8 +255,25 @@ func (b *SelectBuilder) Or(condition gooq.Expression) *SelectBuilder {
 	return b
 }
 
-func (b *SelectBuilder) Order(clauses ...gooq.OrderClause) *SelectBuilder {
-	b.orderBy = append(b.orderBy, clauses...)
+// Order 追加排序表达式，原样渲染（方向由表达式自带：Field.Asc()/Desc()、gooq.OrderAscExpr/DescExpr；任意片段用 gooq.Raw）。
+func (b *SelectBuilder) Order(exprs ...gooq.Expression) *SelectBuilder {
+	b.orderBy = append(b.orderBy, exprs...)
+	return b
+}
+
+// OrderAsc 追加排序表达式，逐条包装为升序。
+func (b *SelectBuilder) OrderAsc(exprs ...gooq.Expression) *SelectBuilder {
+	for _, e := range exprs {
+		b.orderBy = append(b.orderBy, gooq.OrderAscExpr(e))
+	}
+	return b
+}
+
+// OrderDesc 追加排序表达式，逐条包装为降序。
+func (b *SelectBuilder) OrderDesc(exprs ...gooq.Expression) *SelectBuilder {
+	for _, e := range exprs {
+		b.orderBy = append(b.orderBy, gooq.OrderDescExpr(e))
+	}
 	return b
 }
 
@@ -923,9 +940,7 @@ func (b *SelectBuilder) ValidateDialect(dialect gooq.Dialect) error {
 	}
 	exprs = append(exprs, b.groupBy...)
 	exprs = append(exprs, b.having...)
-	for _, o := range b.orderBy {
-		exprs = append(exprs, o.Field())
-	}
+	exprs = append(exprs, b.orderBy...)
 	for _, e := range exprs {
 		if err := gooq.WalkExpression(e, dialect); err != nil {
 			return err
@@ -1085,7 +1100,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 	if len(b.orderBy) > 0 {
 		var orders []string
 		for _, o := range b.orderBy {
-			orderSQL, _ := o.Render(rc)
+			orderSQL, _ := rc.Render(o)
 			orders = append(orders, orderSQL)
 		}
 		sql.WriteString(" ORDER BY ")

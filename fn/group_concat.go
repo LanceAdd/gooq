@@ -15,8 +15,8 @@ type GroupConcatOptions struct {
 	Separator string
 	// Distinct 是否去重（MySQL/SQLite 支持；PG 不支持，渲染校验报错）。
 	Distinct bool
-	// OrderBy 是组内排序（SQLite 忽略；MySQL/PG 支持）。
-	OrderBy []gooq.OrderClause
+	// OrderBy 是组内排序（SQLite 忽略；MySQL/PG 支持），表达式自带方向（Field.Asc() 等）。
+	OrderBy []gooq.Expression
 }
 
 // GroupConcat 构造字符串聚合表达式。
@@ -39,7 +39,7 @@ func GroupConcat(options GroupConcatOptions) *FuncExpr {
 		if len(options.OrderBy) > 0 {
 			var parts []string
 			for _, o := range options.OrderBy {
-				orderSQLPart, _ := o.Render(rc)
+				orderSQLPart, _ := rc.Render(o)
 				parts = append(parts, orderSQLPart)
 			}
 			orderSQL = strings.Join(parts, ", ")
