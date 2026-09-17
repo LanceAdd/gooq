@@ -31,6 +31,54 @@ func Max(field gooq.Expression) *FuncExpr {
 	return New("MAX", field)
 }
 
+func AnyValue(field gooq.Expression) *FuncExpr {
+	return New("ANY_VALUE", field)
+}
+
+func ArrayAgg(field gooq.Expression) *FuncExpr {
+	return New("ARRAY_AGG", field)
+}
+
+func BitAnd(field gooq.Expression) *FuncExpr {
+	return New("BIT_AND", field)
+}
+
+func BitOr(field gooq.Expression) *FuncExpr {
+	return New("BIT_OR", field)
+}
+
+func BitXor(field gooq.Expression) *FuncExpr {
+	return New("BIT_XOR", field)
+}
+
+func BoolAnd(field gooq.Expression) *FuncExpr {
+	return New("BOOL_AND", field)
+}
+
+func BoolOr(field gooq.Expression) *FuncExpr {
+	return New("BOOL_OR", field)
+}
+
+func Every(field gooq.Expression) *FuncExpr {
+	return New("EVERY", field)
+}
+
+func JsonArrayAgg(field gooq.Expression) *FuncExpr {
+	return New("JSON_ARRAYAGG", field)
+}
+
+func JsonObjectAgg(key, value any) *FuncExpr {
+	return New("JSON_OBJECTAGG", key, value)
+}
+
+func Grouping(field gooq.Expression) *FuncExpr {
+	return New("GROUPING", field)
+}
+
+func XmlAgg(field gooq.Expression) *FuncExpr {
+	return New("XMLAGG", field)
+}
+
 // 字符串与数学函数。
 func Concat(args ...any) *FuncExpr {
 	return New("CONCAT", args...)
@@ -133,4 +181,12 @@ func Lag(field gooq.Expression, offset, defaultValue any) *FuncExpr {
 
 func Lead(field gooq.Expression, offset, defaultValue any) *FuncExpr {
 	return New("LEAD", field, offset, defaultValue)
+}
+
+func CumeDist() *FuncExpr {
+	return New("CUME_DIST")
+}
+
+func PercentRank() *FuncExpr {
+	return New("PERCENT_RANK")
 }

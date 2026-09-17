@@ -17,6 +17,7 @@ type FuncExpr struct {
 	args     []any
 	alias    string
 	over     *overClause
+	filter   gooq.Expression
 	render   RenderFn
 	validate func(gooq.Dialect) error
 }
@@ -53,6 +54,11 @@ func (f *FuncExpr) OverFrame(
 	return f
 }
 
+func (f *FuncExpr) Filter(cond gooq.Expression) *FuncExpr {
+	f.filter = cond
+	return f
+}
+
 func (f *FuncExpr) Condition() (string, []any) {
 	return f.Render(gooq.NewRenderContext(gooq.DialectMySQL))
 }
@@ -80,6 +86,11 @@ func (f *FuncExpr) Render(rc *gooq.RenderContext) (string, []any) {
 	} else {
 		sql = f.name + "(" + strings.Join(argsSQL, ", ") + ")"
 	}
+	if f.filter != nil {
+		filterSQL, filterArgs := rc.Render(f.filter)
+		sql += " FILTER (WHERE " + filterSQL + ")"
+		argsAll = append(argsAll, filterArgs...)
+	}
 	if f.over != nil {
 		sql += " OVER (" + renderOver(rc, f.over) + ")"
 	}
@@ -102,6 +113,9 @@ func (f *FuncExpr) SubExpressions() []gooq.Expression {
 		if expr, ok := arg.(gooq.Expression); ok {
 			subs = append(subs, expr)
 		}
+	}
+	if f.filter != nil {
+		subs = append(subs, f.filter)
 	}
 	return subs
 }

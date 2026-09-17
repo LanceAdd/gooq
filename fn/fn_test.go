@@ -132,6 +132,18 @@ func TestFn_Aggregate(t *testing.T) {
 			{Min(testUser.Age), "MIN(`user`.`age`)"},
 			{Max(testUser.Age), "MAX(`user`.`age`)"},
 			{CountDistinct(testUser.Status), "COUNT(DISTINCT `user`.`status`)"},
+			{AnyValue(testUser.Age), "ANY_VALUE(`user`.`age`)"},
+			{ArrayAgg(testUser.Age), "ARRAY_AGG(`user`.`age`)"},
+			{BitAnd(testUser.Age), "BIT_AND(`user`.`age`)"},
+			{BitOr(testUser.Age), "BIT_OR(`user`.`age`)"},
+			{BitXor(testUser.Age), "BIT_XOR(`user`.`age`)"},
+			{BoolAnd(testUser.Age), "BOOL_AND(`user`.`age`)"},
+			{BoolOr(testUser.Age), "BOOL_OR(`user`.`age`)"},
+			{Every(testUser.Age), "EVERY(`user`.`age`)"},
+			{JsonArrayAgg(testUser.Age), "JSON_ARRAYAGG(`user`.`age`)"},
+			{JsonObjectAgg(testUser.Name, testUser.Age), "JSON_OBJECTAGG(`user`.`name`, `user`.`age`)"},
+			{Grouping(testUser.Status), "GROUPING(`user`.`status`)"},
+			{XmlAgg(testUser.Name), "XMLAGG(`user`.`name`)"},
 		}
 		for _, c := range cases {
 			sql, _, err := dsl.Select(c.expr).From(testUser).ToSql(gooq.DialectMySQL)
@@ -224,6 +236,62 @@ func TestFn_Window(t *testing.T) {
 		).From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT SUM(`user`.`age`) OVER (PARTITION BY `user`.`status` ORDER BY `user`.`id` ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM `user` WHERE `user`.`deleted_at` IS NULL")
+
+		sql, _, err = dsl.Select(
+			CumeDist().Over(nil, []gooq.Expression{testUser.Age.Asc()}),
+		).From(testUser).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT CUME_DIST() OVER (ORDER BY `user`.`age` ASC) FROM `user` WHERE `user`.`deleted_at` IS NULL")
+
+		sql, _, err = dsl.Select(
+			PercentRank().Over([]gooq.Expression{testUser.Status}, []gooq.Expression{testUser.Age.Desc()}),
+		).From(testUser).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT PERCENT_RANK() OVER (PARTITION BY "user"."status" ORDER BY "user"."age" DESC) FROM "user" WHERE "user"."deleted_at" IS NULL`)
+	})
+}
+
+func TestFn_OrderedSet(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, args, err := dsl.Select(PercentileCont(0.5, testUser.Age.Asc())).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT PERCENTILE_CONT($1) WITHIN GROUP (ORDER BY "user"."age" ASC) FROM "user" WHERE "user"."deleted_at" IS NULL`)
+		t.AssertEQ(args, []any{0.5})
+
+		sql, args, err = dsl.Select(PercentileDisc(0.9, testUser.Age.Desc())).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT PERCENTILE_DISC($1) WITHIN GROUP (ORDER BY "user"."age" DESC) FROM "user" WHERE "user"."deleted_at" IS NULL`)
+		t.AssertEQ(args, []any{0.9})
+
+		sql, _, err = dsl.Select(Mode(testUser.Age.Desc())).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT MODE() WITHIN GROUP (ORDER BY "user"."age" DESC) FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(Median(testUser.Age)).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "user"."age") FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(Median(testUser.Age)).From(testUser).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT MEDIAN(`user`.`age`) FROM `user` WHERE `user`.`deleted_at` IS NULL")
+	})
+}
+
+func TestFn_Filter(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, args, err := dsl.Select(Sum(testUser.Age).Filter(testUser.Status.Eq("active"))).
+			From(testUser).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT SUM(`user`.`age`) FILTER (WHERE `user`.`status` = ?) FROM `user` WHERE `user`.`deleted_at` IS NULL")
+		t.AssertEQ(args, []any{"active"})
+
+		sql, args, err = dsl.Select(
+			Count(testUser.ID).Filter(testUser.Status.Eq("active")).
+				Over([]gooq.Expression{testUser.Status}, nil),
+		).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT COUNT("user"."id") FILTER (WHERE "user"."status" = $1) OVER (PARTITION BY "user"."status") FROM "user" WHERE "user"."deleted_at" IS NULL`)
+		t.AssertEQ(args, []any{"active"})
 	})
 }
 
