@@ -104,7 +104,7 @@ func TestFn_Basic(t *testing.T) {
 			{Mod(testUser.Age, 2), "MOD(`user`.`age`, ?)", []any{2}},
 			{CurDate(), "CURDATE()", nil},
 			{Now(), "NOW()", nil},
-			{DateAdd(testUser.CreatedAt, "INTERVAL 1 DAY"), "DATE_ADD(`user`.`created_at`, ?)", []any{"INTERVAL 1 DAY"}},
+			{DateAdd(testUser.CreatedAt, 1, "DAY"), "DATE_ADD(`user`.`created_at`, INTERVAL ? DAY)", []any{1}},
 			{DateDiff(testUser.CreatedAt, Now()), "DATEDIFF(`user`.`created_at`, NOW())", nil},
 		}
 		for _, c := range cases {
@@ -155,6 +155,18 @@ func TestFn_DateFormat(t *testing.T) {
 		sql, _, err = dsl.Select(DateFormat(testUser.CreatedAt, "%Y-%m-%d")).From(testUser).ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
 		t.Assert(sql, `SELECT strftime('%Y-%m-%d', "user"."created_at") FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(DateFormat(testUser.CreatedAt, "%Y-%m-%d %H:%i:%s")).From(testUser).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT DATE_FORMAT(`user`.`created_at`, '%Y-%m-%d %H:%i:%s') FROM `user` WHERE `user`.`deleted_at` IS NULL")
+
+		sql, _, err = dsl.Select(DateFormat(testUser.CreatedAt, "%Y-%m-%d %H:%i:%s")).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT TO_CHAR("user"."created_at", 'YYYY-MM-DD HH24:MI:SS') FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(DateFormat(testUser.CreatedAt, "%Y-%m-%d %H:%i:%s")).From(testUser).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT strftime('%Y-%m-%d %H:%M:%S', "user"."created_at") FROM "user" WHERE "user"."deleted_at" IS NULL`)
 	})
 }
 

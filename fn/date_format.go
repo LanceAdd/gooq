@@ -16,7 +16,7 @@ func DateFormat(field gooq.Expression, format string) *FuncExpr {
 			case gooq.DialectPgsql:
 				return fmt.Sprintf("TO_CHAR(%s, '%s')", argsSQL[0], mysqlToPgFormat(format)), nil
 			case gooq.DialectSQLite:
-				return fmt.Sprintf("strftime('%s', %s)", format, argsSQL[0]), nil
+				return fmt.Sprintf("strftime('%s', %s)", sqliteFormatReplacer.Replace(format), argsSQL[0]), nil
 			default:
 				return fmt.Sprintf("DATE_FORMAT(%s, '%s')", argsSQL[0], format), nil
 			}
@@ -34,3 +34,8 @@ var pgFormatReplacer = strings.NewReplacer(
 func mysqlToPgFormat(format string) string {
 	return pgFormatReplacer.Replace(format)
 }
+
+var sqliteFormatReplacer = strings.NewReplacer(
+	"%i", "%M",
+	"%s", "%S",
+)

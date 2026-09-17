@@ -1,6 +1,8 @@
 package fn
 
 import (
+	"fmt"
+
 	"github.com/lanceadd/gooq"
 )
 
@@ -96,8 +98,12 @@ func CurDate() *FuncExpr {
 	return New("CURDATE")
 }
 
-func DateAdd(date gooq.Expression, interval string) *FuncExpr {
-	return New("DATE_ADD", date, interval)
+func DateAdd(date gooq.Expression, count any, unit string) *FuncExpr {
+	return New("DATE_ADD", date, count).RenderWith(
+		func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+			return fmt.Sprintf("DATE_ADD(%s, INTERVAL %s %s)", argsSQL[0], argsSQL[1], unit), nil
+		},
+	)
 }
 
 func DateDiff(a, b gooq.Expression) *FuncExpr {
