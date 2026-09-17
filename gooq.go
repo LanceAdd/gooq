@@ -1,29 +1,5 @@
 package gooq
 
-import (
-	"github.com/gogf/gf/v2/container/gvar"
-)
-
-type (
-	// Value is the field value type.
-	Value = *gvar.Var
-
-	// Array is the field value array type.
-	Array = gvar.Vars
-
-	// Record is the row record of the table.
-	Record map[string]Value
-
-	// Result is the row record array.
-	Result []Record
-
-	// Map is alias of map[string]any, which is the most common usage map type.
-	Map = map[string]any
-
-	// List is type of map array.
-	List = []Map
-)
-
 // LocalType is a type that defines the local storage type of a field value.
 // It is used to specify how the field value should be processed locally.
 type LocalType string

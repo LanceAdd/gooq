@@ -123,7 +123,7 @@ func TestDsl_Update_Set(t *testing.T) {
 
 func TestDsl_Update_Record_Data(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		// Update/Delete 单条 gooq.Record 不支持：使用 Set/Data + Where。
+		// Update/Delete 单条 Record() 不支持：使用 Set/Data + Where。
 		_, _, err := Update(testUser).Record(testUserRecord{Id: 5, Name: "x", Age: 20}).ToSql(gooq.DialectMySQL)
 		t.AssertNE(err, nil)
 		t.Assert(gstr.Contains(err.Error(), "not supported"), true)

@@ -453,6 +453,11 @@ row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
 id := gooq.Get(row, User.Id)      // int64
 name := gooq.Get(row, User.Name)  // string
 
+// RowOne enforces at most one row: nil when none matched, error when 2+ matched
+// (Take-first-row semantics stay in Row; explicit Limit/Page/Cache is rejected).
+row, err = dsl.Select(User.Id, User.Name).From(User).
+    Where(User.Account.Eq("x")).UseDB(gdb.DB()).RowOne(ctx)
+
 // The dialect is derived from the gdb driver name; UseDB can be re-bound
 // for multi-database / read-write splitting.
 ```

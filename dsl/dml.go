@@ -49,7 +49,7 @@ type DMLBuilder struct {
 	upsert          *upsertClause
 	joins           []*joinClause     // UPDATE 多表 JOIN 子句。
 	returning       []gooq.Expression // RETURNING/OUTPUT 返回列。
-	recordUpdate    bool              // gooq.Record 误用于 Update/Delete 的标记（渲染时报错，防静默无效）。
+	recordUpdate    bool              // Record() 误用于 Update/Delete 的标记（渲染时报错，防静默无效）。
 	executor        executor          // 执行器（UseDB/UseTX 绑定；nil 时仅离线渲染）。
 }
 
@@ -598,7 +598,7 @@ func isInStrings(list []string, target string) bool {
 
 func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error) {
 	if b.recordUpdate {
-		return "", nil, fmt.Errorf("gooq: Update/Delete gooq.Record is not supported, use Set/Data with Where or Delete with Where")
+		return "", nil, fmt.Errorf("gooq: Update/Delete Record() is not supported, use Set/Data with Where or Delete with Where")
 	}
 	if len(b.setValues) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
@@ -692,7 +692,7 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 
 func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error) {
 	if b.recordUpdate {
-		return "", nil, fmt.Errorf("gooq: Update/Delete gooq.Record is not supported, use Set/Data with Where or Delete with Where")
+		return "", nil, fmt.Errorf("gooq: Update/Delete Record() is not supported, use Set/Data with Where or Delete with Where")
 	}
 	if !b.unscoped && b.table.Meta() != nil {
 		if softField := b.table.Meta().SoftDeleteField(); softField != nil {

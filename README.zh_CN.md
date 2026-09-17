@@ -452,6 +452,10 @@ row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
 id := gooq.Get(row, User.Id)      // int64
 name := gooq.Get(row, User.Name)  // string
 
+// RowOne 强制至多一行：无匹配返回 nil，匹配 2+ 行报错（取首行语义仍在 Row；显式 Limit/Page/Cache 直接拒绝）。
+row, err = dsl.Select(User.Id, User.Name).From(User).
+    Where(User.Account.Eq("x")).UseDB(gdb.DB()).RowOne(ctx)
+
 // 方言从 gdb 驱动名自动推导；UseDB 可重新绑定以支持多库/读写分离。
 ```
 
