@@ -26,7 +26,7 @@ func concatPipe(a, b gooq.Expression) *fn.FuncExpr {
 
 type userTable struct {
 	*gooq.TableBase
-	ID   gooq.Field[int64]
+	Id   gooq.Field[int64]
 	Name gooq.Field[string]
 }
 
@@ -38,7 +38,7 @@ func newUserTable() *userTable {
 			{ColumnName: "name", LocalType: gooq.LocalTypeString},
 		},
 	})}
-	t.ID = gooq.NewFieldAt[int64](t.TableBase, "id")
+	t.Id = gooq.NewFieldAt[int64](t.TableBase, "id")
 	t.Name = gooq.NewFieldAt[string](t.TableBase, "name")
 	return t
 }
@@ -57,7 +57,7 @@ func TestExt_CustomFunction(t *testing.T) {
 		t.Assert(sql, `SELECT ("user"."name" || '-x') AS tag FROM "user"`)
 
 		// 条件位置同样可用。
-		sql, _, err = dsl.Select(u.ID).From(u).
+		sql, _, err = dsl.Select(u.Id).From(u).
 			Where(gooq.Eq(concatPipe(u.Name, gooq.Str("-x")), gooq.Str("a-x"))).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)

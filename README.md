@@ -26,7 +26,7 @@ Generates typed gooq table objects (`table/`) for all tables in one shot. `do/`/
 ```go
 type UserTable struct {
     *gooq.TableBase
-    ID        gooq.Field[int64]
+    Id        gooq.Field[int64]
     Name      gooq.Field[string]
     Age       gooq.Field[int]
     Status    gooq.Field[string]
@@ -53,7 +53,7 @@ func newUserTable(alias ...string) *UserTable {
     if len(alias) > 0 {
         t.TableBase = t.TableBase.As(alias[0])
     }
-    t.ID = gooq.NewFieldAt[int64](t.TableBase, "id")
+    t.Id = gooq.NewFieldAt[int64](t.TableBase, "id")
     t.Name = gooq.NewFieldAt[string](t.TableBase, "name")
     t.Age = gooq.NewFieldAt[int](t.TableBase, "age")
     t.Status = gooq.NewFieldAt[string](t.TableBase, "status")
@@ -76,10 +76,10 @@ import (
     "github.com/lanceadd/gooq/dsl" // builders: Select/Insert/Update/Delete
 )
 
-sql, args, err := dsl.Select(User.ID, User.Name).
+sql, args, err := dsl.Select(User.Id, User.Name).
     From(User).
     Where(User.Age.Gt(18)).
-    Order(User.ID.Desc()).
+    Order(User.Id.Desc()).
     Limit(10).
     ToSql(gooq.DialectMySQL)
 // sql:  SELECT `user`.`id`, `user`.`name` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL ORDER BY `user`.`id` DESC LIMIT 10
@@ -109,23 +109,23 @@ err := dsl.Select(User.AllFields()).From(User).
 ```go
 // All columns / set difference / alias / distinct
 dsl.Select(User.AllFields()).From(User)                                     // SELECT `user`.`id`, `user`.`name`, ...
-dsl.Select(User.ID).From(User).FieldsEx(User.CreatedAt, User.DeletedAt)     // difference: remaining columns
+dsl.Select(User.Id).From(User).FieldsEx(User.CreatedAt, User.DeletedAt)     // difference: remaining columns
 dsl.Select(User.Name.As("nickname")).From(User)                             // SELECT `user`.`name` AS nickname
-dsl.Select(User.ID).From(User).Distinct()                                   // SELECT DISTINCT ...
+dsl.Select(User.Id).From(User).Distinct()                                   // SELECT DISTINCT ...
 
 // Paging
-dsl.Select(User.ID).From(User).Limit(10)              // ... LIMIT 10
-dsl.Select(User.ID).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
-dsl.Select(User.ID).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（1-based pages）
+dsl.Select(User.Id).From(User).Limit(10)              // ... LIMIT 10
+dsl.Select(User.Id).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
+dsl.Select(User.Id).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（1-based pages）
 
 // Ordering: direction is part of the expression (Field.Asc()/Desc(), gooq.OrderAscExpr/DescExpr)
-dsl.Select(User.ID).From(User).Order(User.Age.Desc(), User.ID.Asc()).ToSql(gooq.DialectPgsql)
+dsl.Select(User.Id).From(User).Order(User.Age.Desc(), User.Id.Asc()).ToSql(gooq.DialectPgsql)
 // SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL ORDER BY "user"."age" DESC, "user"."id" ASC
-dsl.Select(User.ID).From(User).OrderDesc(fn.Count(User.ID))       // shorthand: wrap each with DESC
+dsl.Select(User.Id).From(User).OrderDesc(fn.Count(User.Id))       // shorthand: wrap each with DESC
 // Order by expression / raw fragment — Order renders items as-is (NULLS etc. via Raw)
-dsl.Select(User.ID).From(User).OrderDesc(gooq.Raw("ABS(`user`.`age`)"))
+dsl.Select(User.Id).From(User).OrderDesc(gooq.Raw("ABS(`user`.`age`)"))
 // ... ORDER BY ABS(`user`.`age`) DESC
-dsl.Select(User.ID).From(User).Order(gooq.Raw("`user`.`age` DESC NULLS LAST"))
+dsl.Select(User.Id).From(User).Order(gooq.Raw("`user`.`age` DESC NULLS LAST"))
 // ... ORDER BY `user`.`age` DESC NULLS LAST
 ```
 
@@ -140,11 +140,11 @@ User.Name.Like("j%")                  // `user`.`name` LIKE ?
 User.DeletedAt.IsNull()               // `user`.`deleted_at` IS NULL
 
 // Expression operands (column comparisons, subqueries, Raw) go through EqExpr.
-OrderItem.UserID.EqExpr(User.ID)      // `order_item`.`user_id` = `user`.`id`
-User.ID.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
+OrderItem.UserId.EqExpr(User.Id)      // `order_item`.`user_id` = `user`.`id`
+User.Id.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
 
 // Combining: AND / OR / NOT.
-dsl.Select(User.ID).From(User).
+dsl.Select(User.Id).From(User).
     Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
     And(User.Name.Like("j%")).
     ToSql(gooq.DialectMySQL)
@@ -152,7 +152,7 @@ dsl.Select(User.ID).From(User).
 // args: []any{18, "vip", "j%"}
 
 // Dynamic assembly: Clone a base builder for reuse.
-base := dsl.Select(User.ID).From(User)
+base := dsl.Select(User.Id).From(User)
 q1 := base.Clone().Where(User.Age.Gt(18))
 q2 := base.Clone().Where(User.Status.Eq("vip")) // independent
 ```
@@ -164,9 +164,9 @@ u := User.As("u")
 ur := UserRole.As("ur")
 r := Role.As("r")
 
-dsl.Select(u.ID, r.Name).From(u).
-    InnerJoin(ur).On(ur.UserID.EqExpr(u.ID)).
-    InnerJoin(r).On(r.ID.EqExpr(ur.RoleID)).
+dsl.Select(u.Id, r.Name).From(u).
+    InnerJoin(ur).On(ur.UserId.EqExpr(u.Id)).
+    InnerJoin(r).On(r.Id.EqExpr(ur.RoleId)).
     Where(r.Name.Eq("admin")).
     ToSql(gooq.DialectMySQL)
 // SELECT `u`.`id`, `r`.`name` FROM `user` AS u INNER JOIN `user_role` AS ur ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS r ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL
@@ -174,39 +174,39 @@ dsl.Select(u.ID, r.Name).From(u).
 // Self-join: two alias instances of the same table.
 u1 := User.As("u1")
 u2 := User.As("u2")
-dsl.Select(u1.ID, u2.ID).From(u1).InnerJoin(u2).On(u1.ID.EqExpr(u2.ID))
+dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
 // SELECT `u1`.`id`, `u2`.`id` FROM `user` AS u1 INNER JOIN `user` AS u2 ON `u1`.`id` = `u2`.`id`
 
 // LATERAL derived tables (InnerLateral maps to CROSS JOIN LATERAL on SQLite).
-lt := dsl.Select(fn.Count(UserRole.UserID).As("cnt")).
-    From(UserRole).Where(UserRole.UserID.EqExpr(u.ID)).As("lt")
-dsl.Select(u.ID, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).ToSql(gooq.DialectPgsql)
+lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
+    From(UserRole).Where(UserRole.UserId.EqExpr(u.Id)).As("lt")
+dsl.Select(u.Id, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).ToSql(gooq.DialectPgsql)
 // ... LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt ON 1 = 1 ...
 ```
 
 ### Subqueries
 
 ```go
-sub := dsl.Select(Role.ID).From(Role).Where(Role.Name.Eq("admin"))
+sub := dsl.Select(Role.Id).From(Role).Where(Role.Name.Eq("admin"))
 
-dsl.Select(User.ID).From(User).Where(User.ID.InExpr(sub))
+dsl.Select(User.Id).From(User).Where(User.Id.InExpr(sub))
 // ... WHERE `user`.`id` IN (SELECT `role`.`id` FROM `role` WHERE `role`.`name` = ? AND `role`.`deleted_at` IS NULL) ...
 
-dsl.Select(User.ID).From(User).Where(gooq.Exists(sub))
+dsl.Select(User.Id).From(User).Where(gooq.Exists(sub))
 // ... WHERE EXISTS (SELECT ...) ...
-dsl.Select(User.ID).From(User).Where(gooq.NotExists(sub))
+dsl.Select(User.Id).From(User).Where(gooq.NotExists(sub))
 
 // Derived tables.
-dsl.Select(User.ID).From(
-    dsl.Select(User.ID).From(User).Where(User.Age.Gt(18)).As("t"),
+dsl.Select(User.Id).From(
+    dsl.Select(User.Id).From(User).Where(User.Age.Gt(18)).As("t"),
 )
 // SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS t
 
 // Correlated subqueries: reference the outer alias inside.
 u := User.As("u")
 ur := UserRole.As("ur")
-dsl.Select(u.ID).From(u).Where(gooq.Exists(
-    dsl.Select(ur.UserID).From(ur).Where(ur.UserID.EqExpr(u.ID)),
+dsl.Select(u.Id).From(u).Where(gooq.Exists(
+    dsl.Select(ur.UserId).From(ur).Where(ur.UserId.EqExpr(u.Id)),
 ))
 // ... WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS ur WHERE `ur`.`user_id` = `u`.`id`) ...
 ```
@@ -214,10 +214,10 @@ dsl.Select(u.ID).From(u).Where(gooq.Exists(
 ### Grouping & aggregation
 
 ```go
-dsl.Select(User.Status, fn.Count(User.ID)).
+dsl.Select(User.Status, fn.Count(User.Id)).
     From(User).
     Group(User.Status).
-    Having(gooq.Gt(fn.Count(User.ID), 2)).
+    Having(gooq.Gt(fn.Count(User.Id), 2)).
     ToSql(gooq.DialectMySQL)
 // SELECT `user`.`status`, COUNT(`user`.`id`) FROM `user` WHERE `user`.`deleted_at` IS NULL GROUP BY `user`.`status` HAVING COUNT(`user`.`id`) > ?
 // args: []any{2}
@@ -232,21 +232,21 @@ dsl.Select(User.Status).From(User).GroupCube(User.Status).ToSql(gooq.DialectPgsq
 ### Set operations & CTEs
 
 ```go
-dsl.Select(User.ID).From(User).Where(User.Age.Eq(1)).
-    UnionAll(dsl.Select(User.ID).From(User).Where(User.Age.Eq(2)))
+dsl.Select(User.Id).From(User).Where(User.Age.Eq(1)).
+    UnionAll(dsl.Select(User.Id).From(User).Where(User.Age.Eq(2)))
 // ... UNION ALL ...
 
-dsl.Select(User.ID).From(User).
-    Intersect(dsl.Select(User.ID).From(User)).
-    Except(dsl.Select(User.ID).From(User))
+dsl.Select(User.Id).From(User).
+    Intersect(dsl.Select(User.Id).From(User)).
+    Except(dsl.Select(User.Id).From(User))
 // ... INTERSECT ... EXCEPT ...
 
 // CTE / recursive CTE.
-dsl.With("adults", dsl.Select(User.ID).From(User).Where(User.Age.Gt(18))).
+dsl.With("adults", dsl.Select(User.Id).From(User).Where(User.Age.Gt(18))).
     Fields(dsl.Cte("adults").Field("id")).From(dsl.Cte("adults")).ToSql(gooq.DialectPgsql)
 // WITH adults AS (SELECT "user"."id" FROM "user" WHERE "user"."age" > $1 AND "user"."deleted_at" IS NULL) SELECT "adults"."id" FROM "adults"
 
-dsl.WithRecursive("t", dsl.Select(User.ID).From(User).Where(User.ID.Eq(1)))
+dsl.WithRecursive("t", dsl.Select(User.Id).From(User).Where(User.Id.Eq(1)))
 // WITH RECURSIVE t AS (...)
 ```
 
@@ -276,11 +276,11 @@ fn.GroupConcat(fn.GroupConcatOptions{
 // Window functions.
 fn.Rank().Over([]gooq.Expression{User.Status}, []gooq.Expression{User.Age.Desc()}).As("r")
 // RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r
-fn.RowNumber().Over(nil, []gooq.Expression{User.ID.Asc()})
+fn.RowNumber().Over(nil, []gooq.Expression{User.Id.Asc()})
 // ROW_NUMBER() OVER (ORDER BY `user`.`id` ASC)
 fn.Sum(User.Age).OverFrame(
     []gooq.Expression{User.Status},
-    []gooq.Expression{User.ID.Asc()},
+    []gooq.Expression{User.Id.Asc()},
     fn.RowsFrame("UNBOUNDED PRECEDING", "CURRENT ROW"),
 )
 // SUM(`user`.`age`) OVER (PARTITION BY `user`.`status` ORDER BY `user`.`id` ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
@@ -299,7 +299,7 @@ User.Age.Cast(gooq.LocalTypeString)             // CAST(`user`.`age` AS CHAR)（
 
 // Raw: structured SQL with parameter binding.
 gooq.Raw("JSON_EXTRACT(data, ?)", "$.name")
-dsl.Select(User.ID).From(User).Where(gooq.Raw("age > ?", 18))
+dsl.Select(User.Id).From(User).Where(gooq.Raw("age > ?", 18))
 
 // Generic functions render NAME(args...) as-is (no dialect awareness).
 dsl.Select(fn.New("JSON_EXTRACT", User.Name, gooq.Str("$.key"))).From(User)
@@ -319,10 +319,10 @@ concatPipe := fn.New("CONCAT", User.Name, gooq.Str("-x")).
 ### Row locks
 
 ```go
-dsl.Select(User.ID).From(User).LockForUpdate().ToSql(gooq.DialectMySQL)   // ... FOR UPDATE
-dsl.Select(User.ID).From(User).LockInShareMode().ToSql(gooq.DialectMySQL) // ... LOCK IN SHARE MODE
-dsl.Select(User.ID).From(User).LockInShareMode().ToSql(gooq.DialectPgsql) // ... FOR SHARE
-dsl.Select(User.ID).From(User).LockForUpdate().ToSql(gooq.DialectSQLite)  // ignored on SQLite
+dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectMySQL)   // ... FOR UPDATE
+dsl.Select(User.Id).From(User).LockInShareMode().ToSql(gooq.DialectMySQL) // ... LOCK IN SHARE MODE
+dsl.Select(User.Id).From(User).LockInShareMode().ToSql(gooq.DialectPgsql) // ... FOR SHARE
+dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectSQLite)  // ignored on SQLite
 ```
 
 ## DML
@@ -353,7 +353,7 @@ dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
 
 ```go
 // Chained Set.
-dsl.Update(User).Set(User.Name, "x").Set(User.Age, 20).Where(User.ID.Eq(1))
+dsl.Update(User).Set(User.Name, "x").Set(User.Age, 20).Where(User.Id.Eq(1))
 // UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?
 
 // Map full update.
@@ -361,7 +361,7 @@ dsl.Update(User).Data(map[string]any{"age": 1, "name": "x"})
 // UPDATE `user` SET `age` = ?, `name` = ?
 
 // Expression values render as SQL fragments (field arithmetic, Raw, etc.).
-dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.ID.Eq(1))
+dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.Id.Eq(1))
 // UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?
 // (single-record Update via Record is not supported; use Set/Data + Where)
 
@@ -371,9 +371,9 @@ dsl.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).B
 
 // Multi-table update (MySQL JOIN / PG+SQLite FROM).
 u := User.As("u"); r := Role.As("r")
-dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.ID.EqExpr(u.ID)).ToSql(gooq.DialectMySQL)
+dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectMySQL)
 // UPDATE `user` AS u INNER JOIN `role` AS r ON `r`.`id` = `u`.`id` SET `status` = ?
-dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.ID.EqExpr(u.ID)).ToSql(gooq.DialectPgsql)
+dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectPgsql)
 // UPDATE "user" AS u SET "status" = $1 FROM "role" AS r WHERE "r"."id" = "u"."id"
 ```
 
@@ -381,15 +381,15 @@ dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.ID.EqExpr(u.ID)).ToSql(gooq
 
 ```go
 // Soft-delete tables: DELETE auto-rewrites to UPDATE deleted_at.
-dsl.Delete(User).Where(User.ID.Eq(1))
+dsl.Delete(User).Where(User.Id.Eq(1))
 // UPDATE `user` SET `deleted_at` = ? WHERE `user`.`id` = ?
 
 // Unscoped(): real DELETE.
-dsl.Delete(User).Unscoped().Where(User.ID.Eq(1))
+dsl.Delete(User).Unscoped().Where(User.Id.Eq(1))
 // DELETE FROM `user` WHERE `user`.`id` = ?
 
 // Non-soft-delete tables delete directly.
-dsl.Delete(UserRole).Where(UserRole.ID.Eq(1))
+dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 // DELETE FROM `user_role` WHERE `user_role`.`id` = ?
 
 // Batch delete by primary key (soft delete honored).
@@ -401,7 +401,7 @@ dsl.Delete(User).Records([]model.User{{Id: 1}, {Id: 2}}).Batch(100).UseDB(gdb.DB
 ```go
 // MySQL: ON DUPLICATE KEY UPDATE.
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
-    OnConflictKey(User.ID).DoUpdate(User.Name, "x").ToSql(gooq.DialectMySQL)
+    OnConflictKey(User.Id).DoUpdate(User.Name, "x").ToSql(gooq.DialectMySQL)
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)
 
 // MySQL: INSERT IGNORE.
@@ -410,15 +410,15 @@ dsl.Insert(User).Columns(User.Name).Values("a").DoNothing().ToSql(gooq.DialectMy
 
 // PG: ON CONFLICT.
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
-    OnConflictKey(User.ID).DoUpdate(User.Name, "x").ToSql(gooq.DialectPgsql)
+    OnConflictKey(User.Id).DoUpdate(User.Name, "x").ToSql(gooq.DialectPgsql)
 // INSERT INTO "user" ("name", "age") VALUES ($1, $2) ON CONFLICT ("id") DO UPDATE SET "name" = $3
 dsl.Insert(User).Columns(User.Name).Values("a").
-    OnConflictKey(User.ID).DoNothing().ToSql(gooq.DialectPgsql)
+    OnConflictKey(User.Id).DoNothing().ToSql(gooq.DialectPgsql)
 // INSERT INTO "user" ("name") VALUES ($1) ON CONFLICT ("id") DO NOTHING
 
 // Returning: PG / SQLite（error on MySQL）.
-dsl.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).
-    Returning(User.ID).ToSql(gooq.DialectPgsql)
+dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).
+    Returning(User.Id).ToSql(gooq.DialectPgsql)
 // UPDATE "user" SET "status" = $1 WHERE "user"."id" = $2 RETURNING "user"."id"
 ```
 
@@ -428,29 +428,29 @@ dsl.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).
 // Query + scan into a struct slice / scalar.
 users := []model.User{}
 err := dsl.Select(User.AllFields()).From(User).
-    UseDB(gdb.DB()).Where(User.Age.Gt(18)).Order(User.ID.Desc()).Limit(10).
+    UseDB(gdb.DB()).Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
     Scan(ctx, &users)
 
 count := int64(0)
-err = dsl.Select(fn.Count(User.ID)).From(User).UseDB(gdb.DB()).Scan(ctx, &count)
+err = dsl.Select(fn.Count(User.Id)).From(User).UseDB(gdb.DB()).Scan(ctx, &count)
 
 // DML.
 _, err = dsl.Insert(User).Record(model.User{Name: "john"}).UseDB(gdb.DB()).Exec(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).UseDB(gdb.DB()).Exec(ctx)
+_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).UseDB(gdb.DB()).Exec(ctx)
 
 // Transaction: UseTX binds the tx connection.
 tx, _ := gdb.DB().Begin(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).UseTX(tx).Exec(ctx)
+_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).UseTX(tx).Exec(ctx)
 tx.Commit()
 
 // Convenience: Count auto-wraps COUNT(*), Exists wraps SELECT EXISTS(...).
 total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).UseDB(gdb.DB()).Count(ctx)
-exists, err := dsl.Select(User.ID).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx)
+exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx)
 
 // Typed row reads: the field type T is consumed at compile time.
-row, err := dsl.Select(User.ID, User.Name, User.Age).From(User).
+row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
     Where(User.Name.Eq("john")).UseDB(gdb.DB()).Row(ctx)
-id := gooq.Get(row, User.ID)      // int64
+id := gooq.Get(row, User.Id)      // int64
 name := gooq.Get(row, User.Name)  // string
 
 // The dialect is derived from the gdb driver name; UseDB can be re-bound
@@ -473,7 +473,7 @@ err := dsl.Select(User.AllFields()).From(User).
 
 // Composite query: count runs first, rows after; count=0 short-circuits without querying rows.
 rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
-    Order(User.ID.Desc()).
+    Order(User.Id.Desc()).
     Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
 
 // PageCache caches the composite query as one hash record (fields "count" and "rows").
@@ -481,7 +481,7 @@ rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 // independently. RowsField/CountField override the field names; Force caches empty
 // results (count=0) which are skipped by default.
 rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
-    Order(User.ID.Desc()).
+    Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
     Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
 
@@ -489,7 +489,7 @@ rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 // It shares the same data cache (unified Result JSON, field "rows") with RowsAndCount.
 var vips []User
 total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
-    Order(User.ID.Desc()).
+    Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
     Page(1, 10).UseDB(gdb.DB()).ScanAndCount(ctx, &vips)
 ```
@@ -518,7 +518,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - Templates: `<hack>/template/table.tmpl` takes precedence over the embedded template (delete it to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Generates only typed gooq table objects (`table/`); `do/`/`entity/` are left to `gf gen dao`.
-- Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; Go naming conventions (`id` → `ID`).
+- Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output).
 - Built-in drivers: mysql/pgsql/sqlite; others by uncommenting the import in `internal/cmd/cmd.go`.
 
 ## Testing

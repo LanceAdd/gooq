@@ -29,7 +29,7 @@ var cacheTestUser = gooq.NewTableBase(&gooq.TableMeta{
 // TestDsl_CacheKey 验证单查询缓存 key：不同参数不同 key，自定义 Name 优先。
 func TestDsl_CacheKey(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		userID := gooq.NewField[int64]("user", "id")
+		userId := gooq.NewField[int64]("user", "id")
 		userLevel := gooq.NewField[int]("user", "level")
 
 		b1 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Cache(CacheOption{})
@@ -60,7 +60,7 @@ func TestDsl_CacheKey(t *testing.T) {
 		k5, err := b1.cacheKey("scan", sqlPg, argsPg)
 		t.AssertNil(err)
 		t.AssertNE(k1, k5)
-		_ = userID
+		_ = userId
 	})
 }
 
@@ -68,13 +68,13 @@ func TestDsl_CacheKey(t *testing.T) {
 // （count 与 rows 子查询共享同一 key，hash field 区分）。
 func TestDsl_CompositeCacheKey(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		userID := gooq.NewField[int64]("user", "id")
+		userId := gooq.NewField[int64]("user", "id")
 		userName := gooq.NewField[string]("user", "name")
 		userLevel := gooq.NewField[int]("user", "level")
 
 		// 同一条件同一排序：不同页（LIMIT/OFFSET 差异）key 不同。
-		b1 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userID.Desc()).Page(1, 10)
-		b2 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userID.Desc()).Page(2, 10)
+		b1 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userId.Desc()).Page(1, 10)
+		b2 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userId.Desc()).Page(2, 10)
 		k1, err := b1.compositeCacheKey(gooq.DialectMySQL)
 		t.AssertNil(err)
 		k2, err := b2.compositeCacheKey(gooq.DialectMySQL)
@@ -82,7 +82,7 @@ func TestDsl_CompositeCacheKey(t *testing.T) {
 		t.AssertNE(k1, k2)
 
 		// 不同参数：key 不同。
-		b3 := SelectFrom(cacheTestUser).Where(userLevel.Eq(2)).Order(userID.Desc()).Page(1, 10)
+		b3 := SelectFrom(cacheTestUser).Where(userLevel.Eq(2)).Order(userId.Desc()).Page(1, 10)
 		k3, err := b3.compositeCacheKey(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.AssertNE(k1, k3)
@@ -94,7 +94,7 @@ func TestDsl_CompositeCacheKey(t *testing.T) {
 		t.AssertNE(k1, k4)
 
 		// 不同 fields（count 与 rows 子查询 fields 不同）：key 相同。
-		b5 := Select(userID, userName).From(cacheTestUser).Where(userLevel.Eq(1)).Order(userID.Desc()).Page(1, 10)
+		b5 := Select(userId, userName).From(cacheTestUser).Where(userLevel.Eq(1)).Order(userId.Desc()).Page(1, 10)
 		k5, err := b5.compositeCacheKey(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(k1, k5)

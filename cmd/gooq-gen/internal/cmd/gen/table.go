@@ -81,8 +81,6 @@ func generateTableContent(
 	for _, fieldName := range fieldNames {
 		field := fieldMap[fieldName]
 		camelName := formatFieldName(fieldName, FieldNameCaseCamel)
-		// Go 惯例：Id 词统一为 ID 缩写（UserId → UserID、ProductId → ProductID、主键 id → ID）。
-		camelName = gstr.Replace(camelName, "Id", "ID")
 
 		goType, localType := tableFieldTypes(ctx, db, field, &hasStdTime, &hasUUID)
 

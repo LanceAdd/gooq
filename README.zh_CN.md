@@ -26,7 +26,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 ```go
 type UserTable struct {
     *gooq.TableBase
-    ID        gooq.Field[int64]
+    Id        gooq.Field[int64]
     Name      gooq.Field[string]
     Age       gooq.Field[int]
     Status    gooq.Field[string]
@@ -52,7 +52,7 @@ func newUserTable(alias ...string) *UserTable {
     if len(alias) > 0 {
         t.TableBase = t.TableBase.As(alias[0])
     }
-    t.ID = gooq.NewFieldAt[int64](t.TableBase, "id")
+    t.Id = gooq.NewFieldAt[int64](t.TableBase, "id")
     t.Name = gooq.NewFieldAt[string](t.TableBase, "name")
     t.Age = gooq.NewFieldAt[int](t.TableBase, "age")
     t.Status = gooq.NewFieldAt[string](t.TableBase, "status")
@@ -75,10 +75,10 @@ import (
     "github.com/lanceadd/gooq/dsl" // 构建器：Select/Insert/Update/Delete
 )
 
-sql, args, err := dsl.Select(User.ID, User.Name).
+sql, args, err := dsl.Select(User.Id, User.Name).
     From(User).
     Where(User.Age.Gt(18)).
-    Order(User.ID.Desc()).
+    Order(User.Id.Desc()).
     Limit(10).
     ToSql(gooq.DialectMySQL)
 // sql:  SELECT `user`.`id`, `user`.`name` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL ORDER BY `user`.`id` DESC LIMIT 10
@@ -108,23 +108,23 @@ err := dsl.Select(User.AllFields()).From(User).
 ```go
 // 全列 / 差集 / 别名 / 去重
 dsl.Select(User.AllFields()).From(User)                                     // SELECT `user`.`id`, `user`.`name`, ...
-dsl.Select(User.ID).From(User).FieldsEx(User.CreatedAt, User.DeletedAt)     // 差集：其余列
+dsl.Select(User.Id).From(User).FieldsEx(User.CreatedAt, User.DeletedAt)     // 差集：其余列
 dsl.Select(User.Name.As("nickname")).From(User)                             // SELECT `user`.`name` AS nickname
-dsl.Select(User.ID).From(User).Distinct()                                   // SELECT DISTINCT ...
+dsl.Select(User.Id).From(User).Distinct()                                   // SELECT DISTINCT ...
 
 // 分页
-dsl.Select(User.ID).From(User).Limit(10)              // ... LIMIT 10
-dsl.Select(User.ID).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
-dsl.Select(User.ID).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（页码从 1 起）
+dsl.Select(User.Id).From(User).Limit(10)              // ... LIMIT 10
+dsl.Select(User.Id).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
+dsl.Select(User.Id).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（页码从 1 起）
 
 // 排序：方向属于表达式本身（Field.Asc()/Desc()、gooq.OrderAscExpr/DescExpr）
-dsl.Select(User.ID).From(User).Order(User.Age.Desc(), User.ID.Asc()).ToSql(gooq.DialectPgsql)
+dsl.Select(User.Id).From(User).Order(User.Age.Desc(), User.Id.Asc()).ToSql(gooq.DialectPgsql)
 // SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL ORDER BY "user"."age" DESC, "user"."id" ASC
-dsl.Select(User.ID).From(User).OrderDesc(fn.Count(User.ID))       // 糖：逐条包装 DESC
+dsl.Select(User.Id).From(User).OrderDesc(fn.Count(User.Id))       // 糖：逐条包装 DESC
 // 表达式/片段排序 —— Order 原样渲染（NULLS 等语法用 Raw 表达）
-dsl.Select(User.ID).From(User).OrderDesc(gooq.Raw("ABS(`user`.`age`)"))
+dsl.Select(User.Id).From(User).OrderDesc(gooq.Raw("ABS(`user`.`age`)"))
 // ... ORDER BY ABS(`user`.`age`) DESC
-dsl.Select(User.ID).From(User).Order(gooq.Raw("`user`.`age` DESC NULLS LAST"))
+dsl.Select(User.Id).From(User).Order(gooq.Raw("`user`.`age` DESC NULLS LAST"))
 // ... ORDER BY `user`.`age` DESC NULLS LAST
 ```
 
@@ -139,11 +139,11 @@ User.Name.Like("j%")                  // `user`.`name` LIKE ?
 User.DeletedAt.IsNull()               // `user`.`deleted_at` IS NULL
 
 // 表达式操作数（列比较、子查询、Raw）走 EqExpr 系列。
-OrderItem.UserID.EqExpr(User.ID)      // `order_item`.`user_id` = `user`.`id`
-User.ID.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
+OrderItem.UserId.EqExpr(User.Id)      // `order_item`.`user_id` = `user`.`id`
+User.Id.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
 
 // 组合：AND / OR / NOT。
-dsl.Select(User.ID).From(User).
+dsl.Select(User.Id).From(User).
     Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
     And(User.Name.Like("j%")).
     ToSql(gooq.DialectMySQL)
@@ -151,7 +151,7 @@ dsl.Select(User.ID).From(User).
 // args: []any{18, "vip", "j%"}
 
 // 动态组装：Clone 复用基准构建器。
-base := dsl.Select(User.ID).From(User)
+base := dsl.Select(User.Id).From(User)
 q1 := base.Clone().Where(User.Age.Gt(18))
 q2 := base.Clone().Where(User.Status.Eq("vip")) // 互不干扰
 ```
@@ -163,9 +163,9 @@ u := User.As("u")
 ur := UserRole.As("ur")
 r := Role.As("r")
 
-dsl.Select(u.ID, r.Name).From(u).
-    InnerJoin(ur).On(ur.UserID.EqExpr(u.ID)).
-    InnerJoin(r).On(r.ID.EqExpr(ur.RoleID)).
+dsl.Select(u.Id, r.Name).From(u).
+    InnerJoin(ur).On(ur.UserId.EqExpr(u.Id)).
+    InnerJoin(r).On(r.Id.EqExpr(ur.RoleId)).
     Where(r.Name.Eq("admin")).
     ToSql(gooq.DialectMySQL)
 // SELECT `u`.`id`, `r`.`name` FROM `user` AS u INNER JOIN `user_role` AS ur ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS r ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL
@@ -173,39 +173,39 @@ dsl.Select(u.ID, r.Name).From(u).
 // 自连接：同一表的两个别名实例。
 u1 := User.As("u1")
 u2 := User.As("u2")
-dsl.Select(u1.ID, u2.ID).From(u1).InnerJoin(u2).On(u1.ID.EqExpr(u2.ID))
+dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
 // SELECT `u1`.`id`, `u2`.`id` FROM `user` AS u1 INNER JOIN `user` AS u2 ON `u1`.`id` = `u2`.`id`
 
 // LATERAL 派生表（InnerLateral 在 SQLite 下映射为 CROSS JOIN LATERAL）。
-lt := dsl.Select(fn.Count(UserRole.UserID).As("cnt")).
-    From(UserRole).Where(UserRole.UserID.EqExpr(u.ID)).As("lt")
-dsl.Select(u.ID, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).ToSql(gooq.DialectPgsql)
+lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
+    From(UserRole).Where(UserRole.UserId.EqExpr(u.Id)).As("lt")
+dsl.Select(u.Id, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).ToSql(gooq.DialectPgsql)
 // ... LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt ON 1 = 1 ...
 ```
 
 ### 子查询
 
 ```go
-sub := dsl.Select(Role.ID).From(Role).Where(Role.Name.Eq("admin"))
+sub := dsl.Select(Role.Id).From(Role).Where(Role.Name.Eq("admin"))
 
-dsl.Select(User.ID).From(User).Where(User.ID.InExpr(sub))
+dsl.Select(User.Id).From(User).Where(User.Id.InExpr(sub))
 // ... WHERE `user`.`id` IN (SELECT `role`.`id` FROM `role` WHERE `role`.`name` = ? AND `role`.`deleted_at` IS NULL) ...
 
-dsl.Select(User.ID).From(User).Where(gooq.Exists(sub))
+dsl.Select(User.Id).From(User).Where(gooq.Exists(sub))
 // ... WHERE EXISTS (SELECT ...) ...
-dsl.Select(User.ID).From(User).Where(gooq.NotExists(sub))
+dsl.Select(User.Id).From(User).Where(gooq.NotExists(sub))
 
 // 派生表。
-dsl.Select(User.ID).From(
-    dsl.Select(User.ID).From(User).Where(User.Age.Gt(18)).As("t"),
+dsl.Select(User.Id).From(
+    dsl.Select(User.Id).From(User).Where(User.Age.Gt(18)).As("t"),
 )
 // SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS t
 
 // 相关子查询：子查询内引用外层别名。
 u := User.As("u")
 ur := UserRole.As("ur")
-dsl.Select(u.ID).From(u).Where(gooq.Exists(
-    dsl.Select(ur.UserID).From(ur).Where(ur.UserID.EqExpr(u.ID)),
+dsl.Select(u.Id).From(u).Where(gooq.Exists(
+    dsl.Select(ur.UserId).From(ur).Where(ur.UserId.EqExpr(u.Id)),
 ))
 // ... WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS ur WHERE `ur`.`user_id` = `u`.`id`) ...
 ```
@@ -213,10 +213,10 @@ dsl.Select(u.ID).From(u).Where(gooq.Exists(
 ### 分组聚合
 
 ```go
-dsl.Select(User.Status, fn.Count(User.ID)).
+dsl.Select(User.Status, fn.Count(User.Id)).
     From(User).
     Group(User.Status).
-    Having(gooq.Gt(fn.Count(User.ID), 2)).
+    Having(gooq.Gt(fn.Count(User.Id), 2)).
     ToSql(gooq.DialectMySQL)
 // SELECT `user`.`status`, COUNT(`user`.`id`) FROM `user` WHERE `user`.`deleted_at` IS NULL GROUP BY `user`.`status` HAVING COUNT(`user`.`id`) > ?
 // args: []any{2}
@@ -231,21 +231,21 @@ dsl.Select(User.Status).From(User).GroupCube(User.Status).ToSql(gooq.DialectPgsq
 ### 集合操作与 CTE
 
 ```go
-dsl.Select(User.ID).From(User).Where(User.Age.Eq(1)).
-    UnionAll(dsl.Select(User.ID).From(User).Where(User.Age.Eq(2)))
+dsl.Select(User.Id).From(User).Where(User.Age.Eq(1)).
+    UnionAll(dsl.Select(User.Id).From(User).Where(User.Age.Eq(2)))
 // ... UNION ALL ...
 
-dsl.Select(User.ID).From(User).
-    Intersect(dsl.Select(User.ID).From(User)).
-    Except(dsl.Select(User.ID).From(User))
+dsl.Select(User.Id).From(User).
+    Intersect(dsl.Select(User.Id).From(User)).
+    Except(dsl.Select(User.Id).From(User))
 // ... INTERSECT ... EXCEPT ...
 
 // CTE / 递归 CTE。
-dsl.With("adults", dsl.Select(User.ID).From(User).Where(User.Age.Gt(18))).
+dsl.With("adults", dsl.Select(User.Id).From(User).Where(User.Age.Gt(18))).
     Fields(dsl.Cte("adults").Field("id")).From(dsl.Cte("adults")).ToSql(gooq.DialectPgsql)
 // WITH adults AS (SELECT "user"."id" FROM "user" WHERE "user"."age" > $1 AND "user"."deleted_at" IS NULL) SELECT "adults"."id" FROM "adults"
 
-dsl.WithRecursive("t", dsl.Select(User.ID).From(User).Where(User.ID.Eq(1)))
+dsl.WithRecursive("t", dsl.Select(User.Id).From(User).Where(User.Id.Eq(1)))
 // WITH RECURSIVE t AS (...)
 ```
 
@@ -275,11 +275,11 @@ fn.GroupConcat(fn.GroupConcatOptions{
 // 窗口函数。
 fn.Rank().Over([]gooq.Expression{User.Status}, []gooq.Expression{User.Age.Desc()}).As("r")
 // RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r
-fn.RowNumber().Over(nil, []gooq.Expression{User.ID.Asc()})
+fn.RowNumber().Over(nil, []gooq.Expression{User.Id.Asc()})
 // ROW_NUMBER() OVER (ORDER BY `user`.`id` ASC)
 fn.Sum(User.Age).OverFrame(
     []gooq.Expression{User.Status},
-    []gooq.Expression{User.ID.Asc()},
+    []gooq.Expression{User.Id.Asc()},
     fn.RowsFrame("UNBOUNDED PRECEDING", "CURRENT ROW"),
 )
 // SUM(`user`.`age`) OVER (PARTITION BY `user`.`status` ORDER BY `user`.`id` ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
@@ -298,7 +298,7 @@ User.Age.Cast(gooq.LocalTypeString)             // CAST(`user`.`age` AS CHAR)（
 
 // Raw：结构化 SQL，参数绑定。
 gooq.Raw("JSON_EXTRACT(data, ?)", "$.name")
-dsl.Select(User.ID).From(User).Where(gooq.Raw("age > ?", 18))
+dsl.Select(User.Id).From(User).Where(gooq.Raw("age > ?", 18))
 
 // 通用函数按 NAME(args...) 原样渲染（无方言感知）。
 dsl.Select(fn.New("JSON_EXTRACT", User.Name, gooq.Str("$.key"))).From(User)
@@ -318,10 +318,10 @@ concatPipe := fn.New("CONCAT", User.Name, gooq.Str("-x")).
 ### 行锁
 
 ```go
-dsl.Select(User.ID).From(User).LockForUpdate().ToSql(gooq.DialectMySQL)   // ... FOR UPDATE
-dsl.Select(User.ID).From(User).LockInShareMode().ToSql(gooq.DialectMySQL) // ... LOCK IN SHARE MODE
-dsl.Select(User.ID).From(User).LockInShareMode().ToSql(gooq.DialectPgsql) // ... FOR SHARE
-dsl.Select(User.ID).From(User).LockForUpdate().ToSql(gooq.DialectSQLite)  // SQLite 忽略
+dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectMySQL)   // ... FOR UPDATE
+dsl.Select(User.Id).From(User).LockInShareMode().ToSql(gooq.DialectMySQL) // ... LOCK IN SHARE MODE
+dsl.Select(User.Id).From(User).LockInShareMode().ToSql(gooq.DialectPgsql) // ... FOR SHARE
+dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectSQLite)  // SQLite 忽略
 ```
 
 ## 写操作
@@ -352,7 +352,7 @@ dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
 
 ```go
 // 链式 Set。
-dsl.Update(User).Set(User.Name, "x").Set(User.Age, 20).Where(User.ID.Eq(1))
+dsl.Update(User).Set(User.Name, "x").Set(User.Age, 20).Where(User.Id.Eq(1))
 // UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?
 
 // map 全量更新。
@@ -360,7 +360,7 @@ dsl.Update(User).Data(map[string]any{"age": 1, "name": "x"})
 // UPDATE `user` SET `age` = ?, `name` = ?
 
 // 表达式值渲染为 SQL 片段（字段算术、Raw 等）。
-dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.ID.Eq(1))
+dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.Id.Eq(1))
 // UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?
 // （单条 Record 更新不支持，使用 Set/Data + Where）
 
@@ -370,9 +370,9 @@ dsl.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).B
 
 // 多表更新（MySQL JOIN / PG+SQLite FROM）。
 u := User.As("u"); r := Role.As("r")
-dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.ID.EqExpr(u.ID)).ToSql(gooq.DialectMySQL)
+dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectMySQL)
 // UPDATE `user` AS u INNER JOIN `role` AS r ON `r`.`id` = `u`.`id` SET `status` = ?
-dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.ID.EqExpr(u.ID)).ToSql(gooq.DialectPgsql)
+dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectPgsql)
 // UPDATE "user" AS u SET "status" = $1 FROM "role" AS r WHERE "r"."id" = "u"."id"
 ```
 
@@ -380,15 +380,15 @@ dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.ID.EqExpr(u.ID)).ToSql(gooq
 
 ```go
 // 软删表：DELETE 自动转 UPDATE deleted_at。
-dsl.Delete(User).Where(User.ID.Eq(1))
+dsl.Delete(User).Where(User.Id.Eq(1))
 // UPDATE `user` SET `deleted_at` = ? WHERE `user`.`id` = ?
 
 // Unscoped()：真删除。
-dsl.Delete(User).Unscoped().Where(User.ID.Eq(1))
+dsl.Delete(User).Unscoped().Where(User.Id.Eq(1))
 // DELETE FROM `user` WHERE `user`.`id` = ?
 
 // 非软删表直接 DELETE。
-dsl.Delete(UserRole).Where(UserRole.ID.Eq(1))
+dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 // DELETE FROM `user_role` WHERE `user_role`.`id` = ?
 
 // 按主键批量删除（软删同样生效）。
@@ -400,7 +400,7 @@ dsl.Delete(User).Records([]model.User{{Id: 1}, {Id: 2}}).Batch(100).UseDB(gdb.DB
 ```go
 // MySQL：ON DUPLICATE KEY UPDATE。
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
-    OnConflictKey(User.ID).DoUpdate(User.Name, "x").ToSql(gooq.DialectMySQL)
+    OnConflictKey(User.Id).DoUpdate(User.Name, "x").ToSql(gooq.DialectMySQL)
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)
 
 // MySQL：INSERT IGNORE。
@@ -409,15 +409,15 @@ dsl.Insert(User).Columns(User.Name).Values("a").DoNothing().ToSql(gooq.DialectMy
 
 // PG：ON CONFLICT。
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
-    OnConflictKey(User.ID).DoUpdate(User.Name, "x").ToSql(gooq.DialectPgsql)
+    OnConflictKey(User.Id).DoUpdate(User.Name, "x").ToSql(gooq.DialectPgsql)
 // INSERT INTO "user" ("name", "age") VALUES ($1, $2) ON CONFLICT ("id") DO UPDATE SET "name" = $3
 dsl.Insert(User).Columns(User.Name).Values("a").
-    OnConflictKey(User.ID).DoNothing().ToSql(gooq.DialectPgsql)
+    OnConflictKey(User.Id).DoNothing().ToSql(gooq.DialectPgsql)
 // INSERT INTO "user" ("name") VALUES ($1) ON CONFLICT ("id") DO NOTHING
 
 // Returning：PG / SQLite（MySQL 渲染报错）。
-dsl.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).
-    Returning(User.ID).ToSql(gooq.DialectPgsql)
+dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).
+    Returning(User.Id).ToSql(gooq.DialectPgsql)
 // UPDATE "user" SET "status" = $1 WHERE "user"."id" = $2 RETURNING "user"."id"
 ```
 
@@ -427,29 +427,29 @@ dsl.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).
 // 查询 + 扫描到 struct 切片 / 标量。
 users := []model.User{}
 err := dsl.Select(User.AllFields()).From(User).
-    UseDB(gdb.DB()).Where(User.Age.Gt(18)).Order(User.ID.Desc()).Limit(10).
+    UseDB(gdb.DB()).Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
     Scan(ctx, &users)
 
 count := int64(0)
-err = dsl.Select(fn.Count(User.ID)).From(User).UseDB(gdb.DB()).Scan(ctx, &count)
+err = dsl.Select(fn.Count(User.Id)).From(User).UseDB(gdb.DB()).Scan(ctx, &count)
 
 // 写操作。
 _, err = dsl.Insert(User).Record(model.User{Name: "john"}).UseDB(gdb.DB()).Exec(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).UseDB(gdb.DB()).Exec(ctx)
+_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).UseDB(gdb.DB()).Exec(ctx)
 
 // 事务：UseTX 绑定事务连接。
 tx, _ := gdb.DB().Begin(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.ID.Eq(1)).UseTX(tx).Exec(ctx)
+_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).UseTX(tx).Exec(ctx)
 tx.Commit()
 
 // 便捷方法：Count 自动补全 COUNT(*)，Exists 包装 SELECT EXISTS(...)。
 total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).UseDB(gdb.DB()).Count(ctx)
-exists, err := dsl.Select(User.ID).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx)
+exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx)
 
 // 行级类型化读取：类型 T 在编译期被消费。
-row, err := dsl.Select(User.ID, User.Name, User.Age).From(User).
+row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
     Where(User.Name.Eq("john")).UseDB(gdb.DB()).Row(ctx)
-id := gooq.Get(row, User.ID)      // int64
+id := gooq.Get(row, User.Id)      // int64
 name := gooq.Get(row, User.Name)  // string
 
 // 方言从 gdb 驱动名自动推导；UseDB 可重新绑定以支持多库/读写分离。
@@ -470,14 +470,14 @@ err := dsl.Select(User.AllFields()).From(User).
 
 // 复合查询：count 先行、rows 后查，count=0 短路不查 rows。
 rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
-    Order(User.ID.Desc()).
+    Order(User.Id.Desc()).
     Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
 
 // PageCache 缓存复合查询为一条 hash 记录（field 为 "count" 与 "rows"）。
 // 需要 SetHashCacheAdapter；key 含 limit/offset，各页独立缓存。
 // RowsField/CountField 可覆盖 field 名；Force 开启后 count=0 也会缓存（默认跳过空结果）。
 rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
-    Order(User.ID.Desc()).
+    Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
     Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
 
@@ -485,7 +485,7 @@ rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 // 与 RowsAndCount 共享同一份数据缓存（统一存 Result JSON，数据 field 默认 "rows"）。
 var vips []User
 total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
-    Order(User.ID.Desc()).
+    Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
     Page(1, 10).UseDB(gdb.DB()).ScanAndCount(ctx, &vips)
 ```
@@ -514,7 +514,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - 模板：`<hack>/template/table.tmpl` 优先于内置模板（删除即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
 - 仅生成 gooq 类型化表对象（`table/`）；`do/`/`entity/` 交由 `gf gen dao`。
-- 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；Go 命名规范（`id` → `ID`）。
+- 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）。
 - 内置驱动：mysql/pgsql/sqlite；其他驱动取消 `internal/cmd/cmd.go` 中 import 注释启用。
 
 ## 测试

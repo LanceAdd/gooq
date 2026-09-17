@@ -55,7 +55,7 @@ Given a table `user`, `table/user.go` is generated as:
 type UserTable struct {
     *gooq.TableBase
 
-    ID   gooq.Field[int64]
+    Id   gooq.Field[int64]
     Name gooq.Field[string]
     ...
 }

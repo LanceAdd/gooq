@@ -19,7 +19,7 @@ import (
 
 type testUserTable struct {
 	*gooq.TableBase
-	ID        gooq.Field[int64]
+	Id        gooq.Field[int64]
 	Name      gooq.Field[string]
 	Age       gooq.Field[int]
 	Status    gooq.Field[string]
@@ -44,7 +44,7 @@ func newTestUserTable(alias ...string) *testUserTable {
 	if len(alias) > 0 {
 		t.TableBase = t.TableBase.As(alias[0])
 	}
-	t.ID = gooq.NewFieldAt[int64](t.TableBase, "id")
+	t.Id = gooq.NewFieldAt[int64](t.TableBase, "id")
 	t.Name = gooq.NewFieldAt[string](t.TableBase, "name")
 	t.Age = gooq.NewFieldAt[int](t.TableBase, "age")
 	t.Status = gooq.NewFieldAt[string](t.TableBase, "status")
@@ -65,7 +65,7 @@ func (t *testUserTable) Clone() *testUserTable {
 
 type testUserRoleTable struct {
 	*gooq.TableBase
-	UserID gooq.Field[int64]
+	UserId gooq.Field[int64]
 }
 
 func newTestUserRoleTable() *testUserRoleTable {
@@ -75,7 +75,7 @@ func newTestUserRoleTable() *testUserRoleTable {
 			{ColumnName: "user_id", LocalType: gooq.LocalTypeInt64},
 		},
 	})}
-	t.UserID = gooq.NewFieldAt[int64](t.TableBase, "user_id")
+	t.UserId = gooq.NewFieldAt[int64](t.TableBase, "user_id")
 	return t
 }
 
@@ -126,7 +126,7 @@ func TestFn_Aggregate(t *testing.T) {
 			expr gooq.Expression
 			sql  string
 		}{
-			{Count(testUser.ID), "COUNT(`user`.`id`)"},
+			{Count(testUser.Id), "COUNT(`user`.`id`)"},
 			{Sum(testUser.Age), "SUM(`user`.`age`)"},
 			{Avg(testUser.Age), "AVG(`user`.`age`)"},
 			{Min(testUser.Age), "MIN(`user`.`age`)"},
@@ -222,7 +222,7 @@ func TestFn_Window(t *testing.T) {
 		t.Assert(sql, "SELECT RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r FROM `user` WHERE `user`.`deleted_at` IS NULL")
 
 		sql, _, err = dsl.Select(
-			RowNumber().Over(nil, []gooq.Expression{testUser.ID.Asc()}),
+			RowNumber().Over(nil, []gooq.Expression{testUser.Id.Asc()}),
 		).From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT ROW_NUMBER() OVER (ORDER BY `user`.`id` ASC) FROM `user` WHERE `user`.`deleted_at` IS NULL")
@@ -230,7 +230,7 @@ func TestFn_Window(t *testing.T) {
 		sql, _, err = dsl.Select(
 			Sum(testUser.Age).OverFrame(
 				[]gooq.Expression{testUser.Status},
-				[]gooq.Expression{testUser.ID.Asc()},
+				[]gooq.Expression{testUser.Id.Asc()},
 				RowsFrame("UNBOUNDED PRECEDING", "CURRENT ROW"),
 			),
 		).From(testUser).ToSql(gooq.DialectMySQL)
@@ -286,7 +286,7 @@ func TestFn_Filter(t *testing.T) {
 		t.AssertEQ(args, []any{"active"})
 
 		sql, args, err = dsl.Select(
-			Count(testUser.ID).Filter(testUser.Status.Eq("active")).
+			Count(testUser.Id).Filter(testUser.Status.Eq("active")).
 				Over([]gooq.Expression{testUser.Status}, nil),
 		).From(testUser).ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
@@ -298,19 +298,19 @@ func TestFn_Filter(t *testing.T) {
 // TestFn_SelectIntegration 验证函数与 SELECT 构建的集成（分组聚合、LATERAL 派生表）。
 func TestFn_SelectIntegration(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		sql, args, err := dsl.Select(testUser.Status, Count(testUser.ID)).
+		sql, args, err := dsl.Select(testUser.Status, Count(testUser.Id)).
 			From(testUser).
 			Group(testUser.Status).
-			Having(gooq.Gt(Count(testUser.ID), 2)).
+			Having(gooq.Gt(Count(testUser.Id), 2)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT `user`.`status`, COUNT(`user`.`id`) FROM `user` WHERE `user`.`deleted_at` IS NULL GROUP BY `user`.`status` HAVING COUNT(`user`.`id`) > ?")
 		t.AssertEQ(args, []any{2})
 
 		u := testUser.As("u")
-		lt := dsl.Select(Count(testUserRole.UserID).As("cnt")).
-			From(testUserRole).Where(testUserRole.UserID.EqExpr(u.ID)).As("lt")
-		_, _, err = dsl.Select(u.ID, lt.Field("cnt")).From(u).
+		lt := dsl.Select(Count(testUserRole.UserId).As("cnt")).
+			From(testUserRole).Where(testUserRole.UserId.EqExpr(u.Id)).As("lt")
+		_, _, err = dsl.Select(u.Id, lt.Field("cnt")).From(u).
 			LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
@@ -330,7 +330,7 @@ func TestFn_Chaining(t *testing.T) {
 		t.Assert(sql, "SELECT GROUP_CONCAT(`user`.`name`) AS names FROM `user` WHERE `user`.`deleted_at` IS NULL")
 
 		sql, _, err = dsl.Select(
-			Count(testUser.ID).Over([]gooq.Expression{testUser.Status}, nil).As("cnt"),
+			Count(testUser.Id).Over([]gooq.Expression{testUser.Status}, nil).As("cnt"),
 		).From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT COUNT(`user`.`id`) OVER (PARTITION BY `user`.`status`) AS cnt FROM `user` WHERE `user`.`deleted_at` IS NULL")

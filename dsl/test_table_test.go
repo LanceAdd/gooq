@@ -14,7 +14,7 @@ import (
 
 type testUserTable struct {
 	*gooq.TableBase
-	ID        gooq.Field[int64]
+	Id        gooq.Field[int64]
 	Name      gooq.Field[string]
 	Age       gooq.Field[int]
 	Status    gooq.Field[string]
@@ -39,7 +39,7 @@ func newTestUserTable(alias string) *testUserTable {
 	if alias != "" {
 		t.TableBase = t.TableBase.As(alias)
 	}
-	t.ID = gooq.NewFieldAt[int64](t.TableBase, "id")
+	t.Id = gooq.NewFieldAt[int64](t.TableBase, "id")
 	t.Name = gooq.NewFieldAt[string](t.TableBase, "name")
 	t.Age = gooq.NewFieldAt[int](t.TableBase, "age")
 	t.Status = gooq.NewFieldAt[string](t.TableBase, "status")
@@ -93,7 +93,7 @@ func (f *testFunc) SubExpressions() []gooq.Expression {
 
 type testRoleTable struct {
 	*gooq.TableBase
-	ID        gooq.Field[int64]
+	Id        gooq.Field[int64]
 	Name      gooq.Field[string]
 	Remark    gooq.Field[string]
 	DeletedAt gooq.Field[time.Time]
@@ -114,7 +114,7 @@ func newTestRoleTable(alias string) *testRoleTable {
 	if alias != "" {
 		t.TableBase = t.TableBase.As(alias)
 	}
-	t.ID = gooq.NewFieldAt[int64](t.TableBase, "id")
+	t.Id = gooq.NewFieldAt[int64](t.TableBase, "id")
 	t.Name = gooq.NewFieldAt[string](t.TableBase, "name")
 	t.Remark = gooq.NewFieldAt[string](t.TableBase, "remark")
 	t.DeletedAt = gooq.NewFieldAt[time.Time](t.TableBase, "deleted_at")
@@ -133,9 +133,9 @@ func (t *testRoleTable) Clone() *testRoleTable {
 
 type testUserRoleTable struct {
 	*gooq.TableBase
-	ID     gooq.Field[int64]
-	UserID gooq.Field[int64]
-	RoleID gooq.Field[int64]
+	Id     gooq.Field[int64]
+	UserId gooq.Field[int64]
+	RoleId gooq.Field[int64]
 }
 
 var testUserRoleMeta = &gooq.TableMeta{
@@ -152,9 +152,9 @@ func newTestUserRoleTable(alias string) *testUserRoleTable {
 	if alias != "" {
 		t.TableBase = t.TableBase.As(alias)
 	}
-	t.ID = gooq.NewFieldAt[int64](t.TableBase, "id")
-	t.UserID = gooq.NewFieldAt[int64](t.TableBase, "user_id")
-	t.RoleID = gooq.NewFieldAt[int64](t.TableBase, "role_id")
+	t.Id = gooq.NewFieldAt[int64](t.TableBase, "id")
+	t.UserId = gooq.NewFieldAt[int64](t.TableBase, "user_id")
+	t.RoleId = gooq.NewFieldAt[int64](t.TableBase, "role_id")
 	return t
 }
 
@@ -171,7 +171,7 @@ func (t *testUserRoleTable) Clone() *testUserRoleTable {
 // schemaUserTable 是带 schema 的最小测试表（schema 渲染专用）。
 type schemaUserTable struct {
 	*gooq.TableBase
-	ID   gooq.Field[int64]
+	Id   gooq.Field[int64]
 	Name gooq.Field[string]
 }
 
@@ -189,7 +189,7 @@ func newSchemaUserTable(alias string) *schemaUserTable {
 	if alias != "" {
 		t.TableBase = t.TableBase.As(alias)
 	}
-	t.ID = gooq.NewFieldAt[int64](t.TableBase, "id")
+	t.Id = gooq.NewFieldAt[int64](t.TableBase, "id")
 	t.Name = gooq.NewFieldAt[string](t.TableBase, "name")
 	return t
 }

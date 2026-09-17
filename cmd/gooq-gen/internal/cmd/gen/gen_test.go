@@ -122,7 +122,7 @@ func TestGen_Sqlite(t *testing.T) {
 		t.Assert(gstr.Contains(content, `SoftDelete: true`), true)
 
 		// NewFieldAt 赋值与 As/Clone。
-		t.Assert(gstr.Contains(content, `t.ID = gooq.NewFieldAt[int](t.TableBase, "id")`), true)
+		t.Assert(gstr.Contains(content, `t.Id = gooq.NewFieldAt[int](t.TableBase, "id")`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) As(alias string) *UserTable {`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) Clone() *UserTable {`), true)
 

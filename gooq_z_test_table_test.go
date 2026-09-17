@@ -13,7 +13,7 @@ import (
 
 type testUserTable struct {
 	*TableBase
-	ID        Field[int64]
+	Id        Field[int64]
 	Name      Field[string]
 	Age       Field[int]
 	Status    Field[string]
@@ -38,7 +38,7 @@ func newTestUserTable(alias string) *testUserTable {
 	if alias != "" {
 		t.TableBase = t.TableBase.As(alias)
 	}
-	t.ID = NewFieldAt[int64](t.TableBase, "id")
+	t.Id = NewFieldAt[int64](t.TableBase, "id")
 	t.Name = NewFieldAt[string](t.TableBase, "name")
 	t.Age = NewFieldAt[int](t.TableBase, "age")
 	t.Status = NewFieldAt[string](t.TableBase, "status")
@@ -92,7 +92,7 @@ func (f *testFunc) SubExpressions() []Expression {
 
 type testRoleTable struct {
 	*TableBase
-	ID        Field[int64]
+	Id        Field[int64]
 	Name      Field[string]
 	Remark    Field[string]
 	DeletedAt Field[time.Time]
@@ -113,7 +113,7 @@ func newTestRoleTable(alias string) *testRoleTable {
 	if alias != "" {
 		t.TableBase = t.TableBase.As(alias)
 	}
-	t.ID = NewFieldAt[int64](t.TableBase, "id")
+	t.Id = NewFieldAt[int64](t.TableBase, "id")
 	t.Name = NewFieldAt[string](t.TableBase, "name")
 	t.Remark = NewFieldAt[string](t.TableBase, "remark")
 	t.DeletedAt = NewFieldAt[time.Time](t.TableBase, "deleted_at")
@@ -132,9 +132,9 @@ func (t *testRoleTable) Clone() *testRoleTable {
 
 type testUserRoleTable struct {
 	*TableBase
-	ID     Field[int64]
-	UserID Field[int64]
-	RoleID Field[int64]
+	Id     Field[int64]
+	UserId Field[int64]
+	RoleId Field[int64]
 }
 
 var testUserRoleMeta = &TableMeta{
@@ -151,9 +151,9 @@ func newTestUserRoleTable(alias string) *testUserRoleTable {
 	if alias != "" {
 		t.TableBase = t.TableBase.As(alias)
 	}
-	t.ID = NewFieldAt[int64](t.TableBase, "id")
-	t.UserID = NewFieldAt[int64](t.TableBase, "user_id")
-	t.RoleID = NewFieldAt[int64](t.TableBase, "role_id")
+	t.Id = NewFieldAt[int64](t.TableBase, "id")
+	t.UserId = NewFieldAt[int64](t.TableBase, "user_id")
+	t.RoleId = NewFieldAt[int64](t.TableBase, "role_id")
 	return t
 }
 
@@ -170,7 +170,7 @@ func (t *testUserRoleTable) Clone() *testUserRoleTable {
 // schemaUserTable 是带 schema 的最小测试表（schema 渲染专用）。
 type schemaUserTable struct {
 	*TableBase
-	ID   Field[int64]
+	Id   Field[int64]
 	Name Field[string]
 }
 
@@ -188,7 +188,7 @@ func newSchemaUserTable(alias string) *schemaUserTable {
 	if alias != "" {
 		t.TableBase = t.TableBase.As(alias)
 	}
-	t.ID = NewFieldAt[int64](t.TableBase, "id")
+	t.Id = NewFieldAt[int64](t.TableBase, "id")
 	t.Name = NewFieldAt[string](t.TableBase, "name")
 	return t
 }

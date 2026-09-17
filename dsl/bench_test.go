@@ -13,9 +13,9 @@ import (
 func BenchmarkSelect_Basic(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = Select(testUser.ID, testUser.Name, testUser.Age).From(testUser).
+		_, _, _ = Select(testUser.Id, testUser.Name, testUser.Age).From(testUser).
 			Where(testUser.Age.Gt(18)).
-			Order(testUser.ID.Desc()).
+			Order(testUser.Id.Desc()).
 			Limit(10).
 			ToSql(gooq.DialectMySQL)
 	}
@@ -24,12 +24,12 @@ func BenchmarkSelect_Basic(b *testing.B) {
 func BenchmarkSelect_Complex(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = Select(testUser.Status, fn.Count(testUser.ID).As("cnt")).
+		_, _, _ = Select(testUser.Status, fn.Count(testUser.Id).As("cnt")).
 			From(testUser).
-			InnerJoin(testUserRole).On(testUserRole.UserID.EqExpr(testUser.ID)).
+			InnerJoin(testUserRole).On(testUserRole.UserId.EqExpr(testUser.Id)).
 			Where(testUser.Age.Gt(18)).Where(testUser.Name.Like("j%")).
 			Group(testUser.Status).
-			Having(gooq.Gt(fn.Count(testUser.ID), 2)).
+			Having(gooq.Gt(fn.Count(testUser.Id), 2)).
 			Order(testUser.Status.Asc()).
 			ToSql(gooq.DialectPgsql)
 	}
