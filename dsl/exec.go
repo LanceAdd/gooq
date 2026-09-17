@@ -95,6 +95,15 @@ func scanExec(ctx context.Context, e executor, sql string, args []any, dest any)
 	switch rv.Elem().Kind() {
 	case reflect.Struct:
 		return e.GetScan(ctx, dest, sql, args...)
+	case reflect.Ptr:
+		if rv.Elem().Type().Elem().Kind() == reflect.Struct {
+			return e.GetScan(ctx, dest, sql, args...)
+		}
+		value, err := e.GetValue(ctx, sql, args...)
+		if err != nil {
+			return err
+		}
+		return value.Scan(dest)
 	case reflect.Slice, reflect.Array:
 		if isStructSlice(rv.Elem().Type()) {
 			return e.GetScan(ctx, dest, sql, args...)
