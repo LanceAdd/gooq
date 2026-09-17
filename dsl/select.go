@@ -667,8 +667,18 @@ func (b *SelectBuilder) rowsValue(ctx context.Context, dialect gooq.Dialect) (go
 	return rows, nil
 }
 
-// countBuilderOf 构造 COUNT(*) 子查询：清除分页与排序（计数是全量语义）。
+// countBuilderOf 构造 COUNT(*) 子查询：清除分页与排序（计数是全量语义）；
+// 分组/集合操作场景外包子查询 (SELECT COUNT(*) FROM (原查询) AS t)，计数为分组/集合结果行数。
 func (b *SelectBuilder) countBuilderOf() *SelectBuilder {
+	if len(b.groupBy) > 0 || b.groupExt != groupExtNone || len(b.setOps) > 0 {
+		inner := b.Clone()
+		inner.limit = 0
+		inner.offset = 0
+		inner.orderBy = nil
+		outer := Select(gooq.Raw("COUNT(*)"))
+		outer.from = inner.As("t")
+		return outer
+	}
 	countBuilder := b.Clone()
 	countBuilder.fields = []gooq.Expression{gooq.Raw("COUNT(*)")}
 	countBuilder.limit = 0

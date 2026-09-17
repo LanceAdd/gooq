@@ -391,3 +391,16 @@ func TestDsl_Select_OrderExpr(t *testing.T) {
 		t.Assert(sql, `SELECT "user"."status", COUNT("user"."id") FROM "user" WHERE "user"."deleted_at" IS NULL GROUP BY "user"."status" ORDER BY COUNT("user"."id") DESC`)
 	})
 }
+
+// TestDsl_Select_CountGroup 验证分组计数外包子查询：COUNT 为分组结果行数。
+func TestDsl_Select_CountGroup(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, _, err := SelectFrom(testUser).Group(testUser.Status).countSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT COUNT(*) FROM (SELECT * FROM `user` WHERE `user`.`deleted_at` IS NULL GROUP BY `user`.`status`) AS t")
+
+		sql, _, err = SelectFrom(testUser).Group(testUser.Status).countSQL(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT COUNT(*) FROM (SELECT * FROM "user" WHERE "user"."deleted_at" IS NULL GROUP BY "user"."status") AS t`)
+	})
+}
