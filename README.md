@@ -518,7 +518,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - Templates: `<hack>/template/table.tmpl` takes precedence over the embedded template (delete it to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Generates only typed gooq table objects (`table/`); `do/`/`entity/` are left to `gf gen dao`.
-- Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output).
+- Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
 - Built-in drivers: mysql/pgsql/sqlite; others by uncommenting the import in `internal/cmd/cmd.go`.
 
 ## Testing

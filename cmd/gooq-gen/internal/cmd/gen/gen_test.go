@@ -19,6 +19,7 @@ import (
 
 	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gfile"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/text/gstr"
 )
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS user (
     name       TEXT NOT NULL,
     age        INTEGER NOT NULL,
     status     TEXT NOT NULL DEFAULT 'active',
+    alias      TEXT,
     deleted_at DATETIME,
     created_at DATETIME
 )`)
@@ -85,7 +87,7 @@ func TestGen_Sqlite(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		var (
 			ctx     = context.Background()
-			tmpDir  = gfile.Temp("gooq-gen-test")
+			tmpDir  = gfile.Temp("gooq-gen-test", gtime.TimestampNanoStr())
 			dbPath  = filepath.Join(tmpDir, "gooq_test.db")
 			genPath = filepath.Join(tmpDir, "gen")
 		)
@@ -123,6 +125,7 @@ func TestGen_Sqlite(t *testing.T) {
 
 		// NewFieldAt 赋值与 As/Clone。
 		t.Assert(gstr.Contains(content, `t.Id = gooq.NewFieldAt[int](t.TableBase, "id")`), true)
+		t.Assert(gstr.Contains(content, `t.Alias = gooq.NewFieldAt[string](t.TableBase, "alias")`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) As(alias string) *UserTable {`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) Clone() *UserTable {`), true)
 
@@ -142,7 +145,7 @@ func TestGen_Sqlite(t *testing.T) {
 func TestInit(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		var (
-			tmpDir = gfile.Temp("gooq-gen-init-test")
+			tmpDir = gfile.Temp("gooq-gen-init-test", gtime.TimestampNanoStr())
 			bin    = buildBinary(t)
 		)
 		defer gfile.Remove(tmpDir)
@@ -186,7 +189,7 @@ func TestInit(t *testing.T) {
 func TestGen_Config(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		var (
-			tmpDir  = gfile.Temp("gooq-gen-cfg-test")
+			tmpDir  = gfile.Temp("gooq-gen-cfg-test", gtime.TimestampNanoStr())
 			dbPath  = filepath.Join(tmpDir, "gooq_test.db")
 			workDir = filepath.Join(tmpDir, "work")
 			bin     = buildBinary(t)

@@ -44,7 +44,7 @@ func (m *TableMeta) AllColumns() []string {
 
 type Table interface {
 	TableName() string
-	Alias() string
+	AliasName() string
 	Meta() *TableMeta
 	AllColumns() []string
 	Field(column string) Field[any]
@@ -63,7 +63,7 @@ func (t *TableBase) TableName() string {
 	return t.meta.TableName
 }
 
-func (t *TableBase) Alias() string {
+func (t *TableBase) AliasName() string {
 	return t.alias
 }
 

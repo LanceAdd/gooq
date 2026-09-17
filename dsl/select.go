@@ -112,7 +112,7 @@ func (b *SelectBuilder) TableName() string {
 	return ""
 }
 
-func (b *SelectBuilder) Alias() string {
+func (b *SelectBuilder) AliasName() string {
 	return b.alias
 }
 
@@ -457,7 +457,7 @@ func (c *cteTable) TableName() string {
 	return c.name
 }
 
-func (c *cteTable) Alias() string {
+func (c *cteTable) AliasName() string {
 	return ""
 }
 
@@ -1143,8 +1143,8 @@ func renderTableName(rc *gooq.RenderContext, t gooq.Table) string {
 		return "(" + subSQL + ") AS " + sub.alias
 	}
 	var sql = tableNameSQL(rc, t)
-	if t.Alias() != "" {
-		sql += " AS " + t.Alias()
+	if t.AliasName() != "" {
+		sql += " AS " + t.AliasName()
 	}
 	return sql
 }

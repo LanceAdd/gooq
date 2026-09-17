@@ -68,7 +68,7 @@ func (f Field[T]) Render(rc *RenderContext) (string, []any) {
 
 func (f Field[T]) prefixParts() []string {
 	if f.table != nil {
-		if alias := f.table.Alias(); alias != "" {
+		if alias := f.table.AliasName(); alias != "" {
 			return []string{alias}
 		}
 		if schema := f.table.Meta().Schema; schema != "" {

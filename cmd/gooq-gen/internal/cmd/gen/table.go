@@ -27,6 +27,18 @@ import (
 //go:embed template/*
 var gooqTemplateFS embed.FS
 
+var reservedFieldNames = map[string]bool{
+	"TableName":  true,
+	"AliasName":  true,
+	"Meta":       true,
+	"AllColumns": true,
+	"AllFields":  true,
+	"Field":      true,
+	"As":         true,
+	"Clone":      true,
+	"TableBase":  true,
+}
+
 // generateTable generates gooq typed table object files for given tables.
 func generateTable(ctx context.Context, db gdb.DB, tableNames []string, dirPathTable string) {
 	for _, tableName := range tableNames {
@@ -81,6 +93,9 @@ func generateTableContent(
 	for _, fieldName := range fieldNames {
 		field := fieldMap[fieldName]
 		camelName := formatFieldName(fieldName, FieldNameCaseCamel)
+		if reservedFieldNames[camelName] {
+			camelName += "Field"
+		}
 
 		goType, localType := tableFieldTypes(ctx, db, field, &hasStdTime, &hasUUID)
 
