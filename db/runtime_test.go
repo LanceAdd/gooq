@@ -57,6 +57,45 @@ func TestLoadConfigAndDryRun(t *testing.T) {
 	}
 }
 
+func TestLoadConfigLoggerAndDebug(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "log.db")
+	link := "sqlite::@file(" + filepath.ToSlash(path) + ")"
+	content := "database:\n  logger:\n    level: all\n    stdout: false\n  loggroup:\n    link: '" + link + "'\n    debug: true\n"
+	adapter, err := gcfg.NewAdapterContent(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(adapter)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := RemoveConfig("loggroup"); err != nil {
+			t.Error(err)
+		}
+	})
+	database, err := Instance("loggroup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	database.Logger().SetWriter(&buf)
+	if _, err = database.Exec(ctx, `CREATE TABLE item (id INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "CREATE TABLE item") {
+		t.Fatalf("debug log %q", buf.String())
+	}
+
+	bad, err := gcfg.NewAdapterContent("database:\n  logger:\n    level: nope\n  badgroup:\n    link: '" + link + "'\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(bad)); err == nil {
+		t.Fatal("expected invalid logger level")
+	}
+}
+
 func TestPrepareAndSchema(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "stmt.db")

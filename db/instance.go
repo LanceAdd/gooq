@@ -42,6 +42,7 @@ func SetConfig(group string, nodes ...Config) error {
 			return err
 		}
 	}
+	clearGroupLogger(group)
 	groupConfigs.Set(group, append([]Config(nil), nodes...))
 	if database := groupInstances.Remove(group); database != nil {
 		return database.Close()
@@ -54,6 +55,7 @@ func RemoveConfig(group string) error {
 	if group == "" {
 		group = DefaultGroupName
 	}
+	clearGroupLogger(group)
 	groupConfigs.Remove(group)
 	if database := groupInstances.Remove(group); database != nil {
 		return database.Close()
@@ -83,6 +85,12 @@ func Instance(name ...string) (*DB, error) {
 	}
 	database, err := openGroup(group, configs)
 	if err != nil {
+		return nil, err
+	}
+	if err = applyGroupLogger(database); err != nil {
+		if closeErr := database.Close(); closeErr != nil {
+			return nil, fmt.Errorf("%w; close: %v", err, closeErr)
+		}
 		return nil, err
 	}
 	actual := groupInstances.GetOrSet(group, database)

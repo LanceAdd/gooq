@@ -5,12 +5,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gogf/gf/v2/container/gmap"
 	"github.com/gogf/gf/v2/container/gtype"
 	"github.com/gogf/gf/v2/os/gcfg"
+	"github.com/gogf/gf/v2/os/glog"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
-var configLoaded = gtype.NewBool(false)
+var (
+	configLoaded       = gtype.NewBool(false)
+	groupLoggerConfigs = gmap.NewKVMap[string, map[string]any](true)
+)
 
 type configNode struct {
 	Link             string
@@ -32,7 +37,8 @@ type configNode struct {
 
 // LoadConfig reads the database node from a GoFrame config.
 // With no config argument it uses gcfg.Instance(). Existing groups are left unchanged.
-// The logger key under database is skipped.
+// database.logger configures the SQL logger for every group loaded from this file.
+// debug on a node turns SQL logging on for that group.
 func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -45,7 +51,14 @@ func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 	if err != nil || value == nil || value.IsEmpty() {
 		return nil
 	}
-	for group, raw := range value.Map() {
+	rawGroups := value.Map()
+	loggerCfg := loggerConfig(rawGroups)
+	if len(loggerCfg) > 0 {
+		if err = glog.New().SetConfigWithMap(loggerCfg); err != nil {
+			return err
+		}
+	}
+	for group, raw := range rawGroups {
 		if strings.EqualFold(group, "logger") {
 			continue
 		}
@@ -59,8 +72,35 @@ func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 		if err = SetConfig(group, nodes...); err != nil {
 			return err
 		}
+		if len(loggerCfg) > 0 {
+			groupLoggerConfigs.Set(group, loggerCfg)
+		}
 	}
 	return nil
+}
+
+func loggerConfig(groups map[string]any) map[string]any {
+	for group, raw := range groups {
+		if strings.EqualFold(group, "logger") {
+			return gconv.Map(raw)
+		}
+	}
+	return nil
+}
+
+func clearGroupLogger(group string) {
+	groupLoggerConfigs.Remove(group)
+}
+
+func applyGroupLogger(database *DB) error {
+	if database == nil || database.logger == nil {
+		return nil
+	}
+	cfg := groupLoggerConfigs.Get(database.group)
+	if len(cfg) == 0 {
+		return nil
+	}
+	return database.logger.SetConfigWithMap(cfg)
 }
 
 func loadConfigOnce(ctx context.Context) error {
