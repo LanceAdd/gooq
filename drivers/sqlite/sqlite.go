@@ -67,6 +67,7 @@ func (sqliteDriver) Columns(ctx context.Context, query db.Queryer, table string)
 			LocalType:     localType,
 			Primary:       primary,
 			AutoIncrement: autoIncrement,
+			Nullable:      record["notnull"] == "0" || record["notnull"] == "",
 			Index:         i,
 		})
 	}

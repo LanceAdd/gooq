@@ -8,35 +8,44 @@
 package dsl
 
 import (
-	"github.com/lanceadd/gooq"
 	"testing"
-	"time"
 
 	"github.com/gogf/gf/v2/test/gtest"
-	"github.com/gogf/gf/v2/text/gstr"
+
+	"github.com/lanceadd/gooq"
 )
 
-type testUserRecord struct {
-	Id        int64     `json:"id" orm:"id"`
-	Name      string    `json:"name" orm:"name"`
-	Age       int       `json:"age" orm:"age"`
-	Status    string    `json:"status" orm:"status"`
-	CreatedAt time.Time `json:"createdAt" orm:"created_at"`
-	DeletedAt time.Time `json:"deletedAt" orm:"deleted_at"`
+type assignRow []gooq.Assignment
+
+func (r assignRow) Assignments() []gooq.Assignment { return r }
+
+func setCol(column string, value any) gooq.Assignment {
+	return gooq.Assignment{Column: column, Value: value}
 }
 
-func TestDsl_Insert_Record(t *testing.T) {
+func nullCol(column string) gooq.Assignment {
+	return gooq.Assignment{Column: column, Null: true}
+}
+
+func TestDsl_Insert_ValuesOf(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		sql, args, err := Insert(testUser).Record(testUserRecord{Name: "john", Age: 18}).ToSql(gooq.DialectMySQL)
+		sql, args, err := Insert(testUser).ValuesOf(assignRow{
+			setCol("name", "john"),
+			setCol("age", 0),
+		}).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "INSERT INTO `user` (`name`, `age`) VALUES (?, ?)")
-		t.AssertEQ(args, []any{"john", 18})
+		t.AssertEQ(args, []any{"john", 0})
 
-		sql, _, err = Insert(testUser).Record(testUserRecord{Name: "a", Status: "vip"}).ToSql(gooq.DialectMySQL)
+		sql, args, err = Insert(testUser).ValuesOf(assignRow{
+			setCol("name", "a"),
+			nullCol("deleted_at"),
+		}).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "INSERT INTO `user` (`name`, `status`) VALUES (?, ?)")
+		t.Assert(sql, "INSERT INTO `user` (`name`, `deleted_at`) VALUES (?, NULL)")
+		t.AssertEQ(args, []any{"a"})
 
-		sql, _, err = Insert(testUser).Record(testUserRecord{}).ToSql(gooq.DialectMySQL)
+		sql, _, err = Insert(testUser).ValuesOf(assignRow{}).ToSql(gooq.DialectMySQL)
 		t.AssertNE(err, nil)
 		t.Assert(sql, "")
 	})
@@ -72,7 +81,7 @@ func TestDsl_Insert_ColumnsValues(t *testing.T) {
 func TestDsl_Insert_Mixed(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, _, err := Insert(testUser).
-			Record(testUserRecord{Name: "a", Age: 1}).
+			ValuesOf(assignRow{setCol("name", "a"), setCol("age", 1)}).
 			Columns(testUser.Name, testUser.Age).
 			Values("b", 2).
 			ToSql(gooq.DialectMySQL)
@@ -121,18 +130,25 @@ func TestDsl_Update_Set(t *testing.T) {
 	})
 }
 
-func TestDsl_Update_Record_Data(t *testing.T) {
+func TestDsl_Update_ValuesOf_Data(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		// Update/Delete 单条 Record() 不支持：使用 Set/Data + Where。
-		_, _, err := Update(testUser).Record(testUserRecord{Id: 5, Name: "x", Age: 20}).ToSql(gooq.DialectMySQL)
-		t.AssertNE(err, nil)
-		t.Assert(gstr.Contains(err.Error(), "not supported"), true)
+		sql, args, err := Update(testUser).
+			ValuesOf(assignRow{setCol("name", "x"), setCol("age", 0)}).
+			Where(testUser.Id.Eq(1)).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?")
+		t.AssertEQ(args, []any{"x", 0, int64(1)})
 
-		_, _, err = Delete(testUser).Record(testUserRecord{Id: 5}).ToSql(gooq.DialectMySQL)
-		t.AssertNE(err, nil)
-		t.Assert(gstr.Contains(err.Error(), "not supported"), true)
+		sql, args, err = Update(testUser).
+			ValuesOf(assignRow{nullCol("deleted_at")}).
+			Where(testUser.Id.Eq(1)).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "UPDATE `user` SET `deleted_at` = NULL WHERE `user`.`id` = ?")
+		t.AssertEQ(args, []any{int64(1)})
 
-		sql, args, err := Update(testUser).Data(map[string]any{"age": 1, "name": "x"}).ToSql(gooq.DialectMySQL)
+		sql, args, err = Update(testUser).Data(map[string]any{"age": 1, "name": "x"}).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "UPDATE `user` SET `age` = ?, `name` = ?")
 		t.AssertEQ(args, []any{1, "x"})
@@ -164,10 +180,10 @@ func TestDsl_Update_Join(t *testing.T) {
 
 func TestDsl_Update_Batch(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		b := Update(testUser).Records([]testUserRecord{
-			{Id: 1, Name: "a"},
-			{Id: 2, Name: "b"},
-		})
+		b := Update(testUser).ValuesOf(
+			assignRow{setCol("id", int64(1)), setCol("name", "a")},
+			assignRow{setCol("id", int64(2)), setCol("name", "b")},
+		)
 		sqls, argss, err := b.renderBatchDML(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(len(sqls), 2)
@@ -195,7 +211,10 @@ func TestDsl_Delete(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, "DELETE FROM `user_role` WHERE `user_role`.`id` = ?")
 
-		sqls, argss, err := Delete(testUser).Records([]testUserRecord{{Id: 1}, {Id: 2}}).renderBatchDML(gooq.DialectMySQL)
+		sqls, argss, err := Delete(testUser).ValuesOf(
+			assignRow{setCol("id", int64(1))},
+			assignRow{setCol("id", int64(2))},
+		).renderBatchDML(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(len(sqls), 2)
 		t.Assert(sqls[0], "UPDATE `user` SET `deleted_at` = ? WHERE `id` = ?")

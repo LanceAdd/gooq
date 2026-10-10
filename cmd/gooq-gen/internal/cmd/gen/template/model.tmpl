@@ -1,0 +1,24 @@
+// ==========================================================================
+// Code generated and maintained by gooq-gen. DO NOT EDIT.
+// ==========================================================================
+
+package {{.TplPackageName}}
+
+import (
+{{.TplImports}}
+)
+
+// {{.TplType}} is the row value for table "{{.TplTableName}}".
+// New{{.TplType}} starts with every column unset. Setters mark a column for ValuesOf.
+type {{.TplType}} struct {
+{{.TplFields}}
+
+	state [{{.TplStateLen}}]gooq.ValueState
+}
+
+// New{{.TplType}} returns an empty row. Unset columns are omitted from SQL.
+func New{{.TplType}}() *{{.TplType}} {
+	return &{{.TplType}}{}
+}
+
+{{.TplMethods}}

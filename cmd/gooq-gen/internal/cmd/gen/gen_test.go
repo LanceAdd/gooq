@@ -134,6 +134,18 @@ func TestGen_Sqlite(t *testing.T) {
 		// 生成的文件头标识。
 		t.Assert(gstr.Contains(content, `Code generated and maintained by gooq-gen. DO NOT EDIT.`), true)
 
+		// 行模型：未调用的列不写入；可空列提供 SetXxxNull。
+		modelFile := filepath.Join(genPath, "model", "user.go")
+		t.Assert(gfile.Exists(modelFile), true)
+		modelContent := gfile.GetContents(modelFile)
+		t.Assert(gstr.Contains(modelContent, `func NewUser() *User`), true)
+		t.Assert(gstr.Contains(modelContent, `func (m *User) SetName(v string) *User`), true)
+		t.Assert(gstr.Contains(modelContent, `func (m *User) SetAge(v int) *User`), true)
+		t.Assert(gstr.Contains(modelContent, `func (m *User) SetAliasNull() *User`), true)
+		t.Assert(gstr.Contains(modelContent, `func (m *User) SetDeletedAtNull() *User`), true)
+		t.Assert(gstr.Contains(modelContent, `func (m *User) SetNameNull()`), false)
+		t.Assert(gstr.Contains(modelContent, `func (m *User) Assignments() []gooq.Assignment`), true)
+
 		// 不再生成 do/entity 产物。
 		t.Assert(gfile.Exists(filepath.Join(genPath, "do")), false)
 		t.Assert(gfile.Exists(filepath.Join(genPath, "entity")), false)

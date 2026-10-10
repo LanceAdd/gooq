@@ -77,6 +77,7 @@ func (mysqlDriver) Columns(ctx context.Context, query db.Queryer, table string) 
 			Primary:       strings.EqualFold(record["key"], "PRI"),
 			Unique:        strings.EqualFold(record["key"], "UNI"),
 			AutoIncrement: strings.Contains(strings.ToLower(record["extra"]), "auto_increment"),
+			Nullable:      strings.EqualFold(record["null"], "YES"),
 			Index:         i,
 		})
 	}

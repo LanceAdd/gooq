@@ -19,7 +19,7 @@ cd cmd/gooq-gen && go run . init                                    # 可选：�
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-一次生成所有表的 gooq 类型化表对象（`table/`）。`do/`/`entity/` 结构体交由 GoFrame 自身的 `gf gen dao` 生成；`gooq-gen` 也可不传命令行参数，改为从 `hack/gooq.yaml` 的 `gooq.gen.table` 节点读取配置。
+一次生成所有表的 gooq 类型化表对象（`table/`）和行模型（`model/`）。`gooq-gen` 也可不传命令行参数，改为从 `hack/gooq.yaml` 的 `gooq.gen.table` 节点读取配置。
 
 ### 2. 手写表对象（或直接用生成产物）
 
@@ -334,19 +334,19 @@ dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectSQLite)  // SQL
 ### 插入
 
 ```go
-// 实体记录：零值字段与自增列自动跳过。
-dsl.Insert(User).Record(model.User{Name: "john", Age: 18})
+// 只写入调用过的 setter。SetAge(0) 会写入 0，SetDeletedAtNull 写入 NULL。
+dsl.Insert(User).ValuesOf(model.NewUser().SetName("john").SetAge(0))
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?)
 
 // 列值对应 + 多次 Values 批量。
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).Values("b", 2)
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?), (?, ?)
 
-// Record 与 Columns/Values 可混用。
-dsl.Insert(User).Record(model.User{Name: "a", Age: 1}).Columns(User.Name, User.Age).Values("b", 2)
-
-// 批量执行：分批提交，RowsAffected 聚合。
-dsl.Insert(User).Records([]model.User{{Name: "a"}, {Name: "b"}}).Batch(100).DB().Exec(ctx)
+// 多行模型。Batch 分批执行并聚合 RowsAffected。
+dsl.Insert(User).ValuesOf(
+    model.NewUser().SetName("a"),
+    model.NewUser().SetName("b"),
+).Batch(100).DB().Exec(ctx)
 
 // INSERT ... SELECT。
 dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
@@ -367,10 +367,13 @@ dsl.Update(User).Data(map[string]any{"age": 1, "name": "x"})
 // 表达式值渲染为 SQL 片段（字段算术、Raw 等）。
 dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.Id.Eq(1))
 // UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?
-// （单条 Record 更新不支持，使用 Set/Data + Where）
 
-// 按主键批量（或 Keys(...) 自定义键），RowsAffected 聚合。
-dsl.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).Batch(100).DB().Exec(ctx)
+// 一行模型变成 SET。多行按主键分别更新，RowsAffected 聚合。
+dsl.Update(User).ValuesOf(model.NewUser().SetName("x").SetAge(0)).Where(User.Id.Eq(1))
+dsl.Update(User).ValuesOf(
+    model.NewUser().SetId(1).SetName("a"),
+    model.NewUser().SetId(2).SetName("b"),
+).DB().Exec(ctx)
 // UPDATE `user` SET `name` = ? WHERE `id` = ?  ×2
 
 // 多表更新（MySQL JOIN / PG+SQLite FROM）。
@@ -397,7 +400,10 @@ dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 // DELETE FROM `user_role` WHERE `user_role`.`id` = ?
 
 // 按主键批量删除（软删同样生效）。
-dsl.Delete(User).Records([]model.User{{Id: 1}, {Id: 2}}).Batch(100).DB().Exec(ctx)
+dsl.Delete(User).ValuesOf(
+    model.NewUser().SetId(1),
+    model.NewUser().SetId(2),
+).DB().Exec(ctx)
 ```
 
 ### Upsert 与 Returning
@@ -439,7 +445,7 @@ count := int64(0)
 err = dsl.Select(fn.Count(User.Id)).From(User).DB().Scan(ctx, &count)
 
 // 写操作。
-_, err = dsl.Insert(User).Record(model.User{Name: "john"}).DB().Exec(ctx)
+_, err = dsl.Insert(User).ValuesOf(model.NewUser().SetName("john")).DB().Exec(ctx)
 _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).DB().Exec(ctx)
 
 // Transaction 把事务放进 ctx，回调里的查询会自动加入。
@@ -530,7 +536,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。
 - 模板：`<hack>/template/table.tmpl` 优先于内置模板（删除即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
-- 仅生成 gooq 类型化表对象（`table/`）；`do/`/`entity/` 交由 `gf gen dao`。
+- 生成类型化表对象（`table/`）和行模型（`model/`）。`model.NewUser().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与表基方法同名的列加 `Field` 后缀（`meta` → `MetaField`）。
 - 内置连接驱动在 `drivers/mysql`、`drivers/pgsql`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。
 

@@ -28,6 +28,7 @@ type Input struct {
 const (
 	dirPathTable   = "table"
 	tplFileTable   = "table.tmpl"
+	tplFileModel   = "model.tmpl"
 	hackDirName    = "hack"
 	tplDirName     = "template"
 	configFileName = "gooq.yaml"
@@ -77,6 +78,7 @@ func Init() {
 	for _, f := range []struct{ path, content string }{
 		{gfile.Join(hackDirName, configFileName), initConfigContent},
 		{gfile.Join(hackDirName, tplDirName, tplFileTable), embeddedTemplate(tplFileTable)},
+		{gfile.Join(hackDirName, tplDirName, tplFileModel), embeddedTemplate(tplFileModel)},
 	} {
 		if gfile.Exists(f.path) {
 			mlog.Print("skipped, already exists:", gfile.RealPath(f.path))
@@ -116,6 +118,7 @@ func Generate(ctx context.Context, in Input) {
 		mlog.Fatalf("fetching tables failed: %+v", err)
 	}
 	generateTable(ctx, database, tableNames, gfile.Join(in.Path, dirPathTable))
+	generateModel(ctx, database, tableNames, gfile.Join(in.Path, dirPathModel))
 
 	mlog.Print("done!")
 }

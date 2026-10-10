@@ -17,6 +17,7 @@ type Column struct {
 	Primary       bool
 	AutoIncrement bool
 	Unique        bool
+	Nullable      bool
 	Index         int
 }
 

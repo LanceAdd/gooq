@@ -2,12 +2,12 @@ English | [简体中文](README.zh_CN.MD)
 
 # gooq-gen
 
-`gooq-gen` is the code generation tool for [gooq](https://github.com/lanceadd/gooq), derived from the GoFrame CLI `gen dao`. It connects to a database and generates typed gooq table objects for every table in one shot. The `do/` and `entity/` structs are left to GoFrame's own `gf gen dao`.
+`gooq-gen` is the code generation tool for [gooq](https://github.com/lanceadd/gooq). It connects to a database and generates typed table objects (`table/`) and row models (`model/`) for every table.
 
 ## Usage
 
 ```bash
-# Optional: initialize hack/gooq.yaml and hack/template/table.tmpl for config file & template customization.
+# Optional: initialize hack/gooq.yaml and hack/template/{table,model}.tmpl for customization.
 gooq-gen init
 
 # Generate via CLI options.
@@ -40,7 +40,7 @@ Built-in drivers `mysql`, `pgsql`, and `sqlite` are imported by `main.go`. Anoth
 | `-p, --path` | output directory, default `internal` (or set `gooq.gen.table.path`) |
 | `-d, --debug` | show internal detailed debugging information |
 
-All tables of the database are generated into the fixed `table/` subdirectory of the output directory.
+All tables of the database are generated into the fixed `table/` and `model/` subdirectories of the output directory.
 
 ## Template customization
 
@@ -71,7 +71,7 @@ func (t *UserTable) As(alias string) *UserTable { return newUserTable(alias) }
 func (t *UserTable) Clone() *UserTable          { return newUserTable() }
 ```
 
-Typical workflow: generate `dao/do/entity` with GoFrame's own `gf gen dao`, then generate the typed table objects with `gooq-gen` (run `gooq-gen init` once to scaffold our own `hack/gooq.yaml`).
+Run `gooq-gen init` once to scaffold `hack/gooq.yaml`, then `gooq-gen` to generate `table/` and `model/`.
 
 ## Tests
 

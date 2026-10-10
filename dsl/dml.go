@@ -5,12 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/lanceadd/gooq"
-	"reflect"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/gogf/gf/v2/text/gstr"
 
 	"github.com/lanceadd/gooq/db"
 )
@@ -33,6 +30,7 @@ type upsertClause struct {
 type columnValue struct {
 	column string
 	value  any
+	null   bool
 }
 
 type DMLBuilder struct {
@@ -50,7 +48,6 @@ type DMLBuilder struct {
 	upsert          *upsertClause
 	joins           []*joinClause     // UPDATE 多表 JOIN 子句。
 	returning       []gooq.Expression // RETURNING/OUTPUT 返回列。
-	recordUpdate    bool              // Record() 误用于 Update/Delete 的标记（渲染时报错，防静默无效）。
 	executor        executor          // 测试注入的执行器；正式执行由 DB(name) 和 ctx 中的事务决定。
 	group           string            // DB(name) 指定的配置组；空字符串表示默认组。
 	groupSet        bool              // 是否显式指定了非默认配置组。
@@ -93,33 +90,50 @@ func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
 	return b
 }
 
-func (b *DMLBuilder) Record(data any) *DMLBuilder {
-	if b.kind == dmlUpdate || b.kind == dmlDelete {
-		b.recordUpdate = true
+// ValuesOf writes columns marked by model.NewXxx setters.
+// Insert accepts one or more rows. One update row becomes SET. Several update or delete
+// rows become per-row statements keyed by the primary key, executed by Exec.
+func (b *DMLBuilder) ValuesOf(rows ...gooq.ValueSource) *DMLBuilder {
+	parsed := assignmentsToRows(rows)
+	if len(parsed) == 0 {
 		return b
 	}
-	row := recordToRow(b.table, data, b.kind == dmlInsert)
-	b.insertRows = append(b.insertRows, row)
+	if b.kind != dmlUpdate && b.kind != dmlDelete {
+		b.insertRows = append(b.insertRows, parsed...)
+		return b
+	}
+	if b.kind == dmlUpdate && len(b.batchUpdateRows) == 0 && len(parsed) == 1 {
+		b.setValues = append(b.setValues, parsed[0]...)
+		return b
+	}
+	if b.kind == dmlUpdate && len(b.setValues) > 0 {
+		b.batchUpdateRows = append(b.batchUpdateRows, b.setValues)
+		b.setValues = nil
+	}
+	b.batchUpdateRows = append(b.batchUpdateRows, parsed...)
 	return b
 }
 
-func (b *DMLBuilder) Records(data any) *DMLBuilder {
-	rv := reflect.ValueOf(data)
-	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
-		return b
-	}
-	for i := 0; i < rv.Len(); i++ {
-		row := recordToRow(b.table, rv.Index(i).Interface(), b.kind == dmlInsert)
-		if len(row) == 0 {
+func assignmentsToRows(rows []gooq.ValueSource) [][]columnValue {
+	parsed := make([][]columnValue, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
 			continue
 		}
-		if b.kind == dmlUpdate || b.kind == dmlDelete {
-			b.batchUpdateRows = append(b.batchUpdateRows, row)
-		} else {
-			b.insertRows = append(b.insertRows, row)
+		assignments := row.Assignments()
+		cvs := make([]columnValue, 0, len(assignments))
+		for _, item := range assignments {
+			if item.Column == "" {
+				continue
+			}
+			cvs = append(cvs, columnValue{column: item.Column, value: item.Value, null: item.Null})
 		}
+		if len(cvs) == 0 {
+			continue
+		}
+		parsed = append(parsed, cvs)
 	}
-	return b
+	return parsed
 }
 
 func (b *DMLBuilder) Batch(size int) *DMLBuilder {
@@ -132,54 +146,6 @@ func (b *DMLBuilder) Keys(fields ...interface{ ColumnName() string }) *DMLBuilde
 		b.updateKeys = append(b.updateKeys, f.ColumnName())
 	}
 	return b
-}
-
-func recordToRow(t gooq.Table, data any, skipAutoIncr bool) []columnValue {
-	rv := reflect.ValueOf(data)
-	for rv.Kind() == reflect.Ptr {
-		if rv.IsNil() {
-			return nil
-		}
-		rv = rv.Elem()
-	}
-	if rv.Kind() != reflect.Struct {
-		return nil
-	}
-	if t.Meta() == nil {
-		return nil
-	}
-	autoIncr := autoIncrementColumn(t)
-	rt := rv.Type()
-	var row []columnValue
-	for _, fm := range t.Meta().Fields {
-		if skipAutoIncr && fm.ColumnName == autoIncr {
-			continue
-		}
-		for i := 0; i < rt.NumField(); i++ {
-			f := rt.Field(i)
-			if f.PkgPath != "" || !fieldMatchesColumn(f, fm.ColumnName) {
-				continue
-			}
-			fv := rv.Field(i)
-			if fv.IsZero() {
-				break
-			}
-			row = append(row, columnValue{column: fm.ColumnName, value: fv.Interface()})
-			break
-		}
-	}
-	return row
-}
-
-func fieldMatchesColumn(f reflect.StructField, column string) bool {
-	for _, tag := range []string{"orm", "json"} {
-		if v := f.Tag.Get(tag); v != "" {
-			if strings.Split(v, ",")[0] == column {
-				return true
-			}
-		}
-	}
-	return gstr.CaseSnake(f.Name) == column
 }
 
 func (b *DMLBuilder) Clone() *DMLBuilder {
@@ -529,8 +495,7 @@ func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error)
 	if len(b.insertRows) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert data is empty")
 	}
-	// 列并集：按首行顺序，后续行的额外列追加；某行缺失的列补 NULL
-	// （Rows 入口按行跳过零值字段，行间非零字段集合可能不同）。
+	// 列并集：按首行顺序，后续行的额外列追加；某行缺失的列补 NULL。
 	var columns []string
 	seen := make(map[string]bool)
 	for _, row := range b.insertRows {
@@ -548,7 +513,7 @@ func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error)
 	for i, row := range b.insertRows {
 		placeholders := make([]string, len(columns))
 		for j, col := range columns {
-			placeholders[j] = rc.AddArg(valueOf(row, col))
+			placeholders[j] = placeValue(rc, row, col)
 		}
 		rows[i] = "(" + strings.Join(placeholders, ", ") + ")"
 	}
@@ -612,13 +577,21 @@ func quoteColumns(rc *gooq.RenderContext, columns []string) []string {
 	return result
 }
 
-func valueOf(row []columnValue, column string) any {
+func placeValue(rc *gooq.RenderContext, row []columnValue, column string) string {
 	for _, cv := range row {
-		if cv.column == column {
-			return cv.value
+		if cv.column != column {
+			continue
 		}
+		if cv.null {
+			return "NULL"
+		}
+		if expr, ok := cv.value.(gooq.Expression); ok {
+			valSQL, _ := rc.Render(expr)
+			return valSQL
+		}
+		return rc.AddArg(cv.value)
 	}
-	return nil
+	return "NULL"
 }
 
 func isInStrings(list []string, target string) bool {
@@ -631,9 +604,6 @@ func isInStrings(list []string, target string) bool {
 }
 
 func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error) {
-	if b.recordUpdate {
-		return "", nil, fmt.Errorf("gooq: Update/Delete Record() is not supported, use Set/Data with Where or Delete with Where")
-	}
 	if len(b.setValues) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
 	}
@@ -675,21 +645,17 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 	)
 	for _, row := range b.batchUpdateRows {
 		var (
-			setCols []string
-			setArgs []any
-			where   []string
-			whereA  []any
+			sets  []columnValue
+			where []columnValue
 		)
 		for _, cv := range row {
 			if isInStrings(keys, cv.column) {
-				where = append(where, cv.column)
-				whereA = append(whereA, cv.value)
+				where = append(where, cv)
 			} else {
-				setCols = append(setCols, cv.column)
-				setArgs = append(setArgs, cv.value)
+				sets = append(sets, cv)
 			}
 		}
-		if len(where) == 0 || (b.kind == dmlUpdate && len(setCols) == 0) {
+		if len(where) == 0 || (b.kind == dmlUpdate && len(sets) == 0) {
 			continue
 		}
 		rc := gooq.NewRenderContext(dialect)
@@ -708,15 +674,19 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 				sqlStr = "DELETE FROM " + tableNameSQL(rc, b.table)
 			}
 		default:
-			placeholders := make([]string, len(setCols))
-			for i := range setCols {
-				placeholders[i] = renderSetValue(rc, setCols[i], setArgs[i])
+			placeholders := make([]string, len(sets))
+			for i := range sets {
+				placeholders[i] = renderSetValue(rc, sets[i])
 			}
 			sqlStr = fmt.Sprintf("UPDATE %s SET %s", tableNameSQL(rc, b.table), strings.Join(placeholders, ", "))
 		}
 		whereParts := make([]string, len(where))
-		for i := range where {
-			whereParts[i] = fmt.Sprintf("%s = %s", rc.Quote(where[i]), rc.AddArg(whereA[i]))
+		for i, cv := range where {
+			if cv.null {
+				whereParts[i] = rc.Quote(cv.column) + " IS NULL"
+				continue
+			}
+			whereParts[i] = fmt.Sprintf("%s = %s", rc.Quote(cv.column), rc.AddArg(cv.value))
 		}
 		sqls = append(sqls, sqlStr+" WHERE "+strings.Join(whereParts, " AND "))
 		argss = append(argss, rc.Args())
@@ -725,9 +695,6 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 }
 
 func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error) {
-	if b.recordUpdate {
-		return "", nil, fmt.Errorf("gooq: Update/Delete Record() is not supported, use Set/Data with Where or Delete with Where")
-	}
 	if !b.unscoped && b.table.Meta() != nil {
 		if softField := b.table.Meta().SoftDeleteField(); softField != nil {
 			sqlStr := fmt.Sprintf(
@@ -779,18 +746,21 @@ func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
 func (b *DMLBuilder) renderSets(rc *gooq.RenderContext) string {
 	var sets []string
 	for _, cv := range b.setValues {
-		sets = append(sets, renderSetValue(rc, cv.column, cv.value))
+		sets = append(sets, renderSetValue(rc, cv))
 	}
 	return strings.Join(sets, ", ")
 }
 
-// renderSetValue 渲染 SET 值：表达式渲染为 SQL 片段，普通值作为参数。
-func renderSetValue(rc *gooq.RenderContext, column string, value any) string {
-	if expr, ok := value.(gooq.Expression); ok {
-		valSQL, _ := rc.Render(expr)
-		return fmt.Sprintf("%s = %s", rc.Quote(column), valSQL)
+// renderSetValue 渲染 SET 值：NULL、表达式片段，或绑定参数。
+func renderSetValue(rc *gooq.RenderContext, cv columnValue) string {
+	if cv.null {
+		return rc.Quote(cv.column) + " = NULL"
 	}
-	return fmt.Sprintf("%s = %s", rc.Quote(column), rc.AddArg(value))
+	if expr, ok := cv.value.(gooq.Expression); ok {
+		valSQL, _ := rc.Render(expr)
+		return fmt.Sprintf("%s = %s", rc.Quote(cv.column), valSQL)
+	}
+	return fmt.Sprintf("%s = %s", rc.Quote(cv.column), rc.AddArg(cv.value))
 }
 
 func (b *DMLBuilder) renderJoinClauses(rc *gooq.RenderContext) string {

@@ -72,7 +72,7 @@ ORDER BY tablename`)
 
 func (postgresDriver) Columns(ctx context.Context, query db.Queryer, table string) ([]db.Column, error) {
 	records, err := db.QueryMaps(ctx, query, `
-SELECT c.column_name, c.udt_name, c.column_default, c.ordinal_position::text AS ordinal_position
+SELECT c.column_name, c.udt_name, c.column_default, c.is_nullable, c.ordinal_position::text AS ordinal_position
 FROM information_schema.columns c
 WHERE c.table_schema = current_schema() AND c.table_name = $1
 ORDER BY c.ordinal_position`, table)
@@ -117,6 +117,7 @@ WHERE tc.table_schema = current_schema()
 			Primary:       primarySet[record["column_name"]],
 			Unique:        uniqueSet[record["column_name"]],
 			AutoIncrement: strings.Contains(record["column_default"], "nextval("),
+			Nullable:      strings.EqualFold(record["is_nullable"], "YES"),
 			Index:         i,
 		})
 	}
