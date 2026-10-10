@@ -17,7 +17,7 @@ func TestLoadConfigAndDryRun(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "cfg.db")
 	link := "sqlite::@file(" + filepath.ToSlash(path) + ")"
-	content := "database:\n  cfggroup:\n    link: '" + link + "'\n    debug: true\n    dryRun: true\n"
+	content := "gooq:\n  database:\n    cfggroup:\n      link: '" + link + "'\n      debug: true\n      dryRun: true\n"
 	adapter, err := gcfg.NewAdapterContent(content)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestLoadConfigLoggerAndDebug(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "log.db")
 	link := "sqlite::@file(" + filepath.ToSlash(path) + ")"
-	content := "database:\n  logger:\n    level: all\n    stdout: false\n  loggroup:\n    link: '" + link + "'\n    debug: true\n"
+	content := "gooq:\n  logger:\n    level: all\n    stdout: false\n  database:\n    loggroup:\n      link: '" + link + "'\n      debug: true\n"
 	adapter, err := gcfg.NewAdapterContent(content)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestLoadConfigLoggerAndDebug(t *testing.T) {
 		t.Fatalf("debug log %q", buf.String())
 	}
 
-	bad, err := gcfg.NewAdapterContent("database:\n  logger:\n    level: nope\n  badgroup:\n    link: '" + link + "'\n")
+	bad, err := gcfg.NewAdapterContent("gooq:\n  logger:\n    level: nope\n  database:\n    badgroup:\n      link: '" + link + "'\n")
 	if err != nil {
 		t.Fatal(err)
 	}

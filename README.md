@@ -472,7 +472,7 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
     Where(User.Account.Eq("x")).DB().RowOne(ctx)
 
 // DB() uses the default group. DB("orders") uses that configuration group.
-// LoadConfig reads the same database node from a GoFrame config file.
+// LoadConfig reads gooq.database and gooq.logger through gcfg.
 // SetDebug logs SQL, SetDryRun skips execution, Prepare prepares a statement,
 // and Schema switches the MySQL database or PostgreSQL search_path.
 // Reads use a slave when the group has one; writes and BEGIN use a master.

@@ -35,9 +35,9 @@ type configNode struct {
 	MaxIdleConnTime  time.Duration
 }
 
-// LoadConfig reads the database node from a GoFrame config.
+// LoadConfig reads gooq.database and gooq.logger through gcfg.
 // With no config argument it uses gcfg.Instance(). Existing groups are left unchanged.
-// database.logger configures the SQL logger for every group loaded from this file.
+// gooq.logger configures the SQL logger for every group loaded from this file.
 // debug on a node turns SQL logging on for that group.
 func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 	if ctx == nil {
@@ -47,21 +47,22 @@ func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 	if len(source) > 0 && source[0] != nil {
 		config = source[0]
 	}
-	value, err := config.Get(ctx, "database")
-	if err != nil || value == nil || value.IsEmpty() {
-		return nil
+	loggerValue, err := config.Get(ctx, "gooq.logger")
+	if err != nil {
+		return err
 	}
-	rawGroups := value.Map()
-	loggerCfg := loggerConfig(rawGroups)
-	if len(loggerCfg) > 0 {
+	var loggerCfg map[string]any
+	if loggerValue != nil && !loggerValue.IsEmpty() {
+		loggerCfg = loggerValue.Map()
 		if err = glog.New().SetConfigWithMap(loggerCfg); err != nil {
 			return err
 		}
 	}
-	for group, raw := range rawGroups {
-		if strings.EqualFold(group, "logger") {
-			continue
-		}
+	value, err := config.Get(ctx, "gooq.database")
+	if err != nil || value == nil || value.IsEmpty() {
+		return nil
+	}
+	for group, raw := range value.Map() {
 		nodes, err := configsFromRaw(raw)
 		if err != nil {
 			return err
@@ -74,15 +75,6 @@ func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 		}
 		if len(loggerCfg) > 0 {
 			groupLoggerConfigs.Set(group, loggerCfg)
-		}
-	}
-	return nil
-}
-
-func loggerConfig(groups map[string]any) map[string]any {
-	for group, raw := range groups {
-		if strings.EqualFold(group, "logger") {
-			return gconv.Map(raw)
 		}
 	}
 	return nil

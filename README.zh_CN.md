@@ -470,7 +470,7 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
     Where(User.Account.Eq("x")).DB().RowOne(ctx)
 
 // DB() 使用默认组，DB("orders") 使用该配置组。
-// LoadConfig 从 GoFrame 配置文件读取 database 节点。
+// LoadConfig 通过 gcfg 读取 gooq.database 和 gooq.logger。
 // SetDebug 打印 SQL，SetDryRun 跳过执行，Prepare 预处理语句，
 // Schema 切换 MySQL 库名或 PostgreSQL search_path。
 // 组内有从库时读走从库，写和 BEGIN 走主库。Master() / Slave() 强制指定。
