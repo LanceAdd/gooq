@@ -3,9 +3,17 @@ package db
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestOpenUnregisteredDriver(t *testing.T) {
+	_, err := Open(Config{Link: "oracle:u:p@tcp(127.0.0.1:1521)/db"})
+	if err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("expected unregistered driver error, got %v", err)
+	}
+}
 
 func TestParseLink(t *testing.T) {
 	parsed, err := parseLink("mysql:root:pass@tcp(127.0.0.1:3306)/app?charset=utf8")

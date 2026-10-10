@@ -983,6 +983,9 @@ func (b *SelectBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 	if len(dialects) > 0 && dialects[0] != "" {
 		dialect = dialects[0]
 	}
+	if _, err := gooq.DialectSpecOf(dialect); err != nil {
+		return "", nil, err
+	}
 	if err := b.ValidateDialect(dialect); err != nil {
 		return "", nil, err
 	}
@@ -993,11 +996,13 @@ func (b *SelectBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 
 // ValidateDialect 遍历各位置表达式触发节点方言校验（含嵌套子查询）。
 func (b *SelectBuilder) ValidateDialect(dialect gooq.Dialect) error {
-	if dialect == gooq.DialectMySQL {
-		switch b.groupExt {
-		case groupExtCube, groupExtGroupingSets:
-			return fmt.Errorf("gooq: GROUP BY %s is not supported by dialect mysql", groupExtKeyword(b.groupExt))
-		default:
+	if b.groupExt != groupExtNone {
+		spec, err := gooq.DialectSpecOf(dialect)
+		if err != nil {
+			return err
+		}
+		if err = spec.SupportsGroup(groupExtKeyword(b.groupExt)); err != nil {
+			return err
 		}
 	}
 	exprs := make([]gooq.Expression, 0, len(b.fields)+len(b.conditions)+len(b.groupBy)+len(b.having)+len(b.orderBy))
@@ -1020,11 +1025,11 @@ func (b *SelectBuilder) ValidateDialect(dialect gooq.Dialect) error {
 func groupExtKeyword(k groupExtKind) string {
 	switch k {
 	case groupExtRollup:
-		return "ROLLUP"
+		return gooq.GroupRollup
 	case groupExtCube:
-		return "CUBE"
+		return gooq.GroupCube
 	case groupExtGroupingSets:
-		return "GROUPING SETS"
+		return gooq.GroupGroupingSets
 	default:
 		return ""
 	}
@@ -1094,8 +1099,8 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 	sql.WriteString(b.renderTable(rc, b.from))
 	for _, j := range b.joins {
 		keyword := joinKeyword[j.joinType]
-		if j.joinType == joinInnerLateral && rc.Dialect() == gooq.DialectSQLite {
-			keyword = "CROSS JOIN LATERAL"
+		if spec := rc.Spec(); spec != nil {
+			keyword = spec.JoinKeyword(keyword)
 		}
 		sql.WriteString(" ")
 		sql.WriteString(keyword)
@@ -1125,7 +1130,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 			groupSQL, _ := rc.Render(g)
 			groups = append(groups, groupSQL)
 		}
-		if b.groupExt != groupExtNone && b.groupExt == groupExtRollup && rc.Dialect() == gooq.DialectMySQL {
+		if b.groupExt == groupExtRollup && rc.Spec() != nil && rc.Spec().RollupWith() {
 			for _, set := range b.groupExtSets {
 				for _, f := range set {
 					groupSQL, _ := rc.Render(f)
@@ -1175,19 +1180,16 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 		sql.WriteString(strings.Join(orders, ", "))
 	}
 	if b.limit > 0 {
-		if rc.DialectInfo() != nil && rc.DialectInfo().RenderLimit != nil {
-			// 驱动注册的自定义分页渲染（扩展点）。
-			sql.WriteString(rc.DialectInfo().RenderLimit(rc, b.limit, b.offset))
+		if spec := rc.Spec(); spec != nil {
+			sql.WriteString(spec.RenderLimit(rc, b.limit, b.offset))
 		} else {
-			sql.WriteString(" LIMIT ")
-			_, _ = fmt.Fprintf(&sql, "%d", b.limit)
+			sql.WriteString(fmt.Sprintf(" LIMIT %d", b.limit))
 			if b.offset > 0 {
-				sql.WriteString(" OFFSET ")
-				_, _ = fmt.Fprintf(&sql, "%d", b.offset)
+				sql.WriteString(fmt.Sprintf(" OFFSET %d", b.offset))
 			}
 		}
 	}
-	if b.lock != lockNone && rc.Dialect() != gooq.DialectSQLite {
+	if b.lock != lockNone && (rc.Spec() == nil || !rc.Spec().OmitLock()) {
 		switch b.lock {
 		case lockForUpdate:
 			sql.WriteString(" FOR UPDATE")

@@ -10,7 +10,7 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-func readAll(ctx context.Context, query queryer, statement string, args ...any) (result gooq.Result, err error) {
+func readAll(ctx context.Context, query Queryer, statement string, args ...any) (result gooq.Result, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
@@ -38,7 +38,7 @@ func readAll(ctx context.Context, query queryer, statement string, args ...any) 
 	return result, nil
 }
 
-func readOne(ctx context.Context, query queryer, statement string, args ...any) (gooq.Record, error) {
+func readOne(ctx context.Context, query Queryer, statement string, args ...any) (gooq.Record, error) {
 	result, err := readAll(ctx, query, statement, args...)
 	if err != nil || len(result) == 0 {
 		return nil, err
@@ -46,7 +46,7 @@ func readOne(ctx context.Context, query queryer, statement string, args ...any) 
 	return result[0], nil
 }
 
-func readValue(ctx context.Context, query queryer, statement string, args ...any) (value any, err error) {
+func readValue(ctx context.Context, query Queryer, statement string, args ...any) (value any, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func readValue(ctx context.Context, query queryer, statement string, args ...any
 	return record[columns[0]], nil
 }
 
-func scanDest(ctx context.Context, query queryer, dest any, statement string, args ...any) error {
+func scanDest(ctx context.Context, query Queryer, dest any, statement string, args ...any) error {
 	rv := reflect.ValueOf(dest)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return fmt.Errorf("gooq: scan destination must be a non-nil pointer")
@@ -125,7 +125,7 @@ func scanDest(ctx context.Context, query queryer, dest any, statement string, ar
 	return gooqAssign(elem, value)
 }
 
-func scanScalarSlice(ctx context.Context, query queryer, slice reflect.Value, statement string, args ...any) error {
+func scanScalarSlice(ctx context.Context, query Queryer, slice reflect.Value, statement string, args ...any) error {
 	values, err := readColumn(ctx, query, statement, args...)
 	if err != nil {
 		return err
@@ -143,7 +143,7 @@ func scanScalarSlice(ctx context.Context, query queryer, slice reflect.Value, st
 	return nil
 }
 
-func readColumn(ctx context.Context, query queryer, statement string, args ...any) (values []any, err error) {
+func readColumn(ctx context.Context, query Queryer, statement string, args ...any) (values []any, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err

@@ -213,7 +213,11 @@ func (c *castExpr) Condition() (string, []any) {
 
 func (c *castExpr) Render(rc *RenderContext) (string, []any) {
 	sql, args := rc.Render(c.expr)
-	return fmt.Sprintf("CAST(%s AS %s)", sql, castTypeOf(rc, c.localType)), args
+	castName := strings.ToUpper(string(c.localType))
+	if spec := rc.Spec(); spec != nil {
+		castName = spec.CastType(c.localType)
+	}
+	return fmt.Sprintf("CAST(%s AS %s)", sql, castName), args
 }
 
 func (c *castExpr) SubExpressions() []Expression {

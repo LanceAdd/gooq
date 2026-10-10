@@ -4,7 +4,7 @@
 
 - **Type-safe** — `Field[T]` carries the column type at compile time: `User.Age.Gt(18)` compiles, `User.Age.Gt("x")` doesn't.
 - **Offline rendering** — `ToSql(dialect)` produces SQL + args anywhere, without a database connection; execute with the standard library or `gooq/db`.
-- **Dialect aware** — MySQL / PostgreSQL / SQLite built in; drivers override rendering details via `RegisterDialect`.
+- **Dialect aware** — MySQL / PostgreSQL / SQLite each implement `DialectSpec`. A new dialect registers the whole spec. Connection drivers register separately through `db.Register`.
 - **Zero runtime guessing** — soft-delete conditions, auto-increment skipping, full-column derivation all come from static `TableMeta` written at codegen time.
 - **Layered packages** — `gooq` (core: fields, tables, expression language, dialects, render contract), `gooq/db` (connections, transactions, scanning), `gooq/dsl` (query and DML builders), `gooq/fn` (function library); generated table code only imports `gooq`.
 
@@ -91,7 +91,10 @@ sql, args, err := dsl.Select(User.Id, User.Name).
 ### 4. Execute
 
 ```go
-import "github.com/lanceadd/gooq/db"
+import (
+    "github.com/lanceadd/gooq/db"
+    _ "github.com/lanceadd/gooq/drivers/mysql" // pgsql, sqlite: drivers/pgsql, drivers/sqlite
+)
 
 err := db.SetConfig(db.DefaultGroupName, db.Config{
     Link: "mysql:root:pass@tcp(127.0.0.1:3306)/app",
@@ -463,6 +466,9 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
     Where(User.Account.Eq("x")).DB().RowOne(ctx)
 
 // DB() uses the default group. DB("orders") uses that configuration group.
+// LoadConfig reads the same database node from a GoFrame config file.
+// SetDebug logs SQL, SetDryRun skips execution, Prepare prepares a statement,
+// and Schema switches the MySQL database or PostgreSQL search_path.
 // Reads use a slave when the group has one; writes and BEGIN use a master.
 // Master() and Slave() force the pool. A transaction is taken from ctx.
 ```
@@ -512,9 +518,10 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 | pgsql | `$n` | `"` | LIMIT |
 | sqlite | `?` | `"` | LIMIT |
 
-- Unregistered dialects fall back to default rendering; `RegisterDialect` overrides built-ins incrementally.
+- `ToSql` requires a registered `DialectSpec`. An unknown dialect returns an error. Embed `MySQLDialect`, `PostgresDialect`, or `SQLiteDialect` and override the methods that differ, then call `RegisterDialect`.
+- Opening a connection requires a blank import of the matching driver package (`drivers/mysql`, `drivers/pgsql`, `drivers/sqlite`). The driver registers itself with `db.Register`. `gooq-gen` imports the three built-in drivers.
 - Schema-qualified tables render `schema.table.column` (alias shadows schema); gooq-gen fills schema for PG only (`current_schema()`).
-- Dialect-sensitive behavior is handled internally: pagination, row locks (`FOR UPDATE`/`LOCK IN SHARE MODE`/`FOR SHARE`), LATERAL mapping (SQLite `INNER JOIN LATERAL` → `CROSS JOIN LATERAL`), upsert syntax, `DATE_FORMAT`/`TO_CHAR`/`strftime`, `GROUP_CONCAT`/`STRING_AGG`.
+- Dialect-sensitive SQL lives on `DialectSpec`: pagination, row locks, `JOIN` rewrites, upsert, `UPDATE ... FROM`, `DATE_FORMAT`, and `GROUP_CONCAT`. SQLite upsert uses `ON CONFLICT`.
 
 ## gooq-gen (codegen tool)
 
@@ -529,7 +536,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Generates only typed gooq table objects (`table/`); `do/`/`entity/` are left to `gf gen dao`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
-- Built-in drivers: mysql, pgsql, and sqlite, opened by `gooq/db`.
+- Built-in connection drivers live in `drivers/mysql`, `drivers/pgsql`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses.
 
 ## Testing
 

@@ -21,6 +21,7 @@ import (
 	"github.com/gogf/gf/v2/text/gstr"
 
 	"github.com/lanceadd/gooq/db"
+	_ "github.com/lanceadd/gooq/drivers/sqlite"
 )
 
 // initSqlite 创建 sqlite 测试库并建表（SetConfigGroup 整组替换，可跨测试重复运行）。

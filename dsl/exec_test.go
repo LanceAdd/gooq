@@ -18,6 +18,7 @@ import (
 
 	"github.com/lanceadd/gooq"
 	"github.com/lanceadd/gooq/db"
+	_ "github.com/lanceadd/gooq/drivers/sqlite"
 )
 
 type fakeExecutor struct {

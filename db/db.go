@@ -10,6 +10,9 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/gogf/gf/v2/container/gtype"
+	"github.com/gogf/gf/v2/os/glog"
+
 	"github.com/lanceadd/gooq"
 )
 
@@ -40,14 +43,25 @@ type Config struct {
 	Link            string
 	Role            Role
 	Weight          int
+	Debug           bool
+	DryRun          bool
+	Charset         string
+	Timezone        string
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
+	MaxIdleTime     time.Duration
 }
 
 type node struct {
-	sql    *sql.DB
-	weight int
+	sql        *sql.DB
+	weight     int
+	dsn        string
+	driverName string
+	maxOpen    int
+	maxIdle    int
+	maxLife    time.Duration
+	maxIdleFor time.Duration
 }
 
 // DB is a group of master and slave pools that share one dialect.
@@ -56,8 +70,13 @@ type DB struct {
 	masters []node
 	slaves  []node
 	route   Route
+	schema  string
+	shared  bool
 	dialect gooq.Dialect
-	kind    dialectKind
+	driver  Driver
+	debug   *gtype.Bool
+	dryRun  *gtype.Bool
+	logger  *glog.Logger
 }
 
 // Tx is a transaction started on a master connection.
@@ -70,7 +89,8 @@ type Tx struct {
 	closed  bool
 }
 
-type queryer interface {
+// Queryer is the subset of a connection used to read rows and run catalog statements.
+type Queryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
@@ -90,7 +110,7 @@ func openGroup(group string, configs []Config) (*DB, error) {
 	}
 	database := &DB{group: group}
 	for _, cfg := range configs {
-		opened, kind, err := openNode(cfg)
+		opened, drv, err := openNode(cfg)
 		if err != nil {
 			closeErr := database.Close()
 			if closeErr != nil {
@@ -98,15 +118,15 @@ func openGroup(group string, configs []Config) (*DB, error) {
 			}
 			return nil, err
 		}
-		if database.kind.sqlDriver == "" {
-			database.kind = kind
-			database.dialect = kind.dialect
-		} else if kind.dialect != database.dialect {
+		if database.driver == nil {
+			database.driver = drv
+			database.dialect = drv.Dialect()
+		} else if drv.Dialect() != database.dialect {
 			closeErr := database.Close()
 			if closeErr != nil {
-				return nil, fmt.Errorf("gooq: group %q mixes dialects %s and %s; close: %v", group, database.dialect, kind.dialect, closeErr)
+				return nil, fmt.Errorf("gooq: group %q mixes dialects %s and %s; close: %v", group, database.dialect, drv.Dialect(), closeErr)
 			}
-			return nil, fmt.Errorf("gooq: group %q mixes dialects %s and %s", group, database.dialect, kind.dialect)
+			return nil, fmt.Errorf("gooq: group %q mixes dialects %s and %s", group, database.dialect, drv.Dialect())
 		}
 		if cfg.Role == RoleSlave {
 			database.slaves = append(database.slaves, opened)
@@ -121,25 +141,68 @@ func openGroup(group string, configs []Config) (*DB, error) {
 		}
 		return nil, fmt.Errorf("gooq: group %q requires a master node", group)
 	}
+	database.debug = gtype.NewBool(false)
+	database.dryRun = gtype.NewBool(false)
+	database.logger = glog.New()
+	for _, cfg := range configs {
+		if cfg.Debug {
+			database.debug.Set(true)
+		}
+		if cfg.DryRun {
+			database.dryRun.Set(true)
+		}
+	}
 	return database, nil
 }
 
-func openNode(cfg Config) (node, dialectKind, error) {
+func openNode(cfg Config) (node, Driver, error) {
 	parsed, err := parseLink(cfg.Link)
 	if err != nil {
-		return node{}, dialectKind{}, err
+		return node{}, nil, err
 	}
-	kind, ok := dialects[parsed.Type]
-	if !ok {
-		return node{}, dialectKind{}, fmt.Errorf("gooq: unsupported database type %q", parsed.Type)
+	drv := driverByLink(parsed.Type)
+	if drv == nil {
+		return node{}, nil, fmt.Errorf("gooq: database driver %q is not registered", parsed.Type)
 	}
-	dsn, err := kind.dsn(parsed)
+	dsn, err := drv.DSN(parsed)
 	if err != nil {
-		return node{}, dialectKind{}, err
+		return node{}, nil, err
 	}
-	sqlDB, err := sql.Open(kind.sqlDriver, dsn)
+	dsn = drv.ApplySession(dsn, cfg)
+	sqlDB, err := openSQL(drv.SQLDriver(), dsn, "", cfg)
 	if err != nil {
-		return node{}, dialectKind{}, err
+		return node{}, nil, err
+	}
+	weight := cfg.Weight
+	if weight <= 0 {
+		weight = 1
+	}
+	return node{
+		sql:        sqlDB,
+		weight:     weight,
+		dsn:        dsn,
+		driverName: drv.SQLDriver(),
+		maxOpen:    cfg.MaxOpenConns,
+		maxIdle:    cfg.MaxIdleConns,
+		maxLife:    cfg.ConnMaxLifetime,
+		maxIdleFor: cfg.MaxIdleTime,
+	}, drv, nil
+}
+
+func openSQL(driverName, dsn, initSQL string, cfg Config) (*sql.DB, error) {
+	var sqlDB *sql.DB
+	if initSQL == "" {
+		var err error
+		sqlDB, err = sql.Open(driverName, dsn)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		drv, err := underlyingByName(driverName)
+		if err != nil {
+			return nil, err
+		}
+		sqlDB = sql.OpenDB(initConnector{driver: drv, dsn: dsn, initSQL: initSQL})
 	}
 	if cfg.MaxOpenConns > 0 {
 		sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
@@ -150,23 +213,22 @@ func openNode(cfg Config) (node, dialectKind, error) {
 	if cfg.ConnMaxLifetime > 0 {
 		sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 	}
-	if err = sqlDB.Ping(); err != nil {
+	if cfg.MaxIdleTime > 0 {
+		sqlDB.SetConnMaxIdleTime(cfg.MaxIdleTime)
+	}
+	if err := sqlDB.Ping(); err != nil {
 		closeErr := sqlDB.Close()
 		if closeErr != nil {
-			return node{}, dialectKind{}, fmt.Errorf("%w; close: %v", err, closeErr)
+			return nil, fmt.Errorf("%w; close: %v", err, closeErr)
 		}
-		return node{}, dialectKind{}, err
+		return nil, err
 	}
-	weight := cfg.Weight
-	if weight <= 0 {
-		weight = 1
-	}
-	return node{sql: sqlDB, weight: weight}, kind, nil
+	return sqlDB, nil
 }
 
 // Close closes every master and slave pool.
 func (d *DB) Close() error {
-	if d == nil {
+	if d == nil || d.shared {
 		return nil
 	}
 	var errs []error
@@ -265,81 +327,134 @@ func (t *Tx) Dialect() gooq.Dialect {
 
 // Query runs a read query and returns the raw rows. The caller closes the rows.
 func (d *DB) Query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	conn, err := d.readDB()
-	if err != nil {
-		return nil, err
-	}
-	return conn.QueryContext(ctx, query, args...)
+	var rows *sql.Rows
+	err := d.observe(ctx, query, args, func(ctx context.Context) error {
+		conn, err := d.readDB()
+		if err != nil {
+			return err
+		}
+		rows, err = conn.QueryContext(ctx, query, args...)
+		return err
+	})
+	return rows, err
 }
 
 // Exec executes a write statement.
 func (d *DB) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	conn, err := d.writeDB()
-	if err != nil {
-		return nil, err
-	}
-	return conn.ExecContext(ctx, query, args...)
+	var result sql.Result = dryResult{}
+	err := d.observe(ctx, query, args, func(ctx context.Context) error {
+		conn, err := d.writeDB()
+		if err != nil {
+			return err
+		}
+		result, err = conn.ExecContext(ctx, query, args...)
+		return err
+	})
+	return result, err
 }
 
 // Exec executes a statement inside the transaction.
 func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	return t.sql.ExecContext(ctx, query, args...)
+	var result sql.Result = dryResult{}
+	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
+		var err error
+		result, err = t.sql.ExecContext(ctx, query, args...)
+		return err
+	})
+	return result, err
 }
 
 // GetAll reads every row. No rows returns a nil result.
 func (d *DB) GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error) {
-	conn, err := d.readDB()
-	if err != nil {
-		return nil, err
-	}
-	return readAll(ctx, conn, query, args...)
+	var result gooq.Result
+	err := d.observe(ctx, query, args, func(ctx context.Context) error {
+		conn, err := d.readDB()
+		if err != nil {
+			return err
+		}
+		result, err = readAll(ctx, conn, query, args...)
+		return err
+	})
+	return result, err
 }
 
 // GetAll reads every row inside the transaction.
 func (t *Tx) GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error) {
-	return readAll(ctx, t.sql, query, args...)
+	var result gooq.Result
+	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
+		var err error
+		result, err = readAll(ctx, t.sql, query, args...)
+		return err
+	})
+	return result, err
 }
 
 // GetOne reads the first row. No rows returns a nil record.
 func (d *DB) GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error) {
-	conn, err := d.readDB()
-	if err != nil {
-		return nil, err
-	}
-	return readOne(ctx, conn, query, args...)
+	var record gooq.Record
+	err := d.observe(ctx, query, args, func(ctx context.Context) error {
+		conn, err := d.readDB()
+		if err != nil {
+			return err
+		}
+		record, err = readOne(ctx, conn, query, args...)
+		return err
+	})
+	return record, err
 }
 
 // GetOne reads the first row inside the transaction.
 func (t *Tx) GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error) {
-	return readOne(ctx, t.sql, query, args...)
+	var record gooq.Record
+	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
+		var err error
+		record, err = readOne(ctx, t.sql, query, args...)
+		return err
+	})
+	return record, err
 }
 
 // GetValue reads the first column of the first row. No rows returns nil.
 func (d *DB) GetValue(ctx context.Context, query string, args ...any) (any, error) {
-	conn, err := d.readDB()
-	if err != nil {
-		return nil, err
-	}
-	return readValue(ctx, conn, query, args...)
+	var value any
+	err := d.observe(ctx, query, args, func(ctx context.Context) error {
+		conn, err := d.readDB()
+		if err != nil {
+			return err
+		}
+		value, err = readValue(ctx, conn, query, args...)
+		return err
+	})
+	return value, err
 }
 
 // GetValue reads the first column of the first row inside the transaction.
 func (t *Tx) GetValue(ctx context.Context, query string, args ...any) (any, error) {
-	return readValue(ctx, t.sql, query, args...)
+	var value any
+	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
+		var err error
+		value, err = readValue(ctx, t.sql, query, args...)
+		return err
+	})
+	return value, err
 }
 
 // GetScan writes the result into dest.
 func (d *DB) GetScan(ctx context.Context, dest any, query string, args ...any) error {
-	conn, err := d.readDB()
-	if err != nil {
-		return err
-	}
-	return scanDest(ctx, conn, dest, query, args...)
+	return d.observe(ctx, query, args, func(ctx context.Context) error {
+		conn, err := d.readDB()
+		if err != nil {
+			return err
+		}
+		return scanDest(ctx, conn, dest, query, args...)
+	})
 }
 
 // GetScan writes the result into dest inside the transaction.
 func (t *Tx) GetScan(ctx context.Context, dest any, query string, args ...any) error {
-	return scanDest(ctx, t.sql, dest, query, args...)
+	return t.db.observe(ctx, query, args, func(ctx context.Context) error {
+		return scanDest(ctx, t.sql, dest, query, args...)
+	})
 }
 
 // Tables returns user table names in the current schema.
@@ -348,7 +463,7 @@ func (d *DB) Tables(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return d.kind.tables(ctx, conn)
+	return d.driver.Tables(ctx, conn)
 }
 
 // TableFields returns columns of one table in definition order.
@@ -360,5 +475,5 @@ func (d *DB) TableFields(ctx context.Context, table string) ([]Column, error) {
 	if err != nil {
 		return nil, err
 	}
-	return d.kind.columns(ctx, conn, table)
+	return d.driver.Columns(ctx, conn, table)
 }

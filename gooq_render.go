@@ -18,16 +18,16 @@ type Subquery interface {
 
 // RenderContext 是一次渲染过程的方言与参数状态。
 type RenderContext struct {
-	dialect     Dialect
-	dialectInfo *DialectInfo // 方言元数据（注册表解析）。
-	args        []any
-	argIndex    int
+	dialect  Dialect
+	spec     DialectSpec
+	args     []any
+	argIndex int
 }
 
 func NewRenderContext(dialect Dialect) *RenderContext {
 	rc := &RenderContext{dialect: dialect}
 	if dialect != "" {
-		rc.dialectInfo = getDialectInfo(string(dialect))
+		rc.spec = LookupDialect(dialect)
 	}
 	return rc
 }
@@ -37,9 +37,9 @@ func (rc *RenderContext) Dialect() Dialect {
 	return rc.dialect
 }
 
-// DialectInfo 返回当前方言的元数据（未注册方言时为 nil）。
-func (rc *RenderContext) DialectInfo() *DialectInfo {
-	return rc.dialectInfo
+// Spec 返回当前渲染方言。未注册方言时为 nil。
+func (rc *RenderContext) Spec() DialectSpec {
+	return rc.spec
 }
 
 // Args 返回当前累积的参数列表。
@@ -47,10 +47,10 @@ func (rc *RenderContext) Args() []any {
 	return rc.args
 }
 
-// Quote 按方言引号包裹标识符。
+// Quote 按方言引号包裹标识符。未注册方言使用双引号。
 func (rc *RenderContext) Quote(ident string) string {
-	if rc.dialectInfo != nil && rc.dialectInfo.QuoteChar != "" {
-		return rc.dialectInfo.QuoteChar + ident + rc.dialectInfo.QuoteChar
+	if rc.spec != nil {
+		return rc.spec.Quote(ident)
 	}
 	return `"` + ident + `"`
 }
@@ -60,6 +60,21 @@ func (rc *RenderContext) AddArg(v any) string {
 	rc.args = append(rc.args, v)
 	rc.argIndex++
 	return rc.placeholder(rc.argIndex)
+}
+
+func (rc *RenderContext) placeholder(n int) string {
+	if rc.spec != nil {
+		return rc.spec.Placeholder(n)
+	}
+	return "?"
+}
+
+// ShareLockKeyword 返回共享行锁子句。未注册方言回退为 FOR SHARE。
+func (rc *RenderContext) ShareLockKeyword() string {
+	if rc.spec != nil && rc.spec.ShareLock() != "" {
+		return rc.spec.ShareLock()
+	}
+	return "FOR SHARE"
 }
 
 // Render 渲染表达式节点；非节点值退化为绑定参数。

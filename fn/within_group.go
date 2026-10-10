@@ -40,8 +40,8 @@ func Mode(orderBy ...gooq.Expression) *FuncExpr {
 func Median(field gooq.Expression) *FuncExpr {
 	return New("MEDIAN", field).RenderWith(
 		func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
-			if rc.Dialect() == gooq.DialectPgsql {
-				return fmt.Sprintf("PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY %s)", argsSQL[0]), nil
+			if spec := rc.Spec(); spec != nil {
+				return spec.RenderMedian(argsSQL[0]), nil
 			}
 			return fmt.Sprintf("MEDIAN(%s)", argsSQL[0]), nil
 		},

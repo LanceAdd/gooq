@@ -66,7 +66,8 @@ func LocalTypeOf(dbType string) gooq.LocalType {
 	}
 }
 
-func queryStrings(ctx context.Context, query queryer, statement string, args ...any) (names []string, err error) {
+// QueryStrings scans the first text column of every row.
+func QueryStrings(ctx context.Context, query Queryer, statement string, args ...any) (names []string, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
@@ -87,7 +88,8 @@ func queryStrings(ctx context.Context, query queryer, statement string, args ...
 	return names, nil
 }
 
-func queryMaps(ctx context.Context, query queryer, statement string, args ...any) (records []map[string]string, err error) {
+// QueryMaps scans every row into a lower-cased column map of text values.
+func QueryMaps(ctx context.Context, query Queryer, statement string, args ...any) (records []map[string]string, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err

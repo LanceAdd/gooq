@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/gogf/gf/v2/container/gmap"
@@ -71,6 +72,12 @@ func Instance(name ...string) (*DB, error) {
 		return database, nil
 	}
 	configs, found := groupConfigs.Search(group)
+	if !found || len(configs) == 0 {
+		if err := loadConfigOnce(context.Background()); err != nil {
+			return nil, err
+		}
+		configs, found = groupConfigs.Search(group)
+	}
 	if !found || len(configs) == 0 {
 		return nil, fmt.Errorf("gooq: empty database configuration for group %q", group)
 	}

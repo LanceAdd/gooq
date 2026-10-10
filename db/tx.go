@@ -277,12 +277,18 @@ func TxFromContext(ctx context.Context, group string) *Tx {
 	return tx
 }
 
+// QuoteIdent quotes one plain identifier with the dialect registered for rendering.
+func QuoteIdent(dialect gooq.Dialect, name string) (string, error) {
+	return quoteIdent(dialect, name)
+}
+
 func quoteIdent(dialect gooq.Dialect, name string) (string, error) {
 	if err := validIdent(name); err != nil {
 		return "", err
 	}
-	if dialect == gooq.DialectMySQL {
-		return "`" + name + "`", nil
+	spec := gooq.LookupDialect(dialect)
+	if spec == nil {
+		return "", fmt.Errorf("gooq: dialect %q is not registered", dialect)
 	}
-	return `"` + name + `"`, nil
+	return spec.Quote(name), nil
 }

@@ -29,7 +29,7 @@ gooq:
 gooq-gen
 ```
 
-内置驱动：`mysql`、`pgsql`、`sqlite`。如需其他驱动（如 `dm`），取消 `internal/cmd/cmd.go` 中对应导入的注释并执行 `go mod tidy`。
+内置驱动 `mysql`、`pgsql`、`sqlite` 由 `main.go` 导入。其他数据库实现 `db.Driver`，在 `init` 中调用 `db.Register`，再从 `main.go` 空白导入。渲染差异实现 `gooq.DialectSpec` 并调用 `gooq.RegisterDialect`。
 
 ## 命令与参数
 

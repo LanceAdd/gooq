@@ -241,6 +241,16 @@ func TestDsl_Upsert(t *testing.T) {
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
 		t.Assert(sql, `INSERT INTO "user" ("name") VALUES ($1) ON CONFLICT ("id") DO NOTHING`)
+
+		sql, args, err = Insert(testUser).
+			Columns(testUser.Name, testUser.Age).
+			Values("a", 1).
+			OnConflictKey(testUser.Id).
+			DoUpdate(testUser.Name, "x").
+			ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("name", "age") VALUES (?, ?) ON CONFLICT ("id") DO UPDATE SET "name" = ?`)
+		t.AssertEQ(args, []any{"a", 1, "x"})
 	})
 }
 

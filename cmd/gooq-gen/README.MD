@@ -29,7 +29,7 @@ gooq:
 gooq-gen
 ```
 
-Built-in drivers: `mysql`, `pgsql`, `sqlite`. To enable other drivers (e.g. `dm`), uncomment the import in `internal/cmd/cmd.go` and run `go mod tidy`.
+Built-in drivers `mysql`, `pgsql`, and `sqlite` are imported by `main.go`. Another database implements `db.Driver`, calls `db.Register` from `init`, and is blank-imported from `main.go`. Rendering differences implement `gooq.DialectSpec` and `gooq.RegisterDialect`.
 
 ## Commands & Options
 

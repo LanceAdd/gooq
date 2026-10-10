@@ -4,7 +4,7 @@
 
 - **类型安全** — `Field[T]` 在编译期携带列类型，`User.Age.Gt(18)` 编译通过，`User.Age.Gt("x")` 直接报错。
 - **离线渲染** — `ToSql(dialect)` 在任何环境产出 SQL + 参数，不连库；执行可用标准库或 `gooq/db`。
-- **方言感知** — 内置 MySQL / PostgreSQL / SQLite，驱动可通过 `RegisterDialect` 增量覆盖渲染细节。
+- **方言感知** — MySQL / PostgreSQL / SQLite 各自实现 `DialectSpec`。新方言整体注册。连接驱动通过 `db.Register` 单独注册。
 - **运行时零猜测** — 软删除自动条件、自增列跳过、全列派生全部来自生成期静态化的 `TableMeta`。
 - **分层子包** — `gooq`（核心：字段/表/表达式语言/方言与渲染契约）、`gooq/db`（连接、事务、扫描）、`gooq/dsl`（查询与 DML 构建器）、`gooq/fn`（函数库）；生成代码只依赖 `gooq`。
 
@@ -90,7 +90,10 @@ sql, args, err := dsl.Select(User.Id, User.Name).
 ### 4. 执行
 
 ```go
-import "github.com/lanceadd/gooq/db"
+import (
+    "github.com/lanceadd/gooq/db"
+    _ "github.com/lanceadd/gooq/drivers/mysql" // pgsql、sqlite 分别是 drivers/pgsql、drivers/sqlite
+)
 
 err := db.SetConfig(db.DefaultGroupName, db.Config{
     Link: "mysql:root:pass@tcp(127.0.0.1:3306)/app",
@@ -461,6 +464,9 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
     Where(User.Account.Eq("x")).DB().RowOne(ctx)
 
 // DB() 使用默认组，DB("orders") 使用该配置组。
+// LoadConfig 从 GoFrame 配置文件读取 database 节点。
+// SetDebug 打印 SQL，SetDryRun 跳过执行，Prepare 预处理语句，
+// Schema 切换 MySQL 库名或 PostgreSQL search_path。
 // 组内有从库时读走从库，写和 BEGIN 走主库。Master() / Slave() 强制指定。
 // 事务从 ctx 读取。
 ```
@@ -508,9 +514,10 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 | pgsql | `$n` | `"` | LIMIT |
 | sqlite | `?` | `"` | LIMIT |
 
-- 未注册方言回退默认渲染；驱动可 `RegisterDialect` 增量覆盖内置方言。
+- `ToSql` 要求方言已注册为 `DialectSpec`。未知方言直接返回错误。可嵌入 `MySQLDialect`、`PostgresDialect` 或 `SQLiteDialect`，只覆盖有差异的方法，再调用 `RegisterDialect`。
+- 打开连接需要空白导入对应驱动包（`drivers/mysql`、`drivers/pgsql`、`drivers/sqlite`）。驱动在 `init` 里调用 `db.Register`。`gooq-gen` 会导入这三种内置驱动。
 - 带 schema 的表渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；gooq-gen 仅对 PG 填充 schema（`current_schema()`）。
-- 方言敏感行为均内置处理：分页（LIMIT/OFFSET）、行锁（`FOR UPDATE`/`LOCK IN SHARE MODE`/`FOR SHARE`）、LATERAL 映射（SQLite `INNER JOIN LATERAL` → `CROSS JOIN LATERAL`）、Upsert 语法、`DATE_FORMAT`/`TO_CHAR`/`strftime`、`GROUP_CONCAT`/`STRING_AGG`。
+- 方言敏感 SQL 都在 `DialectSpec` 上：分页、行锁、`JOIN` 改写、upsert、`UPDATE ... FROM`、`DATE_FORMAT`、`GROUP_CONCAT`。SQLite 的 upsert 使用 `ON CONFLICT`。
 
 ## gooq-gen（代码生成工具）
 
@@ -525,7 +532,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
 - 仅生成 gooq 类型化表对象（`table/`）；`do/`/`entity/` 交由 `gf gen dao`。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与表基方法同名的列加 `Field` 后缀（`meta` → `MetaField`）。
-- 内置驱动：mysql、pgsql、sqlite，由 `gooq/db` 打开。
+- 内置连接驱动在 `drivers/mysql`、`drivers/pgsql`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。
 
 ## 测试
 

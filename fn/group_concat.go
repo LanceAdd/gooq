@@ -1,7 +1,6 @@
 package fn
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/lanceadd/gooq"
@@ -24,55 +23,40 @@ type GroupConcatOptions struct {
 func GroupConcat(options GroupConcatOptions) *FuncExpr {
 	f := New("GROUP_CONCAT", options.Field)
 	f.validate = func(d gooq.Dialect) error {
-		if options.Distinct && d == gooq.DialectPgsql {
-			return fmt.Errorf("gooq: GROUP_CONCAT DISTINCT is not supported by dialect %s", d)
+		spec, err := gooq.DialectSpecOf(d)
+		if err != nil {
+			return err
 		}
-		return nil
+		_, err = spec.RenderGroupConcat(gooq.GroupConcatInput{
+			Distinct:  options.Distinct,
+			Separator: options.Separator,
+		})
+		return err
 	}
 	return f.RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
-		fieldSQL := argsSQL[0]
-		separator := options.Separator
-		if separator == "" {
-			separator = ","
+		spec := rc.Spec()
+		if spec == nil {
+			return "", nil
 		}
 		var orderSQL string
 		if len(options.OrderBy) > 0 {
-			var parts []string
+			parts := make([]string, 0, len(options.OrderBy))
 			for _, o := range options.OrderBy {
 				orderSQLPart, _ := rc.Render(o)
 				parts = append(parts, orderSQLPart)
 			}
 			orderSQL = strings.Join(parts, ", ")
 		}
-		switch rc.Dialect() {
-		case gooq.DialectPgsql:
-			// STRING_AGG(field, 'sep' [ORDER BY ...])；DISTINCT 不支持（validate 已拦截）。
-			sqlStr := fmt.Sprintf("STRING_AGG(%s, '%s'", fieldSQL, separator)
-			if orderSQL != "" {
-				sqlStr += " ORDER BY " + orderSQL
-			}
-			return sqlStr + ")", nil
-		case gooq.DialectSQLite:
-			// GROUP_CONCAT([DISTINCT ]field, 'sep')；SQLite 不支持函数内 ORDER BY。
-			distinct := ""
-			if options.Distinct {
-				distinct = "DISTINCT "
-			}
-			return fmt.Sprintf("GROUP_CONCAT(%s%s, '%s')", distinct, fieldSQL, separator), nil
-		default:
-			// MySQL：GROUP_CONCAT([DISTINCT ]field [ORDER BY ...] [SEPARATOR 'sep'])。
-			distinct := ""
-			if options.Distinct {
-				distinct = "DISTINCT "
-			}
-			sqlStr := fmt.Sprintf("GROUP_CONCAT(%s%s", distinct, fieldSQL)
-			if orderSQL != "" {
-				sqlStr += " ORDER BY " + orderSQL
-			}
-			if options.Separator != "" && options.Separator != "," {
-				sqlStr += " SEPARATOR '" + options.Separator + "'"
-			}
-			return sqlStr + ")", nil
+		sqlStr, err := spec.RenderGroupConcat(gooq.GroupConcatInput{
+			FieldSQL:  argsSQL[0],
+			Separator: options.Separator,
+			Distinct:  options.Distinct,
+			OrderSQL:  orderSQL,
+		})
+		if err != nil {
+			// ValidateDialect 会先返回这个错误。这里不再拼出错误方言的函数。
+			return "", nil
 		}
+		return sqlStr, nil
 	})
 }

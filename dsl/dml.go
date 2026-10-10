@@ -341,6 +341,9 @@ func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
 	}
 	defer restore()
 	dialect := b.dmlDialect()
+	if _, err = gooq.DialectSpecOf(dialect); err != nil {
+		return nil, err
+	}
 	if (b.kind == dmlUpdate || b.kind == dmlDelete) && len(b.batchUpdateRows) > 0 {
 		sqls, argss, err := b.renderBatchDML(dialect)
 		if err != nil {
@@ -470,6 +473,9 @@ func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 	if len(dialects) > 0 && dialects[0] != "" {
 		dialect = dialects[0]
 	}
+	if _, err := gooq.DialectSpecOf(dialect); err != nil {
+		return "", nil, err
+	}
 	if (b.kind == dmlUpdate || b.kind == dmlDelete) && len(b.batchUpdateRows) > 0 {
 		return "", nil, fmt.Errorf("gooq: batch delete/update renders multiple SQL, use Exec")
 	}
@@ -546,9 +552,11 @@ func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error)
 		}
 		rows[i] = "(" + strings.Join(placeholders, ", ") + ")"
 	}
+	spec := rc.Spec()
+	doNothing := b.upsert != nil && b.upsert.doNothing
 	insertKeyword := "INSERT"
-	if b.upsert != nil && b.upsert.doNothing && rc.Dialect() == gooq.DialectMySQL {
-		insertKeyword = "INSERT IGNORE"
+	if spec != nil {
+		insertKeyword = spec.InsertKeyword(doNothing)
 	}
 	var sqlStr = fmt.Sprintf(
 		"%s INTO %s (%s) VALUES %s",
@@ -557,8 +565,12 @@ func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error)
 		strings.Join(quoteColumns(rc, columns), ", "),
 		strings.Join(rows, ", "),
 	)
-	if b.upsert != nil && !(b.upsert.doNothing && rc.Dialect() == gooq.DialectMySQL) {
-		sqlStr += renderUpsertClause(rc, b.upsert, rc.Dialect())
+	if b.upsert != nil && spec != nil {
+		sqlStr += spec.RenderUpsert(rc, gooq.UpsertClause{
+			DoNothing:    b.upsert.doNothing,
+			ConflictCols: b.upsert.conflictCols,
+			Updates:      b.upsert.updateMap,
+		})
 	}
 	if returning, err := b.renderReturning(rc); err != nil {
 		return "", nil, err
@@ -629,7 +641,7 @@ func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error)
 	switch {
 	case len(b.joins) == 0:
 		sqlStr = fmt.Sprintf("UPDATE %s SET %s", renderTableName(rc, b.table), b.renderSets(rc))
-	case rc.Dialect() == gooq.DialectPgsql || rc.Dialect() == gooq.DialectSQLite:
+	case rc.Spec() != nil && rc.Spec().UpdateFrom():
 		sqlStr = fmt.Sprintf("UPDATE %s SET %s FROM %s", renderTableName(rc, b.table), b.renderSets(rc), b.renderJoinTables(rc))
 	default:
 		sqlStr = fmt.Sprintf("UPDATE %s %s SET %s", renderTableName(rc, b.table), b.renderJoinClauses(rc), b.renderSets(rc))
@@ -749,7 +761,7 @@ func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error)
 
 func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
 	conditions := b.conditions
-	if len(b.joins) > 0 && (rc.Dialect() == gooq.DialectPgsql || rc.Dialect() == gooq.DialectSQLite) {
+	if len(b.joins) > 0 && rc.Spec() != nil && rc.Spec().UpdateFrom() {
 		for _, j := range b.joins {
 			conditions = append(conditions, j.on...)
 		}
@@ -817,8 +829,8 @@ func (b *DMLBuilder) renderReturning(rc *gooq.RenderContext) (string, error) {
 		return "", nil
 	}
 	var keyword string
-	if rc.DialectInfo() != nil {
-		keyword = rc.DialectInfo().Returning
+	if rc.Spec() != nil {
+		keyword = rc.Spec().Returning()
 	}
 	if keyword == "" {
 		return "", fmt.Errorf("gooq: RETURNING is not supported by dialect %s", rc.Dialect())
@@ -841,31 +853,4 @@ func autoIncrementColumn(t gooq.Table) string {
 		}
 	}
 	return ""
-}
-
-func renderUpsertClause(rc *gooq.RenderContext, clause *upsertClause, dialect gooq.Dialect) string {
-	switch dialect {
-	case gooq.DialectPgsql:
-		if clause.doNothing {
-			return fmt.Sprintf(
-				" ON CONFLICT (%s) DO NOTHING",
-				strings.Join(quoteColumns(rc, clause.conflictCols), ", "),
-			)
-		}
-		var sets []string
-		for col, val := range clause.updateMap {
-			sets = append(sets, fmt.Sprintf(`%s = %s`, rc.Quote(col), rc.AddArg(val)))
-		}
-		return fmt.Sprintf(
-			" ON CONFLICT (%s) DO UPDATE SET %s",
-			strings.Join(quoteColumns(rc, clause.conflictCols), ", "),
-			strings.Join(sets, ", "),
-		)
-	default:
-		var sets []string
-		for col := range clause.updateMap {
-			sets = append(sets, fmt.Sprintf(`%s = VALUES(%s)`, rc.Quote(col), rc.Quote(col)))
-		}
-		return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", ")
-	}
 }
