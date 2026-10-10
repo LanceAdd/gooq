@@ -1,0 +1,23 @@
+// ==========================================================================
+// Code generated and maintained by gooq-gen. DO NOT EDIT.
+// ==========================================================================
+
+package {{.TplPackageName}}
+
+import (
+{{.TplImports}}
+)
+
+// {{.TplRecordType}} writes a partial row for table "{{.TplTableName}}".
+// New{{.TplRecordType}} starts with every column unset. Setters mark a column for ValuesOf.
+// ToModel copies set values into {{.TplType}}. New{{.TplRecordType}}From copies every column.
+type {{.TplRecordType}} struct {
+{{.TplRecordFields}}
+}
+
+// New{{.TplRecordType}} returns an empty write row. Unset columns are omitted from SQL.
+func New{{.TplRecordType}}() *{{.TplRecordType}} {
+	return &{{.TplRecordType}}{}
+}
+
+{{.TplMethods}}

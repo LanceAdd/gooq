@@ -3,22 +3,14 @@
 // ==========================================================================
 
 package {{.TplPackageName}}
+{{if .TplImports}}
 
 import (
 {{.TplImports}}
 )
+{{end}}
 
-// {{.TplType}} is the row value for table "{{.TplTableName}}".
-// New{{.TplType}} starts with every column unset. Setters mark a column for ValuesOf.
+// {{.TplType}} is the plain row for table "{{.TplTableName}}".
 type {{.TplType}} struct {
 {{.TplFields}}
-
-	state [{{.TplStateLen}}]gooq.ValueState
 }
-
-// New{{.TplType}} returns an empty row. Unset columns are omitted from SQL.
-func New{{.TplType}}() *{{.TplType}} {
-	return &{{.TplType}}{}
-}
-
-{{.TplMethods}}

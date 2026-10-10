@@ -1,4 +1,4 @@
-// 本文件实现 gooq 行模型生成：可链式赋值，并通过 Assignments 交给 ValuesOf。
+// 本文件实现 gooq 行模型生成：普通结构体带 json/orm 标签，写入记录使用 Property[T]。
 
 package gen
 
@@ -10,6 +10,7 @@ import (
 
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gview"
+	"github.com/gogf/gf/v2/text/gstr"
 
 	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/mlog"
 	"github.com/lanceadd/gooq/db"
@@ -19,9 +20,10 @@ const dirPathModel = "model"
 
 var reservedModelNames = map[string]bool{
 	"Assignments": true,
+	"ToModel":     true,
 }
 
-// generateModel generates row models for the given tables.
+// generateModel generates plain row models and write records for the given tables.
 func generateModel(ctx context.Context, database *db.DB, tableNames []string, dirPath string) {
 	for _, tableName := range tableNames {
 		generateModelSingle(ctx, database, tableName, dirPath)
@@ -34,56 +36,97 @@ func generateModelSingle(ctx context.Context, database *db.DB, tableName, dirPat
 		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, tableName, err)
 	}
 	fileName := formatFileName(tableName, "")
-	path := filepath.FromSlash(gfile.Join(dirPath, fileName+".go"))
-	content, err := generateModelContent(ctx, tableName, dirPath, columns)
+	modelContent, recordContent, err := generateModelContent(ctx, tableName, dirPath, columns)
 	if err != nil {
 		mlog.Fatalf(`generating gooq model content failed for table "%s": %+v`, tableName, err)
 	}
-	if err = gfile.PutContents(path, content); err != nil {
+	writeGenerated(filepath.Join(dirPath, fileName+"_model.go"), modelContent)
+	writeGenerated(filepath.Join(dirPath, fileName+"_record.go"), recordContent)
+}
+
+func writeGenerated(path, content string) {
+	path = filepath.FromSlash(path)
+	if err := gfile.PutContents(path, content); err != nil {
 		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
 	}
 	GoFmt(path)
 	mlog.Print("generated:", gfile.RealPath(path))
 }
 
-func generateModelContent(ctx context.Context, tableName, dirPath string, columns []db.Column) (string, error) {
-	typeName := formatFieldName(tableName, FieldNameCaseCamel)
+func generateModelContent(ctx context.Context, tableName, dirPath string, columns []db.Column) (string, string, error) {
+	baseName := formatFieldName(tableName, FieldNameCaseCamel)
+	typeName := baseName + "Model"
+	recordName := baseName + "Record"
 	var (
-		fields      []string
-		methods     []string
-		imports     []string
-		hasStdTime  bool
-		hasUUID     bool
-		assignments []string
+		fields       []string
+		recordFields []string
+		methods      []string
+		modelImports []string
+		imports      []string
+		hasStdTime   bool
+		hasUUID      bool
+		assignments  []string
+		toModel      []string
+		fromModel    []string
 	)
-	for i, field := range columns {
+	for _, field := range columns {
 		camel := modelFieldName(field.Name)
 		nullable := field.Nullable && !field.Primary
 		fieldType, setType := modelFieldTypes(field, nullable, &hasStdTime, &hasUUID)
-		fields = append(fields, fmt.Sprintf("\t%s %s", camel, fieldType))
-		methods = append(methods, modelSetter(typeName, camel, setType, fieldType, nullable, i))
-		assignments = append(assignments, modelAssignment(camel, field.Name, nullable, i))
+		fields = append(fields, fmt.Sprintf("\t%s %s `json:%q orm:%q`", camel, fieldType, modelJSONName(field.Name), field.Name))
+		recordFields = append(recordFields, fmt.Sprintf("\t%s gooq.Property[%s]", camel, setType))
+		methods = append(methods, modelSetter(recordName, camel, setType, nullable))
+		assignments = append(assignments, modelAssignment(camel, field.Name))
+		toModel = append(toModel, modelToModelLine(camel, nullable))
+		fromModel = append(fromModel, modelFromModelLine(camel, setType, nullable))
 	}
-	methods = append(methods, modelAssignmentsMethod(typeName, len(columns), strings.Join(assignments, "\n")))
+	methods = append(methods,
+		modelAssignmentsMethod(recordName, len(columns), strings.Join(assignments, "\n")),
+		modelToModelMethod(recordName, typeName, strings.Join(toModel, "\n")),
+		modelFromModelMethod(recordName, typeName, strings.Join(fromModel, "\n")),
+	)
 	if hasStdTime {
+		modelImports = append(modelImports, `"time"`)
 		imports = append(imports, `"time"`)
 	}
 	if hasUUID {
+		modelImports = append(modelImports, `"github.com/google/uuid"`)
 		imports = append(imports, `"github.com/google/uuid"`)
 	}
 	imports = append(imports, `"github.com/lanceadd/gooq"`)
 
-	tplView.ClearAssigns()
-	tplView.Assigns(gview.Params{
-		"TplPackageName": filepath.Base(dirPath),
-		"TplImports":     strings.Join(imports, "\n"),
+	pkg := filepath.Base(dirPath)
+	modelView := gview.Params{
+		"TplPackageName": pkg,
+		"TplImports":     strings.Join(modelImports, "\n"),
 		"TplType":        typeName,
 		"TplTableName":   tableName,
 		"TplFields":      strings.Join(fields, "\n"),
-		"TplStateLen":    len(columns),
-		"TplMethods":     strings.Join(methods, "\n"),
-	})
-	return tplView.ParseContent(ctx, getTemplate(tplFileModel))
+	}
+	recordView := gview.Params{
+		"TplPackageName":  pkg,
+		"TplImports":      strings.Join(imports, "\n"),
+		"TplType":         typeName,
+		"TplRecordType":   recordName,
+		"TplTableName":    tableName,
+		"TplRecordFields": strings.Join(recordFields, "\n"),
+		"TplMethods":      strings.Join(methods, "\n\n"),
+	}
+	modelContent, err := renderTemplate(ctx, tplFileModel, modelView)
+	if err != nil {
+		return "", "", err
+	}
+	recordContent, err := renderTemplate(ctx, tplFileRecord, recordView)
+	if err != nil {
+		return "", "", err
+	}
+	return modelContent, recordContent, nil
+}
+
+func renderTemplate(ctx context.Context, name string, params gview.Params) (string, error) {
+	tplView.ClearAssigns()
+	tplView.Assigns(params)
+	return tplView.ParseContent(ctx, getTemplate(name))
 }
 
 func modelFieldName(column string) string {
@@ -92,6 +135,13 @@ func modelFieldName(column string) string {
 		return name + "Field"
 	}
 	return name
+}
+
+func modelJSONName(column string) string {
+	if isAllUpper(column) {
+		column = strings.ToLower(column)
+	}
+	return gstr.CaseCamelLower(column)
 }
 
 func modelFieldTypes(field db.Column, nullable bool, hasStdTime, hasUUID *bool) (fieldType, setType string) {
@@ -103,51 +153,77 @@ func modelFieldTypes(field db.Column, nullable bool, hasStdTime, hasUUID *bool) 
 	return fieldType, setType
 }
 
-func modelSetter(typeName, camel, setType, fieldType string, nullable bool, index int) string {
-	var setter string
-	if nullable {
-		setter = fmt.Sprintf(`func (m *%s) Set%s(v %s) *%s {
-	value := v
-	m.%s = &value
-	m.state[%d] = gooq.ValueSet
-	return m
-}`, typeName, camel, setType, typeName, camel, index)
-		setter += fmt.Sprintf(`
-
-func (m *%s) Set%sNull() *%s {
-	m.%s = nil
-	m.state[%d] = gooq.ValueNull
-	return m
-}`, typeName, camel, typeName, camel, index)
+func modelSetter(recordName, camel, setType string, nullable bool) string {
+	setter := fmt.Sprintf(`func (r *%s) Set%s(v %s) *%s {
+	r.%s = gooq.Set(v)
+	return r
+}`, recordName, camel, setType, recordName, camel)
+	if !nullable {
 		return setter
 	}
-	return fmt.Sprintf(`func (m *%s) Set%s(v %s) *%s {
-	m.%s = v
-	m.state[%d] = gooq.ValueSet
-	return m
-}`, typeName, camel, fieldType, typeName, camel, index)
+	setter += fmt.Sprintf(`
+
+func (r *%s) Set%sNull() *%s {
+	r.%s = gooq.Null[%s]()
+	return r
+}`, recordName, camel, recordName, camel, setType)
+	return setter
 }
 
-func modelAssignment(camel, column string, nullable bool, index int) string {
+func modelAssignment(camel, column string) string {
+	return fmt.Sprintf(`	if item, ok := r.%s.Assignment(%q); ok {
+		out = append(out, item)
+	}`, camel, column)
+}
+
+func modelToModelLine(camel string, nullable bool) string {
 	if !nullable {
-		return fmt.Sprintf(`	if m.state[%d] == gooq.ValueSet {
-		out = append(out, gooq.Assignment{Column: %q, Value: m.%s})
-	}`, index, column, camel)
+		return fmt.Sprintf(`	if value, ok := r.%s.Value(); ok {
+		row.%s = value
+	}`, camel, camel)
 	}
-	return fmt.Sprintf(`	if m.state[%d] == gooq.ValueNull {
-		out = append(out, gooq.Assignment{Column: %q, Null: true})
-	} else if m.state[%d] == gooq.ValueSet {
-		out = append(out, gooq.Assignment{Column: %q, Value: m.%s})
-	}`, index, column, index, column, camel)
+	return fmt.Sprintf(`	if value, ok := r.%s.Value(); ok {
+		row.%s = &value
+	}`, camel, camel)
 }
 
-func modelAssignmentsMethod(typeName string, count int, body string) string {
-	return fmt.Sprintf(`func (m *%s) Assignments() []gooq.Assignment {
-	if m == nil {
+func modelFromModelLine(camel, setType string, nullable bool) string {
+	if !nullable {
+		return fmt.Sprintf(`	r.%s = gooq.Set(row.%s)`, camel, camel)
+	}
+	return fmt.Sprintf(`	if row.%s == nil {
+		r.%s = gooq.Null[%s]()
+	} else {
+		r.%s = gooq.Set(*row.%s)
+	}`, camel, camel, setType, camel, camel)
+}
+
+func modelAssignmentsMethod(recordName string, count int, body string) string {
+	return fmt.Sprintf(`func (r *%s) Assignments() []gooq.Assignment {
+	if r == nil {
 		return nil
 	}
 	out := make([]gooq.Assignment, 0, %d)
 %s
 	return out
-}`, typeName, count, body)
+}`, recordName, count, body)
+}
+
+func modelToModelMethod(recordName, typeName, body string) string {
+	return fmt.Sprintf(`func (r *%s) ToModel() %s {
+	if r == nil {
+		return %s{}
+	}
+	var row %s
+%s
+	return row
+}`, recordName, typeName, typeName, typeName, body)
+}
+
+func modelFromModelMethod(recordName, typeName, body string) string {
+	return fmt.Sprintf(`func New%sFrom(row %s) *%s {
+	r := New%s()
+%s
+	return r
+}`, recordName, typeName, recordName, recordName, body)
 }

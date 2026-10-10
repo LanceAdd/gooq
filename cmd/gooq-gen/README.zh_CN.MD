@@ -2,12 +2,12 @@
 
 # gooq-gen
 
-`gooq-gen` 是 [gooq](https://github.com/lanceadd/gooq) 的代码生成工具。连接数据库后一次性为所有表生成类型化表对象（`table/`）和行模型（`model/`）。
+`gooq-gen` 是 [gooq](https://github.com/lanceadd/gooq) 的代码生成工具。连接数据库后一次性为所有表生成类型化表对象（`table/`），以及 `user_model.go` 和 `user_record.go`。
 
 ## 使用
 
 ```bash
-# 可选：初始化 hack/gooq.yaml 与 hack/template/{table,model}.tmpl（配置文件与模板定制用）。
+# 可选：初始化 hack/gooq.yaml 与 hack/template/{table,model,record}.tmpl（配置文件与模板定制用）。
 gooq-gen init
 
 # 通过命令行参数生成。
@@ -40,7 +40,7 @@ gooq-gen
 | `-p, --path` | 输出目录，默认 `internal`（或配置 `gooq.gen.table.path`） |
 | `-d, --debug` | 输出内部调试信息 |
 
-默认生成数据库全部表，产物位于输出目录下固定的 `table/` 与 `model/` 子目录。
+默认生成数据库全部表，产物位于输出目录下固定的 `table/` 与 `model/` 子目录。`model/user_model.go` 定义 `UserModel`，`model/user_record.go` 定义 `UserRecord`。
 
 ## 模板定制
 
@@ -71,7 +71,7 @@ func (t *UserTable) As(alias string) *UserTable { return newUserTable(alias) }
 func (t *UserTable) Clone() *UserTable          { return newUserTable() }
 ```
 
-首次运行 `gooq-gen init` 生成 `hack/gooq.yaml`，再运行 `gooq-gen` 生成 `table/` 与 `model/`。
+首次运行 `gooq-gen init` 生成 `hack/gooq.yaml`，再运行 `gooq-gen` 生成 `table/` 与 `model/`。`UserModel` 是用于扫描的普通结构体，`UserRecord` 是部分写入的记录。
 
 ## 测试
 

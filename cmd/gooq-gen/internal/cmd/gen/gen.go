@@ -29,6 +29,7 @@ const (
 	dirPathTable   = "table"
 	tplFileTable   = "table.tmpl"
 	tplFileModel   = "model.tmpl"
+	tplFileRecord  = "record.tmpl"
 	hackDirName    = "hack"
 	tplDirName     = "template"
 	configFileName = "gooq.yaml"
@@ -79,6 +80,7 @@ func Init() {
 		{gfile.Join(hackDirName, configFileName), initConfigContent},
 		{gfile.Join(hackDirName, tplDirName, tplFileTable), embeddedTemplate(tplFileTable)},
 		{gfile.Join(hackDirName, tplDirName, tplFileModel), embeddedTemplate(tplFileModel)},
+		{gfile.Join(hackDirName, tplDirName, tplFileRecord), embeddedTemplate(tplFileRecord)},
 	} {
 		if gfile.Exists(f.path) {
 			mlog.Print("skipped, already exists:", gfile.RealPath(f.path))

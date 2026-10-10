@@ -90,7 +90,7 @@ func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
 	return b
 }
 
-// ValuesOf writes columns marked by model.NewXxx setters.
+// ValuesOf writes columns marked by model.NewXxxRecord setters.
 // Insert accepts one or more rows. One update row becomes SET. Several update or delete
 // rows become per-row statements keyed by the primary key, executed by Exec.
 func (b *DMLBuilder) ValuesOf(rows ...gooq.ValueSource) *DMLBuilder {

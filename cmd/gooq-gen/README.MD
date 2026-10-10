@@ -2,12 +2,12 @@ English | [简体中文](README.zh_CN.MD)
 
 # gooq-gen
 
-`gooq-gen` is the code generation tool for [gooq](https://github.com/lanceadd/gooq). It connects to a database and generates typed table objects (`table/`) and row models (`model/`) for every table.
+`gooq-gen` is the code generation tool for [gooq](https://github.com/lanceadd/gooq). It connects to a database and generates typed table objects (`table/`) plus `user_model.go` and `user_record.go` for every table.
 
 ## Usage
 
 ```bash
-# Optional: initialize hack/gooq.yaml and hack/template/{table,model}.tmpl for customization.
+# Optional: initialize hack/gooq.yaml and hack/template/{table,model,record}.tmpl for customization.
 gooq-gen init
 
 # Generate via CLI options.
@@ -40,7 +40,7 @@ Built-in drivers `mysql`, `pgsql`, and `sqlite` are imported by `main.go`. Anoth
 | `-p, --path` | output directory, default `internal` (or set `gooq.gen.table.path`) |
 | `-d, --debug` | show internal detailed debugging information |
 
-All tables of the database are generated into the fixed `table/` and `model/` subdirectories of the output directory.
+All tables of the database are generated into the fixed `table/` and `model/` subdirectories of the output directory. `model/user_model.go` defines `UserModel`. `model/user_record.go` defines `UserRecord`.
 
 ## Template customization
 
@@ -71,7 +71,7 @@ func (t *UserTable) As(alias string) *UserTable { return newUserTable(alias) }
 func (t *UserTable) Clone() *UserTable          { return newUserTable() }
 ```
 
-Run `gooq-gen init` once to scaffold `hack/gooq.yaml`, then `gooq-gen` to generate `table/` and `model/`.
+Run `gooq-gen init` once to scaffold `hack/gooq.yaml`, then `gooq-gen` to generate `table/` and `model/`. `UserModel` is the plain scan struct. `UserRecord` is the partial write row.
 
 ## Tests
 

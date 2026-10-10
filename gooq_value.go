@@ -22,7 +22,7 @@ type Assignment struct {
 	Null bool
 }
 
-// ValueSource is a row built by model.NewXxx setters.
+// ValueSource is a row built by model.NewXxxRecord setters.
 type ValueSource interface {
 	// Assignments returns only the columns that were set or set to NULL.
 	Assignments() []Assignment

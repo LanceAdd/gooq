@@ -42,7 +42,7 @@ func (r Record) Struct(pointer any) error {
 		}
 		return sql.ErrNoRows
 	}
-	return gconv.Scan(map[string]any(r), pointer)
+	return gconv.StructTag(map[string]any(r), pointer, "orm")
 }
 
 // Structs fills *[]T or *[]*T from these rows.
@@ -51,5 +51,5 @@ func (r Result) Structs(pointer any) error {
 	if rv.Kind() != reflect.Pointer || rv.IsNil() || rv.Elem().Kind() != reflect.Slice {
 		return fmt.Errorf("gooq: Structs destination must be a pointer to a slice")
 	}
-	return gconv.Structs([]Record(r), pointer)
+	return gconv.StructsTag([]Record(r), pointer, "orm")
 }

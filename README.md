@@ -19,7 +19,7 @@ cd cmd/gooq-gen && go run . init                                    # optional: 
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-Generates typed gooq table objects (`table/`) and row models (`model/`) for all tables in one shot. `gooq-gen` can also read `hack/gooq.yaml` under the `gooq.gen.table` node instead of CLI options.
+Generates typed gooq table objects (`table/`) and `model/` for all tables in one shot. Each table produces `user_model.go` (`UserModel`) and `user_record.go` (`UserRecord`). `gooq-gen` can also read `hack/gooq.yaml` under the `gooq.gen.table` node instead of CLI options.
 
 ### 2. Hand-write a table object (or use the generated one)
 
@@ -100,7 +100,7 @@ err := db.SetConfig(db.DefaultGroupName, db.Config{
     Link: "mysql:root:pass@tcp(127.0.0.1:3306)/app",
 })
 
-users := []model.User{}
+users := []model.UserModel{}
 err = dsl.Select(User.AllFields()).From(User).
     DB().
     Where(User.Age.Gt(18)).
@@ -336,17 +336,17 @@ dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectSQLite)  // ign
 
 ```go
 // Only setters that were called are written. SetAge(0) writes 0. SetDeletedAtNull writes NULL.
-dsl.Insert(User).ValuesOf(model.NewUser().SetName("john").SetAge(0))
+dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john").SetAge(0))
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?)
 
 // Positional columns/values, repeated Values for batch.
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).Values("b", 2)
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?), (?, ?)
 
-// Several model rows. Batch chunks execution and aggregates RowsAffected.
+// Several record rows. Batch chunks execution and aggregates RowsAffected.
 dsl.Insert(User).ValuesOf(
-    model.NewUser().SetName("a"),
-    model.NewUser().SetName("b"),
+    model.NewUserRecord().SetName("a"),
+    model.NewUserRecord().SetName("b"),
 ).Batch(100).DB().Exec(ctx)
 
 // INSERT ... SELECT.
@@ -369,11 +369,11 @@ dsl.Update(User).Data(map[string]any{"age": 1, "name": "x"})
 dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.Id.Eq(1))
 // UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?
 
-// One model row becomes SET. Several rows update by primary key. RowsAffected is aggregated.
-dsl.Update(User).ValuesOf(model.NewUser().SetName("x").SetAge(0)).Where(User.Id.Eq(1))
+// One record row becomes SET. Several rows update by primary key. RowsAffected is aggregated.
+dsl.Update(User).ValuesOf(model.NewUserRecord().SetName("x").SetAge(0)).Where(User.Id.Eq(1))
 dsl.Update(User).ValuesOf(
-    model.NewUser().SetId(1).SetName("a"),
-    model.NewUser().SetId(2).SetName("b"),
+    model.NewUserRecord().SetId(1).SetName("a"),
+    model.NewUserRecord().SetId(2).SetName("b"),
 ).DB().Exec(ctx)
 // UPDATE `user` SET `name` = ? WHERE `id` = ?  ×2
 
@@ -402,8 +402,8 @@ dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 
 // Batch delete by primary key (soft delete honored).
 dsl.Delete(User).ValuesOf(
-    model.NewUser().SetId(1),
-    model.NewUser().SetId(2),
+    model.NewUserRecord().SetId(1),
+    model.NewUserRecord().SetId(2),
 ).DB().Exec(ctx)
 ```
 
@@ -437,7 +437,7 @@ dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).
 
 ```go
 // Query + scan into a struct slice / scalar.
-users := []model.User{}
+users := []model.UserModel{}
 err := dsl.Select(User.AllFields()).From(User).
     DB().Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
     Scan(ctx, &users)
@@ -446,7 +446,7 @@ count := int64(0)
 err = dsl.Select(fn.Count(User.Id)).From(User).DB().Scan(ctx, &count)
 
 // DML.
-_, err = dsl.Insert(User).ValuesOf(model.NewUser().SetName("john")).DB().Exec(ctx)
+_, err = dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john")).DB().Exec(ctx)
 _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).DB().Exec(ctx)
 
 // Transaction puts the tx into ctx. Queries inside the callback join it.
@@ -540,7 +540,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority.
 - Templates: `<hack>/template/table.tmpl` takes precedence over the embedded template (delete it to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
-- Generates typed table objects (`table/`) and row models (`model/`). `model.NewUser().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`.
+- Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `Scan` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
 - Built-in connection drivers live in `drivers/mysql`, `drivers/pgsql`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses.
 
