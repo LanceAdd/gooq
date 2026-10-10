@@ -15,24 +15,22 @@ import (
 	"sync"
 	"testing"
 
-	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
-
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/text/gstr"
+
+	"github.com/lanceadd/gooq/db"
 )
 
 // initSqlite 创建 sqlite 测试库并建表（SetConfigGroup 整组替换，可跨测试重复运行）。
 func initSqlite(t *gtest.T, dbPath string) {
-	err := gdb.SetConfigGroup("gooq-gen-test", gdb.ConfigGroup{{
-		Link: "sqlite::@file(" + dbPath + ")",
-	}})
+	database, err := db.Open(db.Config{Link: "sqlite::@file(" + dbPath + ")"})
 	t.AssertNil(err)
-	db, err := gdb.Instance("gooq-gen-test")
-	t.AssertNil(err)
-	_, err = db.Exec(context.Background(), `
+	defer func() {
+		t.AssertNil(database.Close())
+	}()
+	_, err = database.Exec(context.Background(), `
 CREATE TABLE IF NOT EXISTS user (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL,

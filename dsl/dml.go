@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/text/gstr"
+
+	"github.com/lanceadd/gooq/db"
 )
 
 type dmlKind int
@@ -50,7 +51,10 @@ type DMLBuilder struct {
 	joins           []*joinClause     // UPDATE 多表 JOIN 子句。
 	returning       []gooq.Expression // RETURNING/OUTPUT 返回列。
 	recordUpdate    bool              // Record() 误用于 Update/Delete 的标记（渲染时报错，防静默无效）。
-	executor        executor          // 执行器（UseDB/UseTX 绑定；nil 时仅离线渲染）。
+	executor        executor          // 测试注入的执行器；正式执行由 DB(name) 和 ctx 中的事务决定。
+	group           string            // DB(name) 指定的配置组；空字符串表示默认组。
+	groupSet        bool              // 是否显式指定了非默认配置组。
+	route           db.Route          // 主从路由（默认写主库）。
 }
 
 func Insert(t gooq.Table) *DMLBuilder {
@@ -306,20 +310,36 @@ func (b *DMLBuilder) DoUpdate(field interface{ ColumnName() string }, v any) *DM
 	return b
 }
 
-func (b *DMLBuilder) UseDB(db gdb.DB) *DMLBuilder {
-	b.executor = db
+// Master forces this statement onto a master node.
+func (b *DMLBuilder) Master() *DMLBuilder {
+	b.route = db.RouteMaster
 	return b
 }
 
-func (b *DMLBuilder) UseTX(tx gdb.TX) *DMLBuilder {
-	b.executor = &txExecutor{tx: tx}
+// Slave forces this statement onto a slave node when the group has one.
+func (b *DMLBuilder) Slave() *DMLBuilder {
+	b.route = db.RouteSlave
+	return b
+}
+
+// DB selects the configuration group used at execution.
+// With no name, it uses the default group, the same as omitting DB.
+func (b *DMLBuilder) DB(name ...string) *DMLBuilder {
+	b.group = ""
+	b.groupSet = false
+	if len(name) > 0 && name[0] != "" {
+		b.group = name[0]
+		b.groupSet = true
+	}
 	return b
 }
 
 func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
-	if b.executor == nil {
-		return nil, fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Exec")
+	restore, err := b.bind(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer restore()
 	dialect := b.dmlDialect()
 	if (b.kind == dmlUpdate || b.kind == dmlDelete) && len(b.batchUpdateRows) > 0 {
 		sqls, argss, err := b.renderBatchDML(dialect)
@@ -421,9 +441,11 @@ func (r *batchResult) RowsAffected() (int64, error) {
 }
 
 func (b *DMLBuilder) Scan(ctx context.Context, dest any) error {
-	if b.executor == nil {
-		return fmt.Errorf("gooq: no database bound, use UseDB/UseTX before Scan")
+	restore, err := b.bind(ctx)
+	if err != nil {
+		return err
 	}
+	defer restore()
 	if len(b.returning) == 0 {
 		return fmt.Errorf("gooq: Scan on DML requires Returning fields")
 	}

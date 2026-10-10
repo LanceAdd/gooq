@@ -9,52 +9,55 @@ package dsl
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/test/gtest"
 
 	"github.com/lanceadd/gooq"
+	"github.com/lanceadd/gooq/db"
 )
 
 type fakeExecutor struct {
 	calls   []string
-	allRows gdb.Result
+	allRows gooq.Result
 	lastSql string
+	dialect gooq.Dialect
 }
 
-func (f *fakeExecutor) GetAll(ctx context.Context, sql string, args ...any) (gdb.Result, error) {
+func (f *fakeExecutor) Dialect() gooq.Dialect {
+	if f.dialect == "" {
+		return gooq.DialectMySQL
+	}
+	return f.dialect
+}
+
+func (f *fakeExecutor) GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error) {
 	f.calls = append(f.calls, "GetAll")
-	f.lastSql = sql
+	f.lastSql = query
 	return f.allRows, nil
 }
 
-func (f *fakeExecutor) GetOne(ctx context.Context, sql string, args ...any) (gdb.Record, error) {
+func (f *fakeExecutor) GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error) {
 	f.calls = append(f.calls, "GetOne")
 	return nil, nil
 }
 
-func (f *fakeExecutor) GetScan(ctx context.Context, pointer any, sql string, args ...any) error {
+func (f *fakeExecutor) GetScan(ctx context.Context, dest any, query string, args ...any) error {
 	f.calls = append(f.calls, "GetScan")
 	return nil
 }
 
-func (f *fakeExecutor) GetArray(ctx context.Context, sql string, args ...any) (gdb.Array, error) {
-	f.calls = append(f.calls, "GetArray")
-	return nil, nil
-}
-
-func (f *fakeExecutor) Exec(ctx context.Context, sql string, args ...any) (sql.Result, error) {
+func (f *fakeExecutor) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	f.calls = append(f.calls, "Exec")
 	return nil, nil
 }
 
-func (f *fakeExecutor) GetValue(ctx context.Context, sql string, args ...any) (gdb.Value, error) {
+func (f *fakeExecutor) GetValue(ctx context.Context, query string, args ...any) (any, error) {
 	f.calls = append(f.calls, "GetValue")
-	return gvar.New(nil), nil
+	return nil, nil
 }
 
 type scanStructTarget struct {
@@ -65,25 +68,21 @@ func TestScanExec_Routing(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		ctx := context.Background()
 
-		// **T：单行扫描走 GetScan（gdb 原生支持 **T）。
 		fe := &fakeExecutor{}
 		var record *scanStructTarget
 		t.AssertNil(scanExec(ctx, fe, "select 1", nil, &record))
 		t.AssertEQ(fe.calls, []string{"GetScan"})
 
-		// 值结构体走 GetScan。
 		fe = &fakeExecutor{}
 		var value scanStructTarget
 		t.AssertNil(scanExec(ctx, fe, "select 1", nil, &value))
 		t.AssertEQ(fe.calls, []string{"GetScan"})
 
-		// 结构体切片走 GetScan。
 		fe = &fakeExecutor{}
 		var list []*scanStructTarget
 		t.AssertNil(scanExec(ctx, fe, "select 1", nil, &list))
 		t.AssertEQ(fe.calls, []string{"GetScan"})
 
-		// 标量走 GetValue。
 		fe = &fakeExecutor{}
 		var count int64
 		t.AssertNil(scanExec(ctx, fe, "select 1", nil, &count))
@@ -95,8 +94,8 @@ func TestRowOne(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		ctx := context.Background()
 
-		fe := &fakeExecutor{allRows: gdb.Result{
-			gdb.Record{"id": gvar.New(int64(1)), "name": gvar.New("john")},
+		fe := &fakeExecutor{allRows: gooq.Result{
+			gooq.Record{"id": int64(1), "name": "john"},
 		}}
 		b := SelectFrom(testUser).Where(testUser.Name.Eq("john"))
 		b.executor = fe
@@ -115,9 +114,9 @@ func TestRowOne(t *testing.T) {
 		t.AssertNil(err)
 		t.AssertNil(record)
 
-		fe = &fakeExecutor{allRows: gdb.Result{
-			gdb.Record{"id": gvar.New(int64(1))},
-			gdb.Record{"id": gvar.New(int64(2))},
+		fe = &fakeExecutor{allRows: gooq.Result{
+			gooq.Record{"id": int64(1)},
+			gooq.Record{"id": int64(2)},
 		}}
 		b = SelectFrom(testUser).Where(testUser.Name.Eq("john"))
 		b.executor = fe
@@ -146,4 +145,57 @@ func TestRowOne(t *testing.T) {
 		_, err = SelectFrom(testUser).RowOne(ctx)
 		t.AssertNE(err, nil)
 	})
+}
+
+func TestScanUsesDefaultInstance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "default.db")
+	gtest.C(t, func(t *gtest.T) {
+		ctx := context.Background()
+		err := db.SetConfig(db.DefaultGroupName, db.Config{Link: "sqlite::@file(" + path + ")"})
+		t.AssertNil(err)
+		defer func() {
+			t.AssertNil(db.RemoveConfig(db.DefaultGroupName))
+		}()
+
+		database, err := db.Instance()
+		t.AssertNil(err)
+		_, err = database.Exec(ctx, `CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT)`)
+		t.AssertNil(err)
+		_, err = database.Exec(ctx, `INSERT INTO user(id, name) VALUES (1, 'john')`)
+		t.AssertNil(err)
+
+		var row struct {
+			Id   int64
+			Name string
+		}
+		err = Select(testUser.Id, testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).Unscoped().Scan(ctx, &row)
+		t.AssertNil(err)
+		t.AssertEQ(row.Id, int64(1))
+		t.AssertEQ(row.Name, "john")
+
+		err = Select(testUser.Name).From(testUser).DB("missing-group").Scan(ctx, &row.Name)
+		t.AssertNE(err, nil)
+
+		err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO user(id, name) VALUES (2, 'tx')`)
+			if err != nil {
+				return err
+			}
+			var name string
+			if err = Select(testUser.Name).From(testUser).Where(testUser.Id.Eq(2)).Unscoped().Scan(ctx, &name); err != nil {
+				return err
+			}
+			if name != "tx" {
+				return errName(name)
+			}
+			return nil
+		})
+		t.AssertNil(err)
+	})
+}
+
+type errName string
+
+func (e errName) Error() string {
+	return "unexpected name " + string(e)
 }

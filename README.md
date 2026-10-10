@@ -3,10 +3,10 @@
 `gooq` is a type-safe SQL query DSL for [GoFrame](https://goframe.org), inspired by [jOOQ](https://www.jooq.org/).
 
 - **Type-safe** — `Field[T]` carries the column type at compile time: `User.Age.Gt(18)` compiles, `User.Age.Gt("x")` doesn't.
-- **Offline rendering** — `ToSql(dialect)` produces SQL + args anywhere, without a database connection; execute with the standard library, gdb, or gooq's built-in gdb fusion.
+- **Offline rendering** — `ToSql(dialect)` produces SQL + args anywhere, without a database connection; execute with the standard library or `gooq/db`.
 - **Dialect aware** — MySQL / PostgreSQL / SQLite built in; drivers override rendering details via `RegisterDialect`.
 - **Zero runtime guessing** — soft-delete conditions, auto-increment skipping, full-column derivation all come from static `TableMeta` written at codegen time.
-- **Layered packages** — `gooq` (core: fields, tables, expression language, dialects, render contract), `gooq/dsl` (query & DML builders), `gooq/fn` (function library); generated table code only imports `gooq`.
+- **Layered packages** — `gooq` (core: fields, tables, expression language, dialects, render contract), `gooq/db` (connections, transactions, scanning), `gooq/dsl` (query and DML builders), `gooq/fn` (function library); generated table code only imports `gooq`.
 
 All rendered output shown below comes from test assertions — copy-paste friendly.
 
@@ -91,13 +91,15 @@ sql, args, err := dsl.Select(User.Id, User.Name).
 ### 4. Execute
 
 ```go
-// Standard library or any driver.
-rows, _ := db.Query(sql, args...)
+import "github.com/lanceadd/gooq/db"
 
-// Or gdb fusion: bind a database and scan directly.
+err := db.SetConfig(db.DefaultGroupName, db.Config{
+    Link: "mysql:root:pass@tcp(127.0.0.1:3306)/app",
+})
+
 users := []model.User{}
-err := dsl.Select(User.AllFields()).From(User).
-    UseDB(gdb.DB()).
+err = dsl.Select(User.AllFields()).From(User).
+    DB().
     Where(User.Age.Gt(18)).
     Scan(ctx, &users)
 ```
@@ -342,7 +344,7 @@ dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).Values("b", 2)
 dsl.Insert(User).Record(model.User{Name: "a", Age: 1}).Columns(User.Name, User.Age).Values("b", 2)
 
 // Chunked execution: RowsAffected aggregated.
-dsl.Insert(User).Records([]model.User{{Name: "a"}, {Name: "b"}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
+dsl.Insert(User).Records([]model.User{{Name: "a"}, {Name: "b"}}).Batch(100).DB().Exec(ctx)
 
 // INSERT ... SELECT.
 dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
@@ -366,7 +368,7 @@ dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.Id.Eq(1))
 // (single-record Update via Record is not supported; use Set/Data + Where)
 
 // Batch by primary key (or Keys(...)), RowsAffected aggregated.
-dsl.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
+dsl.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).Batch(100).DB().Exec(ctx)
 // UPDATE `user` SET `name` = ? WHERE `id` = ?  ×2
 
 // Multi-table update (MySQL JOIN / PG+SQLite FROM).
@@ -393,7 +395,7 @@ dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 // DELETE FROM `user_role` WHERE `user_role`.`id` = ?
 
 // Batch delete by primary key (soft delete honored).
-dsl.Delete(User).Records([]model.User{{Id: 1}, {Id: 2}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
+dsl.Delete(User).Records([]model.User{{Id: 1}, {Id: 2}}).Batch(100).DB().Exec(ctx)
 ```
 
 ### Upsert & Returning
@@ -422,44 +424,47 @@ dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).
 // UPDATE "user" SET "status" = $1 WHERE "user"."id" = $2 RETURNING "user"."id"
 ```
 
-## Execution (gooq + gdb fusion)
+## Execution
 
 ```go
 // Query + scan into a struct slice / scalar.
 users := []model.User{}
 err := dsl.Select(User.AllFields()).From(User).
-    UseDB(gdb.DB()).Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
+    DB().Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
     Scan(ctx, &users)
 
 count := int64(0)
-err = dsl.Select(fn.Count(User.Id)).From(User).UseDB(gdb.DB()).Scan(ctx, &count)
+err = dsl.Select(fn.Count(User.Id)).From(User).DB().Scan(ctx, &count)
 
 // DML.
-_, err = dsl.Insert(User).Record(model.User{Name: "john"}).UseDB(gdb.DB()).Exec(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).UseDB(gdb.DB()).Exec(ctx)
+_, err = dsl.Insert(User).Record(model.User{Name: "john"}).DB().Exec(ctx)
+_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).DB().Exec(ctx)
 
-// Transaction: UseTX binds the tx connection.
-tx, _ := gdb.DB().Begin(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).UseTX(tx).Exec(ctx)
-tx.Commit()
+// Transaction puts the tx into ctx. Queries inside the callback join it.
+database, err := db.Instance()
+err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+    _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
+    return err
+})
 
 // Convenience: Count auto-wraps COUNT(*), Exists wraps SELECT EXISTS(...).
-total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).UseDB(gdb.DB()).Count(ctx)
-exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx)
+total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).DB().Count(ctx)
+exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).DB().Exists(ctx)
 
 // Typed row reads: the field type T is consumed at compile time.
 row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
-    Where(User.Name.Eq("john")).UseDB(gdb.DB()).Row(ctx)
+    Where(User.Name.Eq("john")).DB().Row(ctx)
 id := gooq.Get(row, User.Id)      // int64
 name := gooq.Get(row, User.Name)  // string
 
 // RowOne enforces at most one row: nil when none matched, error when 2+ matched
 // (Take-first-row semantics stay in Row; explicit Limit/Page/Cache is rejected).
 row, err = dsl.Select(User.Id, User.Name).From(User).
-    Where(User.Account.Eq("x")).UseDB(gdb.DB()).RowOne(ctx)
+    Where(User.Account.Eq("x")).DB().RowOne(ctx)
 
-// The dialect is derived from the gdb driver name; UseDB can be re-bound
-// for multi-database / read-write splitting.
+// DB() uses the default group. DB("orders") uses that configuration group.
+// Reads use a slave when the group has one; writes and BEGIN use a master.
+// Master() and Slave() force the pool. A transaction is taken from ctx.
 ```
 
 ### Caching
@@ -474,12 +479,12 @@ dsl.SetHashCacheAdapter(redisHashAdapter)
 // (useful for manual invalidation).
 err := dsl.Select(User.AllFields()).From(User).
     Cache(dsl.CacheOption{Duration: time.Minute}).
-    UseDB(gdb.DB()).Scan(ctx, &users)
+    DB().Scan(ctx, &users)
 
 // Composite query: count runs first, rows after; count=0 short-circuits without querying rows.
 rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
-    Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
+    Page(1, 10).DB().RowsAndCount(ctx)
 
 // PageCache caches the composite query as one hash record (fields "count" and "rows").
 // Requires SetHashCacheAdapter; the key includes limit/offset so each page is cached
@@ -488,7 +493,7 @@ rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
-    Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
+    Page(1, 10).DB().RowsAndCount(ctx)
 
 // ScanAndCount is the typed variant: scans data into dest and returns the total.
 // It shares the same data cache (unified Result JSON, field "rows") with RowsAndCount.
@@ -496,7 +501,7 @@ var vips []User
 total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
-    Page(1, 10).UseDB(gdb.DB()).ScanAndCount(ctx, &vips)
+    Page(1, 10).DB().ScanAndCount(ctx, &vips)
 ```
 
 ## Dialects
@@ -524,7 +529,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Generates only typed gooq table objects (`table/`); `do/`/`entity/` are left to `gf gen dao`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
-- Built-in drivers: mysql/pgsql/sqlite; others by uncommenting the import in `internal/cmd/cmd.go`.
+- Built-in drivers: mysql, pgsql, and sqlite, opened by `gooq/db`.
 
 ## Testing
 

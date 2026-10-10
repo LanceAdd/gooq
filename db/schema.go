@@ -1,0 +1,134 @@
+package db
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/lanceadd/gooq"
+)
+
+// Column is one table column used by gooq-gen.
+type Column struct {
+	Name          string
+	DBType        string
+	LocalType     gooq.LocalType
+	Primary       bool
+	AutoIncrement bool
+	Unique        bool
+	Index         int
+}
+
+var identPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func validIdent(name string) error {
+	if !identPattern.MatchString(name) {
+		return fmt.Errorf("gooq: invalid identifier %q", name)
+	}
+	return nil
+}
+
+// LocalTypeOf maps a database type name to a gooq local type.
+func LocalTypeOf(dbType string) gooq.LocalType {
+	typed := strings.ToLower(strings.TrimSpace(dbType))
+	if index := strings.IndexByte(typed, '('); index > 0 {
+		typed = strings.TrimSpace(typed[:index])
+	}
+	switch typed {
+	case "bool", "boolean":
+		return gooq.LocalTypeBool
+	case "tinyint", "smallint", "mediumint", "int", "int2", "int4", "integer":
+		return gooq.LocalTypeInt
+	case "bigint", "int8":
+		return gooq.LocalTypeInt64
+	case "float", "float4", "float8", "double", "real", "numeric", "decimal":
+		return gooq.LocalTypeFloat64
+	case "date":
+		return gooq.LocalTypeDate
+	case "time", "timetz":
+		return gooq.LocalTypeTime
+	case "datetime", "timestamp", "timestamptz":
+		return gooq.LocalTypeDatetime
+	case "json":
+		return gooq.LocalTypeJson
+	case "jsonb":
+		return gooq.LocalTypeJsonb
+	case "uuid":
+		return gooq.LocalTypeUUID
+	case "bytea", "blob", "binary", "varbinary":
+		return gooq.LocalTypeBytes
+	default:
+		if strings.Contains(typed, "int") {
+			return gooq.LocalTypeInt
+		}
+		return gooq.LocalTypeString
+	}
+}
+
+func queryStrings(ctx context.Context, query queryer, statement string, args ...any) (names []string, err error) {
+	rows, err := query.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = closeRows(rows, err)
+	}()
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+func queryMaps(ctx context.Context, query queryer, statement string, args ...any) (records []map[string]string, err error) {
+	rows, err := query.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = closeRows(rows, err)
+	}()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		values := make([]any, len(columns))
+		targets := make([]any, len(columns))
+		for i := range values {
+			targets[i] = &values[i]
+		}
+		if err = rows.Scan(targets...); err != nil {
+			return nil, err
+		}
+		record := make(map[string]string, len(columns))
+		for i, column := range columns {
+			record[strings.ToLower(column)] = scalarText(values[i])
+		}
+		records = append(records, record)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func scalarText(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case []byte:
+		return string(typed)
+	default:
+		return fmt.Sprint(typed)
+	}
+}

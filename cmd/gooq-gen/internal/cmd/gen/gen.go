@@ -11,12 +11,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gfile"
-	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/os/gview"
 
 	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/mlog"
+	"github.com/lanceadd/gooq/db"
 )
 
 // Input is the input parameter of gooq-gen.
@@ -102,28 +101,21 @@ func Generate(ctx context.Context, in Input) {
 	if dirRealPath := gfile.RealPath(in.Path); dirRealPath == "" {
 		mlog.Fatalf(`path "%s" does not exist`, in.Path)
 	}
-	var (
-		err error
-		db  gdb.DB
-	)
-	// It uses user passed database configuration.
-	var tempGroup = gtime.TimestampNanoStr()
-	err = gdb.AddConfigNode(tempGroup, gdb.ConfigNode{
-		Link: in.Link,
-	})
+	database, err := db.Open(db.Config{Link: in.Link})
 	if err != nil {
-		mlog.Fatalf(`database configuration failed: %+v`, err)
-	}
-	if db, err = gdb.Instance(tempGroup); err != nil {
 		mlog.Fatalf(`database initialization failed: %+v`, err)
 	}
+	defer func() {
+		if closeErr := database.Close(); closeErr != nil {
+			mlog.Fatalf(`closing database failed: %+v`, closeErr)
+		}
+	}()
 
-	// 一次性生成全部表。
-	tableNames, err := db.Tables(context.TODO())
+	tableNames, err := database.Tables(ctx)
 	if err != nil {
 		mlog.Fatalf("fetching tables failed: %+v", err)
 	}
-	generateTable(ctx, db, tableNames, gfile.Join(in.Path, dirPathTable))
+	generateTable(ctx, database, tableNames, gfile.Join(in.Path, dirPathTable))
 
 	mlog.Print("done!")
 }

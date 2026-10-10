@@ -3,10 +3,10 @@
 `gooq` 是面向 [GoFrame](https://goframe.org) 的类型安全 SQL 查询 DSL，灵感来自 [jOOQ](https://www.jooq.org/)。
 
 - **类型安全** — `Field[T]` 在编译期携带列类型，`User.Age.Gt(18)` 编译通过，`User.Age.Gt("x")` 直接报错。
-- **离线渲染** — `ToSql(dialect)` 在任何环境产出 SQL + 参数，不连库；执行方式任选（标准库、gdb、gooq 内置融合执行）。
+- **离线渲染** — `ToSql(dialect)` 在任何环境产出 SQL + 参数，不连库；执行可用标准库或 `gooq/db`。
 - **方言感知** — 内置 MySQL / PostgreSQL / SQLite，驱动可通过 `RegisterDialect` 增量覆盖渲染细节。
 - **运行时零猜测** — 软删除自动条件、自增列跳过、全列派生全部来自生成期静态化的 `TableMeta`。
-- **分层子包** — `gooq`（核心：字段/表/表达式语言/方言与渲染契约）、`gooq/dsl`（查询与 DML 构建器）、`gooq/fn`（函数库）；生成代码只依赖 `gooq`。
+- **分层子包** — `gooq`（核心：字段/表/表达式语言/方言与渲染契约）、`gooq/db`（连接、事务、扫描）、`gooq/dsl`（查询与 DML 构建器）、`gooq/fn`（函数库）；生成代码只依赖 `gooq`。
 
 下文所有示例的渲染输出均来自测试断言，可直接运行验证。
 
@@ -90,13 +90,15 @@ sql, args, err := dsl.Select(User.Id, User.Name).
 ### 4. 执行
 
 ```go
-// 标准库或任意驱动。
-rows, _ := db.Query(sql, args...)
+import "github.com/lanceadd/gooq/db"
 
-// 或 gdb 融合：绑定数据库直接扫描。
+err := db.SetConfig(db.DefaultGroupName, db.Config{
+    Link: "mysql:root:pass@tcp(127.0.0.1:3306)/app",
+})
+
 users := []model.User{}
-err := dsl.Select(User.AllFields()).From(User).
-    UseDB(gdb.DB()).
+err = dsl.Select(User.AllFields()).From(User).
+    DB().
     Where(User.Age.Gt(18)).
     Scan(ctx, &users)
 ```
@@ -341,7 +343,7 @@ dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).Values("b", 2)
 dsl.Insert(User).Record(model.User{Name: "a", Age: 1}).Columns(User.Name, User.Age).Values("b", 2)
 
 // 批量执行：分批提交，RowsAffected 聚合。
-dsl.Insert(User).Records([]model.User{{Name: "a"}, {Name: "b"}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
+dsl.Insert(User).Records([]model.User{{Name: "a"}, {Name: "b"}}).Batch(100).DB().Exec(ctx)
 
 // INSERT ... SELECT。
 dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
@@ -365,7 +367,7 @@ dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.Id.Eq(1))
 // （单条 Record 更新不支持，使用 Set/Data + Where）
 
 // 按主键批量（或 Keys(...) 自定义键），RowsAffected 聚合。
-dsl.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
+dsl.Update(User).Records([]model.User{{Id: 1, Name: "a"}, {Id: 2, Name: "b"}}).Batch(100).DB().Exec(ctx)
 // UPDATE `user` SET `name` = ? WHERE `id` = ?  ×2
 
 // 多表更新（MySQL JOIN / PG+SQLite FROM）。
@@ -392,7 +394,7 @@ dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 // DELETE FROM `user_role` WHERE `user_role`.`id` = ?
 
 // 按主键批量删除（软删同样生效）。
-dsl.Delete(User).Records([]model.User{{Id: 1}, {Id: 2}}).Batch(100).UseDB(gdb.DB()).Exec(ctx)
+dsl.Delete(User).Records([]model.User{{Id: 1}, {Id: 2}}).Batch(100).DB().Exec(ctx)
 ```
 
 ### Upsert 与 Returning
@@ -421,42 +423,46 @@ dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).
 // UPDATE "user" SET "status" = $1 WHERE "user"."id" = $2 RETURNING "user"."id"
 ```
 
-## 执行（gooq + gdb 融合）
+## 执行
 
 ```go
 // 查询 + 扫描到 struct 切片 / 标量。
 users := []model.User{}
 err := dsl.Select(User.AllFields()).From(User).
-    UseDB(gdb.DB()).Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
+    DB().Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
     Scan(ctx, &users)
 
 count := int64(0)
-err = dsl.Select(fn.Count(User.Id)).From(User).UseDB(gdb.DB()).Scan(ctx, &count)
+err = dsl.Select(fn.Count(User.Id)).From(User).DB().Scan(ctx, &count)
 
 // 写操作。
-_, err = dsl.Insert(User).Record(model.User{Name: "john"}).UseDB(gdb.DB()).Exec(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).UseDB(gdb.DB()).Exec(ctx)
+_, err = dsl.Insert(User).Record(model.User{Name: "john"}).DB().Exec(ctx)
+_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).DB().Exec(ctx)
 
-// 事务：UseTX 绑定事务连接。
-tx, _ := gdb.DB().Begin(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).UseTX(tx).Exec(ctx)
-tx.Commit()
+// Transaction 把事务放进 ctx，回调里的查询会自动加入。
+database, err := db.Instance()
+err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+    _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
+    return err
+})
 
 // 便捷方法：Count 自动补全 COUNT(*)，Exists 包装 SELECT EXISTS(...)。
-total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).UseDB(gdb.DB()).Count(ctx)
-exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).UseDB(gdb.DB()).Exists(ctx)
+total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).DB().Count(ctx)
+exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).DB().Exists(ctx)
 
 // 行级类型化读取：类型 T 在编译期被消费。
 row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
-    Where(User.Name.Eq("john")).UseDB(gdb.DB()).Row(ctx)
+    Where(User.Name.Eq("john")).DB().Row(ctx)
 id := gooq.Get(row, User.Id)      // int64
 name := gooq.Get(row, User.Name)  // string
 
 // RowOne 强制至多一行：无匹配返回 nil，匹配 2+ 行报错（取首行语义仍在 Row；显式 Limit/Page/Cache 直接拒绝）。
 row, err = dsl.Select(User.Id, User.Name).From(User).
-    Where(User.Account.Eq("x")).UseDB(gdb.DB()).RowOne(ctx)
+    Where(User.Account.Eq("x")).DB().RowOne(ctx)
 
-// 方言从 gdb 驱动名自动推导；UseDB 可重新绑定以支持多库/读写分离。
+// DB() 使用默认组，DB("orders") 使用该配置组。
+// 组内有从库时读走从库，写和 BEGIN 走主库。Master() / Slave() 强制指定。
+// 事务从 ctx 读取。
 ```
 
 ### 缓存
@@ -470,12 +476,12 @@ dsl.SetHashCacheAdapter(redisHashAdapter)
 // Cache() 无参或零值 option 不开启；自定义 Name 固定 key（便于手动失效）。
 err := dsl.Select(User.AllFields()).From(User).
     Cache(dsl.CacheOption{Duration: time.Minute}).
-    UseDB(gdb.DB()).Scan(ctx, &users)
+    DB().Scan(ctx, &users)
 
 // 复合查询：count 先行、rows 后查，count=0 短路不查 rows。
 rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
-    Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
+    Page(1, 10).DB().RowsAndCount(ctx)
 
 // PageCache 缓存复合查询为一条 hash 记录（field 为 "count" 与 "rows"）。
 // 需要 SetHashCacheAdapter；key 含 limit/offset，各页独立缓存。
@@ -483,7 +489,7 @@ rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
-    Page(1, 10).UseDB(gdb.DB()).RowsAndCount(ctx)
+    Page(1, 10).DB().RowsAndCount(ctx)
 
 // ScanAndCount 是类型化变体：数据扫入 dest 并返回总数。
 // 与 RowsAndCount 共享同一份数据缓存（统一存 Result JSON，数据 field 默认 "rows"）。
@@ -491,7 +497,7 @@ var vips []User
 total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
-    Page(1, 10).UseDB(gdb.DB()).ScanAndCount(ctx, &vips)
+    Page(1, 10).DB().ScanAndCount(ctx, &vips)
 ```
 
 ## 方言
@@ -519,7 +525,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
 - 仅生成 gooq 类型化表对象（`table/`）；`do/`/`entity/` 交由 `gf gen dao`。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与表基方法同名的列加 `Field` 后缀（`meta` → `MetaField`）。
-- 内置驱动：mysql/pgsql/sqlite；其他驱动取消 `internal/cmd/cmd.go` 中 import 注释启用。
+- 内置驱动：mysql、pgsql、sqlite，由 `gooq/db` 打开。
 
 ## 测试
 

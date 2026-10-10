@@ -4,128 +4,117 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/lanceadd/gooq"
 	"reflect"
 
-	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/database/gdb"
+	"github.com/gogf/gf/v2/util/gconv"
+
+	"github.com/lanceadd/gooq"
+	"github.com/lanceadd/gooq/db"
 )
 
 type executor interface {
-	GetAll(ctx context.Context, sql string, args ...any) (gdb.Result, error)
-	GetOne(ctx context.Context, sql string, args ...any) (gdb.Record, error)
-	GetScan(ctx context.Context, pointer any, sql string, args ...any) error
-	GetArray(ctx context.Context, sql string, args ...any) (gdb.Array, error)
-	Exec(ctx context.Context, sql string, args ...any) (sql.Result, error)
-	GetValue(ctx context.Context, sql string, args ...any) (gdb.Value, error)
+	Dialect() gooq.Dialect
+	GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error)
+	GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error)
+	GetScan(ctx context.Context, dest any, query string, args ...any) error
+	Exec(ctx context.Context, query string, args ...any) (sql.Result, error)
+	GetValue(ctx context.Context, query string, args ...any) (any, error)
 }
 
-type txExecutor struct {
-	tx gdb.TX
+func (b *SelectBuilder) bind(ctx context.Context) (func(), error) {
+	return bindBuilder(ctx, &b.executor, b.route, b.group, b.groupSet)
 }
 
-func (e *txExecutor) GetAll(ctx context.Context, sql string, args ...any) (gdb.Result, error) {
-	return e.tx.Ctx(ctx).GetAll(sql, args...)
+func (b *DMLBuilder) bind(ctx context.Context) (func(), error) {
+	return bindBuilder(ctx, &b.executor, b.route, b.group, b.groupSet)
 }
 
-func (e *txExecutor) GetOne(ctx context.Context, sql string, args ...any) (gdb.Record, error) {
-	return e.tx.Ctx(ctx).GetOne(sql, args...)
-}
-
-func (e *txExecutor) GetScan(ctx context.Context, pointer any, sql string, args ...any) error {
-	return e.tx.Ctx(ctx).GetScan(pointer, sql, args...)
-}
-
-func (e *txExecutor) Exec(ctx context.Context, sql string, args ...any) (sql.Result, error) {
-	return e.tx.Ctx(ctx).Exec(sql, args...)
-}
-
-func (e *txExecutor) GetArray(ctx context.Context, sql string, args ...any) (gdb.Array, error) {
-	rows, err := e.tx.QueryContext(ctx, sql, args...)
+func bindBuilder(ctx context.Context, slot *executor, route db.Route, group string, groupSet bool) (func(), error) {
+	stored, active, err := resolveExecutor(ctx, *slot, route, group, groupSet)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var array gdb.Array
-	for rows.Next() {
-		var value any
-		if err := rows.Scan(&value); err != nil {
-			return nil, err
-		}
-		array = append(array, gvar.New(value))
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return array, nil
+	*slot = active
+	return func() { *slot = stored }, nil
 }
 
-func (e *txExecutor) GetValue(ctx context.Context, sql string, args ...any) (gdb.Value, error) {
-	return e.tx.Ctx(ctx).GetValue(sql, args...)
+func resolveExecutor(ctx context.Context, current executor, route db.Route, group string, groupSet bool) (stored executor, active executor, err error) {
+	switch current.(type) {
+	case nil, *db.DB, *db.Tx:
+	default:
+		return current, current, nil
+	}
+	var database *db.DB
+	if groupSet {
+		database, err = db.Instance(group)
+	} else {
+		database, err = db.Instance()
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if tx := db.TxFromContext(ctx, database.Group()); tx != nil {
+		return database, tx, nil
+	}
+	return database, database.WithRoute(route), nil
 }
 
-func autoDialect(e executor) gooq.Dialect {
-	if db, ok := e.(gdb.DB); ok {
-		if cfg := db.GetConfig(); cfg != nil && cfg.Type != "" {
-			return gooq.Dialect(cfg.Type)
-		}
+func autoDialect(exec executor) gooq.Dialect {
+	if exec == nil {
+		return gooq.DialectMySQL
 	}
-	if g, ok := e.(interface{ GetDB() gdb.DB }); ok {
-		if db := g.GetDB(); db != nil {
-			if cfg := db.GetConfig(); cfg != nil && cfg.Type != "" {
-				return gooq.Dialect(cfg.Type)
-			}
-		}
+	if dialect := exec.Dialect(); dialect != "" {
+		return dialect
 	}
 	return gooq.DialectMySQL
 }
 
-func (e *txExecutor) GetDB() gdb.DB {
-	if g, ok := e.tx.(interface{ GetDB() gdb.DB }); ok {
-		return g.GetDB()
-	}
-	return nil
-}
-
-func scanExec(ctx context.Context, e executor, sql string, args []any, dest any) error {
+func scanExec(ctx context.Context, exec executor, query string, args []any, dest any) error {
 	rv := reflect.ValueOf(dest)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return fmt.Errorf("gooq: Scan dest must be a non-nil pointer")
 	}
 	switch rv.Elem().Kind() {
-	case reflect.Struct:
-		return e.GetScan(ctx, dest, sql, args...)
-	case reflect.Ptr:
+	case reflect.Slice, reflect.Array, reflect.Struct:
+		return exec.GetScan(ctx, dest, query, args...)
+	case reflect.Pointer:
 		if rv.Elem().Type().Elem().Kind() == reflect.Struct {
-			return e.GetScan(ctx, dest, sql, args...)
+			return exec.GetScan(ctx, dest, query, args...)
 		}
-		value, err := e.GetValue(ctx, sql, args...)
-		if err != nil {
-			return err
-		}
-		return value.Scan(dest)
-	case reflect.Slice, reflect.Array:
-		if isStructSlice(rv.Elem().Type()) {
-			return e.GetScan(ctx, dest, sql, args...)
-		}
-		array, err := e.GetArray(ctx, sql, args...)
-		if err != nil {
-			return err
-		}
-		return array.Scan(dest)
 	default:
-		value, err := e.GetValue(ctx, sql, args...)
-		if err != nil {
-			return err
-		}
-		return value.Scan(dest)
 	}
+	value, err := exec.GetValue(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	return assignAny(rv.Elem(), value)
 }
 
-// isEmptyResult 判断查询结果是否为空（空集合或零值标量）；struct 不判定（无空语义）。
-func isEmptyResult(v any) bool {
-	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr || rv.IsNil() {
+func assignAny(dst reflect.Value, src any) error {
+	if !dst.CanAddr() {
+		return fmt.Errorf("gooq: destination cannot be addressed")
+	}
+	return gconv.Scan(src, dst.Addr().Interface())
+}
+
+func toInt64(value any) (int64, error) {
+	var out int64
+	if err := gconv.Scan(value, &out); err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+// Ensure *db.DB and *db.Tx satisfy the executor contract.
+var (
+	_ executor = (*db.DB)(nil)
+	_ executor = (*db.Tx)(nil)
+)
+
+// isEmptyResult reports whether a scanned value has no rows or a zero scalar.
+func isEmptyResult(value any) bool {
+	rv := reflect.ValueOf(value)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return false
 	}
 	rv = rv.Elem()
@@ -140,12 +129,4 @@ func isEmptyResult(v any) bool {
 	default:
 		return false
 	}
-}
-
-func isStructSlice(t reflect.Type) bool {
-	elem := t.Elem()
-	if elem.Kind() == reflect.Struct {
-		return true
-	}
-	return elem.Kind() == reflect.Ptr && elem.Elem().Kind() == reflect.Struct
 }

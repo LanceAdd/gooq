@@ -10,21 +10,12 @@ package cmd
 import (
 	"context"
 
-	_ "github.com/gogf/gf/contrib/drivers/mysql/v2"
-	_ "github.com/gogf/gf/contrib/drivers/pgsql/v2"
-	_ "github.com/gogf/gf/contrib/drivers/sqlite/v2"
-
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/gmeta"
 	"github.com/gogf/gf/v2/util/gtag"
 
 	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/cmd/gen"
 )
-
-// 使用 DM 等驱动时，在下方取消对应行注释并执行 go mod tidy：
-// import (
-//     _ "github.com/gogf/gf/contrib/drivers/dm/v2"
-// )
 
 // GF is the management object for `gooq-gen` command line tool.
 var GF = cGF{}

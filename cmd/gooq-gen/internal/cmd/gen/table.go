@@ -13,15 +13,14 @@ import (
 	"embed"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 
-	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gview"
-	"github.com/gogf/gf/v2/text/gstr"
 
+	"github.com/lanceadd/gooq"
 	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/mlog"
+	"github.com/lanceadd/gooq/db"
 )
 
 //go:embed template/*
@@ -40,21 +39,21 @@ var reservedFieldNames = map[string]bool{
 }
 
 // generateTable generates gooq typed table object files for given tables.
-func generateTable(ctx context.Context, db gdb.DB, tableNames []string, dirPathTable string) {
+func generateTable(ctx context.Context, database *db.DB, tableNames []string, dirPathTable string) {
 	for _, tableName := range tableNames {
-		generateTableSingle(ctx, db, tableName, dirPathTable)
+		generateTableSingle(ctx, database, tableName, dirPathTable)
 	}
 }
 
 // generateTableSingle generates the gooq table object for a single table.
-func generateTableSingle(ctx context.Context, db gdb.DB, tableName, dirPathTable string) {
-	fieldMap, err := db.TableFields(ctx, tableName)
+func generateTableSingle(ctx context.Context, database *db.DB, tableName, dirPathTable string) {
+	columns, err := database.TableFields(ctx, tableName)
 	if err != nil {
 		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, tableName, err)
 	}
 	fileName := formatFileName(tableName, "")
 	path := filepath.FromSlash(gfile.Join(dirPathTable, fileName+".go"))
-	tableContent, err := generateTableContent(ctx, db, tableName, dirPathTable, fieldMap)
+	tableContent, err := generateTableContent(ctx, database, tableName, dirPathTable, columns)
 	if err != nil {
 		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, tableName, err)
 	}
@@ -68,7 +67,7 @@ func generateTableSingle(ctx context.Context, db gdb.DB, tableName, dirPathTable
 
 // generateTableContent builds and renders the gooq table object content.
 func generateTableContent(
-	ctx context.Context, db gdb.DB, tableName, dirPathTable string, fieldMap map[string]*gdb.TableField,
+	ctx context.Context, database *db.DB, tableName, dirPathTable string, columns []db.Column,
 ) (string, error) {
 	var (
 		fieldsLines []string
@@ -83,31 +82,18 @@ func generateTableContent(
 	if filepath.Base(dirPathTable) == "gooq" {
 		gooqRef = ""
 	}
-	fieldNames := make([]string, 0, len(fieldMap))
-	for fieldName := range fieldMap {
-		fieldNames = append(fieldNames, fieldName)
-	}
-	sort.Slice(fieldNames, func(i, j int) bool {
-		return fieldMap[fieldNames[i]].Index < fieldMap[fieldNames[j]].Index
-	})
-	for _, fieldName := range fieldNames {
-		field := fieldMap[fieldName]
+	for _, field := range columns {
+		fieldName := field.Name
 		camelName := formatFieldName(fieldName, FieldNameCaseCamel)
 		if reservedFieldNames[camelName] {
 			camelName += "Field"
 		}
 
-		goType, localType := tableFieldTypes(ctx, db, field, &hasStdTime, &hasUUID)
-
-		// Key 大小写不敏感：sqlite 驱动返回 "pri"/"uni"（小写），MySQL 返回 "PRI"/"UNI"。
-		primary := strings.EqualFold(field.Key, "PRI")
-		autoIncrement := gstr.Contains(field.Extra, "auto_increment")
-		// sqlite：INTEGER PRIMARY KEY 即 rowid 别名（自增语义），驱动 Extra 不返回 auto_increment。
-		if !autoIncrement && db.GetConfig().Type == "sqlite" && primary && localType == string(gdb.LocalTypeInt) {
-			autoIncrement = true
-		}
+		goType, localType := tableFieldTypes(field, &hasStdTime, &hasUUID)
 		softDelete := fieldName == "deleted_at" || fieldName == "delete_at"
-		unique := strings.EqualFold(field.Key, "UNI")
+		primary := field.Primary
+		autoIncrement := field.AutoIncrement
+		unique := field.Unique
 
 		fieldsLines = append(fieldsLines, fmt.Sprintf(
 			"\t%-20s %sField[%s]", camelName, gooqRef, goType,
@@ -144,7 +130,7 @@ func generateTableContent(
 		"TplGooqImport":         tplGooqImport,
 		"TplTableNameCamelCase": formatFieldName(tableName, FieldNameCaseCamel),
 		"TplTableName":          tableName,
-		"TplTableSchema":        currentSchema(ctx, db),
+		"TplTableSchema":        currentSchema(ctx, database),
 		"TplGooqFields":         strings.Join(fieldsLines, "\n"),
 		"TplGooqFieldMetas":     strings.Join(metaLines, "\n"),
 		"TplGooqFieldAssigns":   strings.Join(assignLines, "\n"),
@@ -154,28 +140,20 @@ func generateTableContent(
 }
 
 // tableFieldTypes returns the Go type name and LocalType string for the given field.
-func tableFieldTypes(
-	ctx context.Context, db gdb.DB, field *gdb.TableField,
-	hasStdTime, hasUUID *bool,
-) (goType string, localTypeStr string) {
-	localType, err := db.CheckLocalTypeForField(ctx, field.Type, nil)
-	if err != nil {
-		mlog.Fatalf(`check local type for field "%s" failed: %+v`, field.Name, err)
-	}
-	localTypeStr = string(localType)
+func tableFieldTypes(field db.Column, hasStdTime, hasUUID *bool) (goType string, localTypeStr string) {
+	localTypeStr = string(field.LocalType)
 	goType = localTypeStr
-	switch localType {
-	case gdb.LocalTypeDate, gdb.LocalTypeTime, gdb.LocalTypeDatetime:
-		// 统一使用 stdlib time.Time。
+	switch field.LocalType {
+	case gooq.LocalTypeDate, gooq.LocalTypeTime, gooq.LocalTypeDatetime:
 		goType = "time.Time"
 		*hasStdTime = true
-	case gdb.LocalTypeInt64Bytes:
+	case gooq.LocalTypeInt64Bytes:
 		goType = "int64"
-	case gdb.LocalTypeUint64Bytes:
+	case gooq.LocalTypeUint64Bytes:
 		goType = "uint64"
-	case gdb.LocalTypeJson, gdb.LocalTypeJsonb:
+	case gooq.LocalTypeJson, gooq.LocalTypeJsonb:
 		goType = "string"
-	case gdb.LocalTypeUUID:
+	case gooq.LocalTypeUUID:
 		goType = "uuid.UUID"
 		*hasUUID = true
 	}
@@ -183,14 +161,15 @@ func tableFieldTypes(
 }
 
 // currentSchema returns the default schema for schema-qualified rendering (PG only).
-func currentSchema(ctx context.Context, db gdb.DB) string {
-	if db.GetConfig().Type != "pgsql" {
+func currentSchema(ctx context.Context, database *db.DB) string {
+	if database.Dialect() != gooq.DialectPgsql {
 		return ""
 	}
-	if v, err := db.GetValue(ctx, "SELECT current_schema()"); err == nil {
-		return v.String()
+	value, err := database.GetValue(ctx, "SELECT current_schema()")
+	if err != nil || value == nil {
+		return ""
 	}
-	return ""
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 // boolSuffix renders a struct field suffix for boolean meta flags.
