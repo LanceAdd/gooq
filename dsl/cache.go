@@ -3,12 +3,12 @@ package dsl
 import (
 	"context"
 	"fmt"
-	"github.com/lanceadd/gooq"
 	"hash/fnv"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/lanceadd/gooq"
 )
 
 type CacheAdapter interface {
@@ -77,39 +77,27 @@ func (b *SelectBuilder) cacheKey(kind, sql string, args []any) (string, error) {
 	return "gooq:sql:" + kind + ":" + hashQuery(sql, args), nil
 }
 
-// compositeCacheKey 复合查询（RowsAndCount）缓存 key：from/join/where/group/having/order/limit/offset。
-// count 与 rows 共享此 key（hash field 区分），故不含 select 字段列表。
-// 只是字段不同、其余子句相同的 PageCache 查询会命中同一条缓存。
+// compositeCacheKey 是 PageCache 的 key。总数 SQL 与当前页 SQL 连同参数一起哈希，
+// count 与 rows 存在这一把 key 的两个 field 里。选择列、条件、排序或页码不同则 key 不同。
 func (b *SelectBuilder) compositeCacheKey(dialect gooq.Dialect) (string, error) {
 	if b.pageCacheOpt != nil && b.pageCacheOpt.Name != "" {
 		return b.pageCacheOpt.Name, nil
 	}
-	rc := gooq.NewRenderContext(dialect)
-	var sb strings.Builder
-	sb.WriteString(b.from.TableName())
-	for _, j := range b.joins {
-		sb.WriteString("|j:" + j.table.TableName())
-		for _, c := range j.on {
-			sql, args := rc.Render(c)
-			sb.WriteString(":" + sql + fmt.Sprintf("%v", args))
-		}
+	countSQL, countArgs, err := b.countSQL(dialect)
+	if err != nil {
+		return "", err
 	}
-	sb.WriteString("|w:" + b.renderWhere(rc) + fmt.Sprintf("%v", rc.Args()))
-	for _, g := range b.groupBy {
-		sql, args := rc.Render(g)
-		sb.WriteString("|g:" + sql + fmt.Sprintf("%v", args))
+	rowsSQL, rowsArgs, err := b.ToSql(dialect)
+	if err != nil {
+		return "", err
 	}
-	for _, h := range b.having {
-		sql, args := rc.Render(h)
-		sb.WriteString("|h:" + sql + fmt.Sprintf("%v", args))
-	}
-	for _, o := range b.orderBy {
-		sql, args := rc.Render(o)
-		sb.WriteString("|o:" + sql + fmt.Sprintf("%v", args))
-	}
-	sb.WriteString("|args:" + fmt.Sprintf("%v", rc.Args()))
-	sb.WriteString(fmt.Sprintf("|limit:%d|offset:%d", b.limit, b.offset))
-	return "gooq:composite:" + hashString(sb.String()), nil
+	return "gooq:composite:" + hashString(encodeQuery(countSQL, countArgs)+encodeQuery(rowsSQL, rowsArgs)), nil
+}
+
+// encodeQuery 用长度前缀拼出 SQL 和参数，避免两段文本粘连后发生碰撞。
+func encodeQuery(sql string, args []any) string {
+	encodedArgs := fmt.Sprintf("%v", args)
+	return strconv.Itoa(len(sql)) + ":" + sql + strconv.Itoa(len(encodedArgs)) + ":" + encodedArgs
 }
 
 func hashQuery(sql string, args []any) string {

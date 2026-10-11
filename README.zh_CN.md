@@ -5,7 +5,7 @@
 - **类型安全** — `Field[T]` 在编译期携带列类型，`User.Age.Gt(18)` 编译通过，`User.Age.Gt("x")` 直接报错。
 - **离线渲染** — `ToSql(dialect)` 在任何环境产出 SQL + 参数，不连库；执行可用标准库或 `gooq/db`。
 - **方言感知** — MySQL / PostgreSQL / SQLite 各自实现 `DialectSpec`。新方言整体注册。连接驱动通过 `db.Register` 单独注册。
-- **运行时零猜测** — 软删除自动条件、自增列跳过、全列派生全部来自生成期静态化的 `TableMeta`。
+- **运行时零猜测** — 软删除自动条件、全列派生来自生成期静态化的 `TableMeta`。INSERT 和 UPDATE 只写被设置过的列。
 - **分层子包** — `gooq`（核心：字段/表/表达式语言/方言与渲染契约）、`gooq/db`（连接、事务、扫描）、`gooq/dsl`（查询与 DML 构建器）、`gooq/fn`（函数库）；生成代码只依赖 `gooq`。
 
 下文所有示例的渲染输出均来自测试断言，可直接运行验证。
@@ -15,7 +15,7 @@
 ### 1. 生成表对象
 
 ```bash
-cd cmd/gooq-gen && go run . init                                    # 可选：初始化 hack/gooq.yaml + hack/template/table.tmpl
+cd cmd/gooq-gen && go run . init                                    # 可选：初始化 hack/gooq.yaml + hack/template/{table,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
@@ -301,7 +301,8 @@ gooq.Add(User.Age, gooq.Mul(2, User.Age))       // (`user`.`age` + (? * `user`.`
 gooq.Negate(User.Age)                           // (-`user`.`age`)
 User.Age.Cast(gooq.LocalTypeString)             // CAST(`user`.`age` AS CHAR)（PG: BIGINT / SQLite: TEXT）
 
-// Raw：结构化 SQL，参数绑定。
+// Raw：结构化 SQL，参数绑定。占位符不会被改写。
+// MySQL / SQLite 写 ?。PostgreSQL 保持原文，需要自己写 $n。
 gooq.Raw("JSON_EXTRACT(data, ?)", "$.name")
 dsl.Select(User.Id).From(User).Where(gooq.Raw("age > ?", 18))
 
@@ -347,6 +348,10 @@ dsl.Insert(User).ValuesOf(
     model.NewUserRecord().SetName("a"),
     model.NewUserRecord().SetName("b"),
 ).Batch(100).DB().Exec(ctx)
+
+// 各行设置的列不同时，Exec 按列集合拆成多条 INSERT。
+// 没写的列留给表默认值。这种形状 ToSql 会报错，改走 Exec。
+// Batch 在每个列集合内部再切分，不会用 NULL 填没写的列。
 
 // INSERT ... SELECT。
 dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
@@ -503,7 +508,8 @@ rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Page(1, 10).DB().RowsAndCount(ctx)
 
 // PageCache 缓存复合查询为一条 hash 记录（field 为 "count" 与 "rows"）。
-// 需要 SetHashCacheAdapter；key 含 limit/offset，各页独立缓存。
+// 需要 SetHashCacheAdapter。key 由总数 SQL 和当前页 SQL 连同参数一起哈希，
+// 选择列、条件、排序或页码不同都会得到不同的 key。
 // RowsField/CountField 可覆盖 field 名；Force 开启后 count=0 也会缓存（默认跳过空结果）。
 rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
@@ -535,13 +541,13 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 ## gooq-gen（代码生成工具）
 
 ```bash
-cd cmd/gooq-gen && go run . init                                    # 初始化 hack/gooq.yaml + hack/template/table.tmpl
+cd cmd/gooq-gen && go run . init                                    # 初始化 hack/gooq.yaml + hack/template/{table,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-- `init` 生成 `hack/gooq.yaml` 与 `hack/template/table.tmpl` 供定制；已存在的文件不覆盖。
+- `init` 生成 `hack/gooq.yaml`，以及 `hack/template/table.tmpl`、`model.tmpl`、`record.tmpl`；已存在的文件不覆盖。
 - 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。
-- 模板：`<hack>/template/table.tmpl` 优先于内置模板（删除即回退内置）。
+- 模板：`<hack>/template/table.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
 - 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `Scan` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与表基方法同名的列加 `Field` 后缀（`meta` → `MetaField`）。

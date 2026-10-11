@@ -64,8 +64,7 @@ func TestDsl_CacheKey(t *testing.T) {
 	})
 }
 
-// TestDsl_CompositeCacheKey 验证复合查询缓存 key：limit/offset 参与哈希、fields 不参与
-// （count 与 rows 子查询共享同一 key，hash field 区分）。
+// TestDsl_CompositeCacheKey 验证 PageCache key：总数 SQL 与当前页 SQL 一起哈希。
 func TestDsl_CompositeCacheKey(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		userId := gooq.NewField[int64]("user", "id")
@@ -93,10 +92,23 @@ func TestDsl_CompositeCacheKey(t *testing.T) {
 		t.AssertNil(err)
 		t.AssertNE(k1, k4)
 
-		// 不同 fields（count 与 rows 子查询 fields 不同）：key 相同。
+		// 不同选择列：key 不同。同一条查询重复计算则 key 相同。
 		b5 := Select(userId, userName).From(cacheTestUser).Where(userLevel.Eq(1)).Order(userId.Desc()).Page(1, 10)
 		k5, err := b5.compositeCacheKey(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(k1, k5)
+		t.AssertNE(k1, k5)
+		b6 := Select(userId, userName).From(cacheTestUser).Where(userLevel.Eq(1)).Order(userId.Desc()).Page(1, 10)
+		k6, err := b6.compositeCacheKey(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(k5, k6)
+
+		// 方言改变 SQL 文本，key 不同。自定义 Name 优先。
+		kPg, err := b1.compositeCacheKey(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.AssertNE(k1, kPg)
+		named := SelectFrom(cacheTestUser).PageCache(CacheOption{Name: "page:users"})
+		kNamed, err := named.compositeCacheKey(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(kNamed, "page:users")
 	})
 }

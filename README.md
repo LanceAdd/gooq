@@ -5,7 +5,7 @@
 - **Type-safe** — `Field[T]` carries the column type at compile time: `User.Age.Gt(18)` compiles, `User.Age.Gt("x")` doesn't.
 - **Offline rendering** — `ToSql(dialect)` produces SQL + args anywhere, without a database connection; execute with the standard library or `gooq/db`.
 - **Dialect aware** — MySQL / PostgreSQL / SQLite each implement `DialectSpec`. A new dialect registers the whole spec. Connection drivers register separately through `db.Register`.
-- **Zero runtime guessing** — soft-delete conditions, auto-increment skipping, full-column derivation all come from static `TableMeta` written at codegen time.
+- **Zero runtime guessing** — soft-delete conditions and the full column list come from static `TableMeta` written at codegen time. INSERT and UPDATE write only columns that were set.
 - **Layered packages** — `gooq` (core: fields, tables, expression language, dialects, render contract), `gooq/db` (connections, transactions, scanning), `gooq/dsl` (query and DML builders), `gooq/fn` (function library); generated table code only imports `gooq`.
 
 All rendered output shown below comes from test assertions — copy-paste friendly.
@@ -15,7 +15,7 @@ All rendered output shown below comes from test assertions — copy-paste friend
 ### 1. Generate table objects
 
 ```bash
-cd cmd/gooq-gen && go run . init                                    # optional: scaffold hack/gooq.yaml + hack/template/table.tmpl
+cd cmd/gooq-gen && go run . init                                    # optional: scaffold hack/gooq.yaml + hack/template/{table,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
@@ -302,7 +302,8 @@ gooq.Add(User.Age, gooq.Mul(2, User.Age))       // (`user`.`age` + (? * `user`.`
 gooq.Negate(User.Age)                           // (-`user`.`age`)
 User.Age.Cast(gooq.LocalTypeString)             // CAST(`user`.`age` AS CHAR)（PG: BIGINT / SQLite: TEXT）
 
-// Raw: structured SQL with parameter binding.
+// Raw: structured SQL with parameter binding. Placeholders are not rewritten.
+// Use ? for MySQL and SQLite. PostgreSQL keeps the text as written, so write $n yourself.
 gooq.Raw("JSON_EXTRACT(data, ?)", "$.name")
 dsl.Select(User.Id).From(User).Where(gooq.Raw("age > ?", 18))
 
@@ -348,6 +349,10 @@ dsl.Insert(User).ValuesOf(
     model.NewUserRecord().SetName("a"),
     model.NewUserRecord().SetName("b"),
 ).Batch(100).DB().Exec(ctx)
+
+// Rows that set different columns become separate INSERT statements at Exec.
+// Omitted columns keep the table default. ToSql rejects that shape; call Exec.
+// Batch splits inside each column set and does not pad missing columns with NULL.
 
 // INSERT ... SELECT.
 dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
@@ -506,8 +511,9 @@ rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Page(1, 10).DB().RowsAndCount(ctx)
 
 // PageCache caches the composite query as one hash record (fields "count" and "rows").
-// Requires SetHashCacheAdapter; the key includes limit/offset so each page is cached
-// independently. RowsField/CountField override the field names; Force caches empty
+// Requires SetHashCacheAdapter. The key hashes the count SQL and the page SQL together,
+// arguments included, so selected columns, filters, order, and page each change the key.
+// RowsField/CountField override the field names; Force caches empty
 // results (count=0) which are skipped by default.
 rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
@@ -539,13 +545,13 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 ## gooq-gen (codegen tool)
 
 ```bash
-cd cmd/gooq-gen && go run . init                                    # scaffold hack/gooq.yaml + hack/template/table.tmpl
+cd cmd/gooq-gen && go run . init                                    # scaffold hack/gooq.yaml + hack/template/{table,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-- `init` creates `hack/gooq.yaml` and `hack/template/table.tmpl` for customization; existing files are never overwritten.
+- `init` creates `hack/gooq.yaml` and `hack/template/table.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten.
 - Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority.
-- Templates: `<hack>/template/table.tmpl` takes precedence over the embedded template (delete it to fall back).
+- Templates: `<hack>/template/table.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `Scan` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
