@@ -14,21 +14,16 @@ type Record map[string]any
 // Result is an ordered list of rows.
 type Result []Record
 
-// Get reads one typed column from a row. A missing or NULL column returns the zero value.
+// Get reads one typed column from a row.
+// A missing column, NULL, and a conversion failure all return the zero value.
+// Value returns the conversion error instead.
 func Get[T any](record Record, field Field[T]) T {
-	var zero T
-	if record == nil {
+	value, err := Value[T](record, field)
+	if err != nil {
+		var zero T
 		return zero
 	}
-	value, ok := record[field.ColumnName()]
-	if !ok || value == nil {
-		return zero
-	}
-	var out T
-	if err := gconv.Scan(value, &out); err != nil {
-		return zero
-	}
-	return out
+	return value
 }
 
 // Struct fills a *struct or **struct from this row.

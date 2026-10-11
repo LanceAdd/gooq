@@ -425,6 +425,42 @@ func (b *DMLBuilder) Scan(ctx context.Context, dest any) error {
 	return scanExec(ctx, b.executor, sqlStr, args, dest)
 }
 
+// Value writes the first RETURNING column into dest. dest is one cell.
+func (b *DMLBuilder) Value(ctx context.Context, dest any) error {
+	if err := gooq.CheckValue(dest); err != nil {
+		return err
+	}
+	return b.readReturning(ctx, func(sqlStr string, args []any) error {
+		return execValue(ctx, b.executor, sqlStr, args, dest)
+	})
+}
+
+// Column writes the first RETURNING column of every row into dest.
+func (b *DMLBuilder) Column(ctx context.Context, dest any) error {
+	if err := gooq.CheckColumn(dest); err != nil {
+		return err
+	}
+	return b.readReturning(ctx, func(sqlStr string, args []any) error {
+		return execColumn(ctx, b.executor, sqlStr, args, dest)
+	})
+}
+
+func (b *DMLBuilder) readReturning(ctx context.Context, run func(string, []any) error) error {
+	restore, err := b.bind(ctx)
+	if err != nil {
+		return err
+	}
+	defer restore()
+	if len(b.returning) == 0 {
+		return fmt.Errorf("gooq: Value and Column on DML require Returning fields")
+	}
+	sqlStr, args, err := b.ToSql(b.dmlDialect())
+	if err != nil {
+		return err
+	}
+	return run(sqlStr, args)
+}
+
 func (b *DMLBuilder) dmlDialect() gooq.Dialect {
 	if b.executor != nil {
 		return autoDialect(b.executor)

@@ -445,6 +445,13 @@ err := dsl.Select(User.AllFields()).From(User).
 count := int64(0)
 err = dsl.Select(fn.Count(User.Id)).From(User).DB().Scan(ctx, &count)
 
+// One column. time.Time, gtime.Time, and sql.Null* are cells, so they use Value
+// or Column. Scan maps a row struct or a basic value such as int64 or string.
+var created time.Time
+err = dsl.Select(User.CreatedAt).From(User).Where(User.Id.Eq(1)).DB().Value(ctx, &created)
+var names []string
+err = dsl.Select(User.Name).From(User).DB().Column(ctx, &names)
+
 // DML.
 _, err = dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john")).DB().Exec(ctx)
 _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).DB().Exec(ctx)

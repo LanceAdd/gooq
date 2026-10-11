@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"reflect"
 	"time"
 
 	"github.com/gogf/gf/v2/container/gtype"
@@ -437,6 +438,142 @@ func (t *Tx) GetValue(ctx context.Context, query string, args ...any) (any, erro
 		return err
 	})
 	return value, err
+}
+
+// Value writes the first column of the first row into dest.
+// dest is a non-nil pointer to one cell, such as *time.Time, *sql.NullString, or *int.
+// No row returns sql.ErrNoRows. NULL writes the zero value. A row struct uses GetScan.
+func (d *DB) Value(ctx context.Context, dest any, query string, args ...any) error {
+	if err := gooq.CheckValue(dest); err != nil {
+		return err
+	}
+	if d != nil && d.dryRun != nil && d.dryRun.Val() {
+		return d.observe(ctx, query, args, func(context.Context) error { return nil })
+	}
+	value, found, err := d.scalar(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return sql.ErrNoRows
+	}
+	return gooq.Assign(dest, value)
+}
+
+// Value writes the first column of the first row into dest inside the transaction.
+func (t *Tx) Value(ctx context.Context, dest any, query string, args ...any) error {
+	if err := gooq.CheckValue(dest); err != nil {
+		return err
+	}
+	if t != nil && t.db != nil && t.db.dryRun != nil && t.db.dryRun.Val() {
+		return t.db.observe(ctx, query, args, func(context.Context) error { return nil })
+	}
+	value, found, err := t.scalar(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return sql.ErrNoRows
+	}
+	return gooq.Assign(dest, value)
+}
+
+// Column writes the first column of every row into dest.
+// dest is a pointer to a slice of cells. No rows sets an empty slice.
+func (d *DB) Column(ctx context.Context, dest any, query string, args ...any) error {
+	if err := gooq.CheckColumn(dest); err != nil {
+		return err
+	}
+	if d != nil && d.dryRun != nil && d.dryRun.Val() {
+		return d.observe(ctx, query, args, func(context.Context) error { return nil })
+	}
+	values, err := d.column(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	return assignColumn(dest, values)
+}
+
+// Column writes the first column of every row into dest inside the transaction.
+func (t *Tx) Column(ctx context.Context, dest any, query string, args ...any) error {
+	if err := gooq.CheckColumn(dest); err != nil {
+		return err
+	}
+	if t != nil && t.db != nil && t.db.dryRun != nil && t.db.dryRun.Val() {
+		return t.db.observe(ctx, query, args, func(context.Context) error { return nil })
+	}
+	values, err := t.column(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	return assignColumn(dest, values)
+}
+
+func (d *DB) scalar(ctx context.Context, query string, args ...any) (any, bool, error) {
+	var (
+		value any
+		found bool
+	)
+	err := d.observe(ctx, query, args, func(ctx context.Context) error {
+		conn, err := d.readDB()
+		if err != nil {
+			return err
+		}
+		value, found, err = readScalar(ctx, conn, query, args...)
+		return err
+	})
+	return value, found, err
+}
+
+func (t *Tx) scalar(ctx context.Context, query string, args ...any) (any, bool, error) {
+	var (
+		value any
+		found bool
+	)
+	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
+		var err error
+		value, found, err = readScalar(ctx, t.sql, query, args...)
+		return err
+	})
+	return value, found, err
+}
+
+func (d *DB) column(ctx context.Context, query string, args ...any) ([]any, error) {
+	var values []any
+	err := d.observe(ctx, query, args, func(ctx context.Context) error {
+		conn, err := d.readDB()
+		if err != nil {
+			return err
+		}
+		values, err = readColumn(ctx, conn, query, args...)
+		return err
+	})
+	return values, err
+}
+
+func (t *Tx) column(ctx context.Context, query string, args ...any) ([]any, error) {
+	var values []any
+	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
+		var err error
+		values, err = readColumn(ctx, t.sql, query, args...)
+		return err
+	})
+	return values, err
+}
+
+func assignColumn(dest any, values []any) error {
+	slice := reflect.ValueOf(dest).Elem()
+	elemType := slice.Type().Elem()
+	out := reflect.MakeSlice(slice.Type(), 0, len(values))
+	for _, value := range values {
+		elem := reflect.New(elemType).Elem()
+		if err := gooq.Assign(elem.Addr().Interface(), value); err != nil {
+			return err
+		}
+		out = reflect.Append(out, elem)
+	}
+	slice.Set(out)
+	return nil
 }
 
 // GetScan writes the result into dest.

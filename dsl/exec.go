@@ -70,6 +70,9 @@ func autoDialect(exec executor) gooq.Dialect {
 }
 
 func scanExec(ctx context.Context, exec executor, query string, args []any, dest any) error {
+	if err := gooq.CheckScan(dest); err != nil {
+		return err
+	}
 	rv := reflect.ValueOf(dest)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return fmt.Errorf("gooq: Scan dest must be a non-nil pointer")
@@ -94,7 +97,29 @@ func assignAny(dst reflect.Value, src any) error {
 	if !dst.CanAddr() {
 		return fmt.Errorf("gooq: destination cannot be addressed")
 	}
-	return gconv.Scan(src, dst.Addr().Interface())
+	return gooq.Assign(dst.Addr().Interface(), src)
+}
+
+func execValue(ctx context.Context, exec executor, query string, args []any, dest any) error {
+	switch typed := exec.(type) {
+	case *db.DB:
+		return typed.Value(ctx, dest, query, args...)
+	case *db.Tx:
+		return typed.Value(ctx, dest, query, args...)
+	default:
+		return fmt.Errorf("gooq: Value requires a database executor")
+	}
+}
+
+func execColumn(ctx context.Context, exec executor, query string, args []any, dest any) error {
+	switch typed := exec.(type) {
+	case *db.DB:
+		return typed.Column(ctx, dest, query, args...)
+	case *db.Tx:
+		return typed.Column(ctx, dest, query, args...)
+	default:
+		return fmt.Errorf("gooq: Column requires a database executor")
+	}
 }
 
 func toInt64(value any) (int64, error) {

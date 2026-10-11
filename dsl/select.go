@@ -562,6 +562,75 @@ func (b *SelectBuilder) Scan(ctx context.Context, dest any) error {
 	return b.queryWithCache(ctx, dialect, sql, args, dest, "scan")
 }
 
+// Value writes the first column of the first row into dest.
+// dest is one cell, such as *time.Time, *gtime.Time, *sql.NullString, or *int.
+// No row returns sql.ErrNoRows. NULL writes the zero value.
+// A row struct uses Scan. A slice uses Column.
+func (b *SelectBuilder) Value(ctx context.Context, dest any) error {
+	if err := gooq.CheckValue(dest); err != nil {
+		return err
+	}
+	return b.readCell(ctx, dest, "value", execValue)
+}
+
+// Column writes the first column of every row into dest.
+// dest is a pointer to a slice of cells. No rows sets an empty slice.
+// A slice of row structs uses Scan.
+func (b *SelectBuilder) Column(ctx context.Context, dest any) error {
+	if err := gooq.CheckColumn(dest); err != nil {
+		return err
+	}
+	return b.readCell(ctx, dest, "column", execColumn)
+}
+
+func (b *SelectBuilder) readCell(
+	ctx context.Context, dest any, kind string, run func(context.Context, executor, string, []any, any) error,
+) error {
+	restore, err := b.bind(ctx)
+	if err != nil {
+		return err
+	}
+	defer restore()
+	if b.pageCacheOpt != nil {
+		return fmt.Errorf("gooq: PageCache only works with RowsAndCount")
+	}
+	dialect := b.dialect()
+	sql, args, err := b.ToSql(dialect)
+	if err != nil {
+		return err
+	}
+	if b.cacheOption != nil {
+		if adapter := GetCacheAdapter(); adapter != nil {
+			return b.cellWithCache(ctx, adapter, sql, args, dest, kind, func() error {
+				return run(ctx, b.executor, sql, args, dest)
+			})
+		}
+	}
+	return run(ctx, b.executor, sql, args, dest)
+}
+
+func (b *SelectBuilder) cellWithCache(
+	ctx context.Context, adapter CacheAdapter, sql string, args []any, dest any, kind string, run func() error,
+) error {
+	key, err := b.cacheKey(kind, sql, args)
+	if err != nil {
+		return err
+	}
+	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
+		return json.Unmarshal(bytes, dest)
+	}
+	if err = run(); err != nil {
+		return err
+	}
+	if isEmptyResult(dest) && !b.cacheOption.Force {
+		return nil
+	}
+	if bytes, err := json.Marshal(dest); err == nil {
+		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
+	}
+	return nil
+}
+
 // rowWithCache 单行缓存：gooq.Record 空结果不缓存（与 count=0 空结果策略一致）。
 func (b *SelectBuilder) rowWithCache(
 	ctx context.Context, adapter CacheAdapter, dialect gooq.Dialect, sql string, args []any,

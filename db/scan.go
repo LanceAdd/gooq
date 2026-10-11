@@ -46,38 +46,48 @@ func readOne(ctx context.Context, query Queryer, statement string, args ...any) 
 	return result[0], nil
 }
 
-func readValue(ctx context.Context, query Queryer, statement string, args ...any) (value any, err error) {
+func readValue(ctx context.Context, query Queryer, statement string, args ...any) (any, error) {
+	value, _, err := readScalar(ctx, query, statement, args...)
+	return value, err
+}
+
+// readScalar reads the first column of the first row.
+// found is false when the query returns no rows. A NULL column is found with a nil value.
+func readScalar(ctx context.Context, query Queryer, statement string, args ...any) (value any, found bool, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() {
 		err = closeRows(rows, err)
 	}()
 	if !rows.Next() {
 		if err = rows.Err(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return nil, nil
+		return nil, false, nil
 	}
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	record, err := scanRecord(rows, columns)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(columns) == 0 {
-		return nil, nil
+		return nil, true, nil
 	}
-	return record[columns[0]], nil
+	return record[columns[0]], true, nil
 }
 
 func scanDest(ctx context.Context, query Queryer, dest any, statement string, args ...any) error {
+	if err := gooq.CheckScan(dest); err != nil {
+		return err
+	}
 	rv := reflect.ValueOf(dest)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return fmt.Errorf("gooq: scan destination must be a non-nil pointer")
