@@ -117,6 +117,10 @@ func (f *FuncExpr) SubExpressions() []gooq.Expression {
 	if f.filter != nil {
 		subs = append(subs, f.filter)
 	}
+	if f.over != nil {
+		subs = append(subs, f.over.partitionBy...)
+		subs = append(subs, f.over.orderBy...)
+	}
 	return subs
 }
 

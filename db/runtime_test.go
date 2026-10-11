@@ -3,11 +3,13 @@ package db
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/os/gcfg"
+	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/glog"
 
 	"github.com/lanceadd/gooq"
@@ -93,6 +95,76 @@ func TestLoadConfigLoggerAndDebug(t *testing.T) {
 	}
 	if err = LoadConfig(ctx, gcfg.NewWithAdapter(bad)); err == nil {
 		t.Fatal("expected invalid logger level")
+	}
+}
+
+func TestInstanceWithoutConfigFile(t *testing.T) {
+	cfg := gcfg.Instance()
+	previous := cfg.GetAdapter()
+	loaded := configLoaded.Val()
+	adapter, err := gcfg.NewAdapterFile("gooq-missing-config-probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = adapter.SetPath(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	cfg.SetAdapter(adapter)
+	configLoaded.Set(false)
+	t.Cleanup(func() {
+		cfg.SetAdapter(previous)
+		configLoaded.Set(loaded)
+	})
+
+	const group = "no-such-group"
+	want := `gooq: empty database configuration for group "no-such-group"`
+	for i := 0; i < 2; i++ {
+		_, err = Instance(group)
+		if err == nil {
+			t.Fatal("expected missing group error")
+		}
+		if strings.Contains(err.Error(), "possible config files") || strings.Contains(err.Error(), "not found in resource manager") {
+			t.Fatalf("config file error leaked: %s", err)
+		}
+		if err.Error() != want {
+			t.Fatalf("got %q", err.Error())
+		}
+	}
+}
+
+func TestInstanceKeepsConfigParseError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("gooq: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := gcfg.Instance()
+	previous := cfg.GetAdapter()
+	loaded := configLoaded.Val()
+	adapter, err := gcfg.NewAdapterFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = adapter.SetPath(dir); err != nil {
+		t.Fatal(err)
+	}
+	cfg.SetAdapter(adapter)
+	configLoaded.Set(false)
+	t.Cleanup(func() {
+		cfg.SetAdapter(previous)
+		configLoaded.Set(loaded)
+	})
+
+	for i := 0; i < 2; i++ {
+		_, err = Instance("parse-group")
+		if err == nil {
+			t.Fatal("expected config parse error")
+		}
+		if strings.Contains(err.Error(), "empty database configuration") {
+			t.Fatalf("parse error was dropped: %s", err)
+		}
+		if !strings.Contains(err.Error(), "load config file") && !strings.Contains(err.Error(), gfile.Basename(dir)) {
+			t.Fatalf("got %q", err.Error())
+		}
 	}
 }
 

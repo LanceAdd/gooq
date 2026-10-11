@@ -95,16 +95,19 @@ func (SQLiteDialect) RenderDateFormat(fieldSQL, format string) string {
 }
 
 // RenderGroupConcat 渲染 GROUP_CONCAT。SQLite 不支持函数内 ORDER BY，调用方传入的排序被忽略。
+// DISTINCT 只能有一个参数。未给分隔符时渲染单参数；给了分隔符则在渲染期报错。
 func (SQLiteDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
+	if in.Distinct && in.Separator != "" {
+		return "", fmt.Errorf("gooq: GROUP_CONCAT DISTINCT with a separator is not supported by dialect %s", DialectSQLite)
+	}
+	if in.Distinct {
+		return fmt.Sprintf("GROUP_CONCAT(DISTINCT %s)", in.FieldSQL), nil
+	}
 	separator := in.Separator
 	if separator == "" {
 		separator = ","
 	}
-	distinct := ""
-	if in.Distinct {
-		distinct = "DISTINCT "
-	}
-	return fmt.Sprintf("GROUP_CONCAT(%s%s, '%s')", distinct, in.FieldSQL, separator), nil
+	return fmt.Sprintf("GROUP_CONCAT(%s, '%s')", in.FieldSQL, separator), nil
 }
 
 // RenderMedian 渲染 MEDIAN。

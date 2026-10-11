@@ -168,7 +168,7 @@ func TestGen_Sqlite(t *testing.T) {
 	})
 }
 
-// TestInit 验证 init 子命令：生成 hack/gooq.yaml 与 hack/template/table.tmpl，已存在文件不覆盖。
+// TestInit 验证 init 子命令：生成 hack/gooq.yaml 与 table/model/record 三个模板，已存在文件不覆盖。
 func TestInit(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		var (
@@ -186,14 +186,18 @@ func TestInit(t *testing.T) {
 
 		cfgPath := filepath.Join(tmpDir, "hack", "gooq.yaml")
 		tplPath := filepath.Join(tmpDir, "hack", "template", "table.tmpl")
+		modelPath := filepath.Join(tmpDir, "hack", "template", "model.tmpl")
+		recordPath := filepath.Join(tmpDir, "hack", "template", "record.tmpl")
 
-		// 首次 init：生成配置与模板。
+		// 首次 init：生成配置与三个模板。
 		out, err := run("init")
 		if err != nil {
 			t.Fatalf("init failed: %v\n%s", err, out)
 		}
 		t.Assert(gfile.Exists(cfgPath), true)
 		t.Assert(gfile.Exists(tplPath), true)
+		t.Assert(gfile.Exists(modelPath), true)
+		t.Assert(gfile.Exists(recordPath), true)
 		cfgContent := gfile.GetContents(cfgPath)
 		t.Assert(gstr.Contains(cfgContent, "gooq:"), true)
 		t.Assert(gstr.Contains(cfgContent, "gen:"), true)

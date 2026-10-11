@@ -77,8 +77,9 @@ func (b *SelectBuilder) cacheKey(kind, sql string, args []any) (string, error) {
 	return "gooq:sql:" + kind + ":" + hashQuery(sql, args), nil
 }
 
-// compositeCacheKey 复合查询（RowsAndCount）缓存 key：公共条件 + limit/offset。
-// count 与 rows 子查询共享此 key（hash field 区分），故不含 fields（两者 fields 不同）。
+// compositeCacheKey 复合查询（RowsAndCount）缓存 key：from/join/where/group/having/order/limit/offset。
+// count 与 rows 共享此 key（hash field 区分），故不含 select 字段列表。
+// 只是字段不同、其余子句相同的 PageCache 查询会命中同一条缓存。
 func (b *SelectBuilder) compositeCacheKey(dialect gooq.Dialect) (string, error) {
 	if b.pageCacheOpt != nil && b.pageCacheOpt.Name != "" {
 		return b.pageCacheOpt.Name, nil

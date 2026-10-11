@@ -281,13 +281,19 @@ func TestDsl_Select_Cte(t *testing.T) {
 			Fields(Cte("adults").Field("id")).From(Cte("adults")).
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `WITH adults AS (SELECT "user"."id" FROM "user" WHERE "user"."age" > $1 AND "user"."deleted_at" IS NULL) SELECT "adults"."id" FROM "adults"`)
+		t.Assert(sql, `WITH "adults" AS (SELECT "user"."id" FROM "user" WHERE "user"."age" > $1 AND "user"."deleted_at" IS NULL) SELECT "adults"."id" FROM "adults"`)
+
+		sql, _, err = With("Adults", Select(testUser.Id).From(testUser).Where(testUser.Age.Gt(18))).
+			Fields(Cte("Adults").Field("id")).From(Cte("Adults")).
+			ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `WITH "Adults" AS (SELECT "user"."id" FROM "user" WHERE "user"."age" > $1 AND "user"."deleted_at" IS NULL) SELECT "Adults"."id" FROM "Adults"`)
 
 		sql, _, err = WithRecursive("t", Select(testUser.Id).From(testUser).Where(testUser.Id.Eq(1))).
 			Fields(Cte("t").Field("id")).From(Cte("t")).
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `WITH RECURSIVE t AS (SELECT "user"."id" FROM "user" WHERE "user"."id" = $1 AND "user"."deleted_at" IS NULL) SELECT "t"."id" FROM "t"`)
+		t.Assert(sql, `WITH RECURSIVE "t" AS (SELECT "user"."id" FROM "user" WHERE "user"."id" = $1 AND "user"."deleted_at" IS NULL) SELECT "t"."id" FROM "t"`)
 	})
 }
 

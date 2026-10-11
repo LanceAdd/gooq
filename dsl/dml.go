@@ -52,6 +52,7 @@ type DMLBuilder struct {
 	group           string            // DB(name) 指定的配置组；空字符串表示默认组。
 	groupSet        bool              // 是否显式指定了非默认配置组。
 	route           db.Route          // 主从路由（默认写主库）。
+	err             error             // 构造期错误（如 Values 数量不匹配），ToSql / Exec 返回它。
 }
 
 func Insert(t gooq.Table) *DMLBuilder {
@@ -79,7 +80,11 @@ func (b *DMLBuilder) Columns(fields ...any) *DMLBuilder {
 }
 
 func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
-	if len(b.insertColumns) == 0 {
+	if b.err != nil || len(b.insertColumns) == 0 {
+		return b
+	}
+	if len(values) != len(b.insertColumns) {
+		b.err = fmt.Errorf("gooq: insert values count %d does not match columns count %d", len(values), len(b.insertColumns))
 		return b
 	}
 	row := make([]columnValue, len(b.insertColumns))
@@ -301,6 +306,9 @@ func (b *DMLBuilder) DB(name ...string) *DMLBuilder {
 }
 
 func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
+	if b.err != nil {
+		return nil, b.err
+	}
 	restore, err := b.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -334,59 +342,11 @@ func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
 		}
 		return &batchResult{result: lastResult, affected: total}, nil
 	}
-	if b.kind == dmlInsert && b.batch > 0 && len(b.insertRows) > b.batch {
-		var (
-			total      int64
-			lastResult sql.Result
-		)
-		for start := 0; start < len(b.insertRows); start += b.batch {
-			end := start + b.batch
-			if end > len(b.insertRows) {
-				end = len(b.insertRows)
-			}
-			chunk := *b
-			chunk.insertRows = b.insertRows[start:end]
-			sqlStr, args, err := chunk.ToSql(dialect)
-			if err != nil {
-				return nil, err
-			}
-			result, err := b.executor.Exec(ctx, sqlStr, args...)
-			if err != nil {
-				return nil, err
-			}
-			if n, err := result.RowsAffected(); err == nil {
-				total += n
-			}
-			lastResult = result
-		}
-		return &batchResult{result: lastResult, affected: total}, nil
-	}
-	// 行间列集合不一致时按列分组拆分多条 INSERT（缺失列走表默认值，避免 NULL 补位
-	// 触发 NOT NULL 报错）；单组（列一致）走单条 SQL。
-	if b.kind == dmlInsert {
-		groups := groupInsertRows(b.insertRows)
-		if len(groups) > 1 {
-			var (
-				total      int64
-				lastResult sql.Result
-			)
-			for _, group := range groups {
-				chunk := *b
-				chunk.insertRows = group
-				sqlStr, args, err := chunk.ToSql(dialect)
-				if err != nil {
-					return nil, err
-				}
-				result, err := b.executor.Exec(ctx, sqlStr, args...)
-				if err != nil {
-					return nil, err
-				}
-				if n, err := result.RowsAffected(); err == nil {
-					total += n
-				}
-				lastResult = result
-			}
-			return &batchResult{result: lastResult, affected: total}, nil
+	// 缺列不补 NULL，留给表默认值。列集合不同拆成多条 INSERT；Batch 在每个列集合内再切分。
+	if b.kind == dmlInsert && len(b.insertRows) > 0 {
+		chunks := splitInsertChunks(b.insertRows, b.batch)
+		if len(chunks) > 1 {
+			return b.execInsertChunks(ctx, dialect, chunks)
 		}
 	}
 	sqlStr, args, err := b.ToSql(dialect)
@@ -471,6 +431,9 @@ func (b *DMLBuilder) dmlDialect() gooq.Dialect {
 // ToSql renders the SQL with the given dialect, or the default MySQL dialect
 // when the parameter is omitted.
 func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
+	if b.err != nil {
+		return "", nil, b.err
+	}
 	var dialect = gooq.DialectMySQL
 	if len(dialects) > 0 && dialects[0] != "" {
 		dialect = dialects[0]
@@ -531,7 +494,11 @@ func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error)
 	if len(b.insertRows) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert data is empty")
 	}
-	// 列并集：按首行顺序，后续行的额外列追加；某行缺失的列补 NULL。
+	// 一条 SQL 只能表达同一列集合。缺列由 Exec 拆成多条 INSERT，不在这里补 NULL。
+	if len(groupInsertRows(b.insertRows)) > 1 {
+		return "", nil, fmt.Errorf("gooq: mixed insert columns render multiple SQL, use Exec")
+	}
+	// 列并集：按首行顺序，后续行的额外列追加。
 	var columns []string
 	seen := make(map[string]bool)
 	for _, row := range b.insertRows {
@@ -603,6 +570,54 @@ func groupInsertRows(rows [][]columnValue) [][][]columnValue {
 		groups[i] = groupMap[key]
 	}
 	return groups
+}
+
+// splitInsertChunks 先按列集合分组，再按 batch 切开。batch <= 0 表示不切。
+// 每个分片列集合一致，渲染时不会用 NULL 填没写的列。
+func splitInsertChunks(rows [][]columnValue, batch int) [][][]columnValue {
+	groups := groupInsertRows(rows)
+	if batch <= 0 {
+		return groups
+	}
+	chunks := make([][][]columnValue, 0, len(groups))
+	for _, group := range groups {
+		if len(group) <= batch {
+			chunks = append(chunks, group)
+			continue
+		}
+		for start := 0; start < len(group); start += batch {
+			end := start + batch
+			if end > len(group) {
+				end = len(group)
+			}
+			chunks = append(chunks, group[start:end])
+		}
+	}
+	return chunks
+}
+
+func (b *DMLBuilder) execInsertChunks(ctx context.Context, dialect gooq.Dialect, chunks [][][]columnValue) (sql.Result, error) {
+	var (
+		total      int64
+		lastResult sql.Result
+	)
+	for _, rows := range chunks {
+		chunk := *b
+		chunk.insertRows = rows
+		sqlStr, args, err := chunk.ToSql(dialect)
+		if err != nil {
+			return nil, err
+		}
+		result, err := b.executor.Exec(ctx, sqlStr, args...)
+		if err != nil {
+			return nil, err
+		}
+		if n, err := result.RowsAffected(); err == nil {
+			total += n
+		}
+		lastResult = result
+	}
+	return &batchResult{result: lastResult, affected: total}, nil
 }
 
 func quoteColumns(rc *gooq.RenderContext, columns []string) []string {
@@ -698,7 +713,10 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 		var sqlStr string
 		switch b.kind {
 		case dmlDelete:
-			softField := b.table.Meta().SoftDeleteField()
+			var softField *gooq.FieldMeta
+			if b.table.Meta() != nil {
+				softField = b.table.Meta().SoftDeleteField()
+			}
 			if softField != nil && !b.unscoped {
 				sqlStr = fmt.Sprintf(
 					"UPDATE %s SET %s = %s",
@@ -847,16 +865,4 @@ func (b *DMLBuilder) renderReturning(rc *gooq.RenderContext) (string, error) {
 		parts = append(parts, fieldSQL)
 	}
 	return " " + keyword + " " + strings.Join(parts, ", "), nil
-}
-
-func autoIncrementColumn(t gooq.Table) string {
-	if t.Meta() == nil {
-		return ""
-	}
-	for i := range t.Meta().Fields {
-		if t.Meta().Fields[i].AutoIncrement {
-			return t.Meta().Fields[i].ColumnName
-		}
-	}
-	return ""
 }

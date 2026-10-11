@@ -1140,7 +1140,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 		var cteParts []string
 		for _, cte := range b.ctes {
 			cteSQL, _ := cte.query.renderSelect(rc)
-			cteParts = append(cteParts, cte.name+" AS ("+cteSQL+")")
+			cteParts = append(cteParts, rc.Quote(cte.name)+" AS ("+cteSQL+")")
 		}
 		sql.WriteString("WITH ")
 		if b.recursive {

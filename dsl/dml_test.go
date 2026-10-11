@@ -8,6 +8,8 @@
 package dsl
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/test/gtest"
@@ -75,6 +77,14 @@ func TestDsl_Insert_ColumnsValues(t *testing.T) {
 
 		sql, _, err = Insert(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNE(err, nil)
+
+		_, _, err = Insert(testUser).Columns(testUser.Name, testUser.Age).Values("x").ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "does not match"), true)
+
+		_, err = Insert(testUser).Columns(testUser.Name).Values("x", 1).Exec(context.Background())
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "does not match"), true)
 	})
 }
 
@@ -87,6 +97,46 @@ func TestDsl_Insert_Mixed(t *testing.T) {
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "INSERT INTO `user` (`name`, `age`) VALUES (?, ?), (?, ?)")
+	})
+}
+
+func TestDsl_Insert_MixedColumns(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		mixed := Insert(testUser).ValuesOf(
+			assignRow{setCol("name", "a"), setCol("age", 1)},
+			assignRow{setCol("name", "b")},
+			assignRow{setCol("name", "c"), setCol("age", 3)},
+			assignRow{setCol("name", "d")},
+		)
+		_, _, err := mixed.ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "use Exec"), true)
+
+		fe := &fakeExecutor{}
+		mixed.Batch(2)
+		mixed.executor = fe
+		result, err := mixed.Exec(context.Background())
+		t.AssertNil(err)
+		t.AssertEQ(fe.queries, []string{
+			"INSERT INTO `user` (`name`, `age`) VALUES (?, ?), (?, ?)",
+			"INSERT INTO `user` (`name`) VALUES (?), (?)",
+		})
+		affected, err := result.RowsAffected()
+		t.AssertNil(err)
+		t.Assert(affected, int64(2))
+
+		uniform := Insert(testUser).
+			Columns(testUser.Name).
+			Values("a").Values("b").Values("c").Values("d").
+			Batch(2)
+		fe = &fakeExecutor{}
+		uniform.executor = fe
+		_, err = uniform.Exec(context.Background())
+		t.AssertNil(err)
+		t.AssertEQ(fe.queries, []string{
+			"INSERT INTO `user` (`name`) VALUES (?), (?)",
+			"INSERT INTO `user` (`name`) VALUES (?), (?)",
+		})
 	})
 }
 
@@ -220,6 +270,15 @@ func TestDsl_Delete(t *testing.T) {
 		t.Assert(sqls[0], "UPDATE `user` SET `deleted_at` = ? WHERE `id` = ?")
 		t.Assert(len(argss[0]), 2)
 		t.AssertEQ(argss[0][1], int64(1))
+
+		sqls, argss, err = Delete(Cte("x")).
+			Keys(testUser.Id).
+			ValuesOf(assignRow{setCol("id", int64(1))}).
+			renderBatchDML(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(len(sqls), 1)
+		t.Assert(sqls[0], "DELETE FROM `x` WHERE `id` = ?")
+		t.AssertEQ(argss[0], []any{int64(1)})
 	})
 }
 
@@ -270,6 +329,36 @@ func TestDsl_Upsert(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, `INSERT INTO "user" ("name", "age") VALUES (?, ?) ON CONFLICT ("id") DO UPDATE SET "name" = ?`)
 		t.AssertEQ(args, []any{"a", 1, "x"})
+
+		sql, args, err = Insert(testUser).
+			Columns(testUser.Name, testUser.Age).
+			Values("a", 1).
+			OnConflictKey(testUser.Id).
+			DoUpdate(testUser.Name, "x").
+			DoUpdate(testUser.Age, 2).
+			ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("name", "age") VALUES ($1, $2) ON CONFLICT ("id") DO UPDATE SET "age" = $3, "name" = $4`)
+		t.AssertEQ(args, []any{"a", 1, 2, "x"})
+		sqlAgain, _, err := Insert(testUser).
+			Columns(testUser.Name, testUser.Age).
+			Values("a", 1).
+			OnConflictKey(testUser.Id).
+			DoUpdate(testUser.Age, 2).
+			DoUpdate(testUser.Name, "x").
+			ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sqlAgain, sql)
+
+		sql, _, err = Insert(testUser).
+			Columns(testUser.Name, testUser.Age).
+			Values("a", 1).
+			OnConflictKey(testUser.Id).
+			DoUpdate(testUser.Name, "x").
+			DoUpdate(testUser.Age, 2).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `age` = VALUES(`age`), `name` = VALUES(`name`)")
 	})
 }
 

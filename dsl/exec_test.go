@@ -23,10 +23,16 @@ import (
 
 type fakeExecutor struct {
 	calls   []string
+	queries []string
 	allRows gooq.Result
 	lastSql string
 	dialect gooq.Dialect
 }
+
+type constResult int64
+
+func (r constResult) LastInsertId() (int64, error) { return 0, nil }
+func (r constResult) RowsAffected() (int64, error) { return int64(r), nil }
 
 func (f *fakeExecutor) Dialect() gooq.Dialect {
 	if f.dialect == "" {
@@ -53,7 +59,8 @@ func (f *fakeExecutor) GetScan(ctx context.Context, dest any, query string, args
 
 func (f *fakeExecutor) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	f.calls = append(f.calls, "Exec")
-	return nil, nil
+	f.queries = append(f.queries, query)
+	return constResult(1), nil
 }
 
 func (f *fakeExecutor) GetValue(ctx context.Context, query string, args ...any) (any, error) {

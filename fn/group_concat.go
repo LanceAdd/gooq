@@ -12,7 +12,7 @@ type GroupConcatOptions struct {
 	Field gooq.Expression
 	// Separator 是分隔符（默认 ","）。
 	Separator string
-	// Distinct 是否去重（MySQL/SQLite 支持；PG 不支持，渲染校验报错）。
+	// Distinct 是否去重。MySQL 支持。SQLite 只支持单参数 DISTINCT，带分隔符时渲染报错。PG 不支持，渲染校验报错。
 	Distinct bool
 	// OrderBy 是组内排序（SQLite 忽略；MySQL/PG 支持），表达式自带方向（Field.Asc() 等）。
 	OrderBy []gooq.Expression

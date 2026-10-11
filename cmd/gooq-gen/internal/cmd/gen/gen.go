@@ -74,7 +74,7 @@ func embeddedTemplate(name string) string {
 	return string(content)
 }
 
-// Init 在当前工作目录创建 hack/gooq.yaml 与 hack/template/table.tmpl；已存在的文件不覆盖。
+// Init 在当前工作目录创建 hack/gooq.yaml，以及 hack/template 下的 table/model/record 模板；已存在的文件不覆盖。
 func Init() {
 	for _, f := range []struct{ path, content string }{
 		{gfile.Join(hackDirName, configFileName), initConfigContent},

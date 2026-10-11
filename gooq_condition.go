@@ -85,6 +85,8 @@ func (r *rawExpr) Render(rc *RenderContext) (string, []any) {
 	return r.sql, r.args
 }
 
+// Raw 原样拼出 SQL 并追加参数，不改写占位符。
+// MySQL / SQLite 写 ?。PostgreSQL 不会把 ? 改成 $n，片段里要自己写 $n，并和周围已渲染的序号对齐。
 func Raw(sql string, args ...any) Expression {
 	return &rawExpr{sql: sql, args: args}
 }

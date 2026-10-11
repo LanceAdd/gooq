@@ -7,6 +7,8 @@ import (
 
 	"github.com/gogf/gf/v2/container/gmap"
 	"github.com/gogf/gf/v2/container/gtype"
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/os/gcfg"
 	"github.com/gogf/gf/v2/os/glog"
 	"github.com/gogf/gf/v2/util/gconv"
@@ -99,8 +101,14 @@ func loadConfigOnce(ctx context.Context) error {
 	if configLoaded.Val() {
 		return nil
 	}
-	if err := LoadConfig(ctx); err != nil {
-		return err
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	config := gcfg.Instance()
+	if config.Available(ctx) {
+		if err := LoadConfig(ctx, config); err != nil && gerror.Code(err) != gcode.CodeNotFound {
+			return err
+		}
 	}
 	configLoaded.Set(true)
 	return nil

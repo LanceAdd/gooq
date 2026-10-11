@@ -199,7 +199,12 @@ func TestFn_GroupConcat(t *testing.T) {
 			Field: testUser.Name, Distinct: true,
 		})).From(testUser).ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
-		t.Assert(sql, `SELECT GROUP_CONCAT(DISTINCT "user"."name", ',') FROM "user" WHERE "user"."deleted_at" IS NULL`)
+		t.Assert(sql, `SELECT GROUP_CONCAT(DISTINCT "user"."name") FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		_, _, err = dsl.Select(GroupConcat(GroupConcatOptions{
+			Field: testUser.Name, Distinct: true, Separator: "-",
+		})).From(testUser).ToSql(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
 
 		sql, _, err = dsl.Select(GroupConcat(GroupConcatOptions{Field: testUser.Name})).
 			From(testUser).ToSql(gooq.DialectPgsql)
@@ -247,6 +252,20 @@ func TestFn_Window(t *testing.T) {
 			PercentRank().Over([]gooq.Expression{testUser.Status}, []gooq.Expression{testUser.Age.Desc()}),
 		).From(testUser).ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
+
+		_, _, err = dsl.Select(
+			Rank().Over([]gooq.Expression{
+				GroupConcat(GroupConcatOptions{Field: testUser.Name, Distinct: true}),
+			}, nil),
+		).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
+
+		_, _, err = dsl.Select(
+			Rank().Over(nil, []gooq.Expression{
+				GroupConcat(GroupConcatOptions{Field: testUser.Name, Distinct: true}),
+			}),
+		).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
 		t.Assert(sql, `SELECT PERCENT_RANK() OVER (PARTITION BY "user"."status" ORDER BY "user"."age" DESC) FROM "user" WHERE "user"."deleted_at" IS NULL`)
 	})
 }

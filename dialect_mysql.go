@@ -67,8 +67,9 @@ func (MySQLDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) string 
 	if clause.DoNothing {
 		return ""
 	}
-	sets := make([]string, 0, len(clause.Updates))
-	for col := range clause.Updates {
+	cols := sortedMapKeys(clause.Updates)
+	sets := make([]string, 0, len(cols))
+	for _, col := range cols {
 		sets = append(sets, fmt.Sprintf("%s = VALUES(%s)", rc.Quote(col), rc.Quote(col)))
 	}
 	return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", ")

@@ -34,7 +34,7 @@ ADDITIONAL
 gooq-gen -l "mysql:root:12345678@tcp(127.0.0.1:3306)/test"
 gooq-gen -l "sqlite::@file(./test.db)"
 `
-	cInitBrief = `initialize hack/gooq.yaml and hack/template/table.tmpl for customization`
+	cInitBrief = `initialize hack/gooq.yaml and hack/template/{table,model,record}.tmpl for customization`
 )
 
 func init() {

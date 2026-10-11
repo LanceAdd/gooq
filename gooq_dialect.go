@@ -2,6 +2,7 @@ package gooq
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -150,9 +151,19 @@ func renderConflict(rc *RenderContext, clause UpsertClause) string {
 	if clause.DoNothing {
 		return fmt.Sprintf(" ON CONFLICT (%s) DO NOTHING", target)
 	}
-	sets := make([]string, 0, len(clause.Updates))
-	for col, val := range clause.Updates {
-		sets = append(sets, fmt.Sprintf("%s = %s", rc.Quote(col), rc.AddArg(val)))
+	cols := sortedMapKeys(clause.Updates)
+	sets := make([]string, 0, len(cols))
+	for _, col := range cols {
+		sets = append(sets, fmt.Sprintf("%s = %s", rc.Quote(col), rc.AddArg(clause.Updates[col])))
 	}
 	return fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s", target, strings.Join(sets, ", "))
+}
+
+func sortedMapKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
