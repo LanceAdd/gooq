@@ -262,12 +262,15 @@ func (d *DB) Slave() *DB {
 }
 
 // WithRoute returns a view that uses route. The underlying pools are shared.
+// Closing the view does not close those pools. Close the original DB to release them.
+// When d already uses route, WithRoute returns d itself.
 func (d *DB) WithRoute(route Route) *DB {
 	if d.route == route {
 		return d
 	}
 	copied := *d
 	copied.route = route
+	copied.shared = true
 	return &copied
 }
 

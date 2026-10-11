@@ -90,3 +90,43 @@ CREATE TABLE user (
 		t.Fatalf("time/json columns: %+v", columns[3:])
 	}
 }
+
+func TestRouteViewCloseKeepsPool(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "route.db")
+	database, err := Open(Config{Link: "sqlite::@file(" + filepath.ToSlash(path) + ")"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(ctx, `CREATE TABLE item (id INTEGER PRIMARY KEY)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(ctx, `INSERT INTO item(id) VALUES (1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	master := database.Master()
+	slave := database.Slave()
+	if master == database || slave == database {
+		t.Fatal("route view reused the owner")
+	}
+	if err = master.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = slave.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var id int
+	if err = database.GetScan(ctx, &id, `SELECT id FROM item`); err != nil || id != 1 {
+		t.Fatalf("owner after view close id=%d err=%v", id, err)
+	}
+	if err = database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = database.GetScan(ctx, &id, `SELECT id FROM item`)
+	if err == nil || !strings.Contains(err.Error(), "database is closed") {
+		t.Fatalf("owner close err=%v", err)
+	}
+}
