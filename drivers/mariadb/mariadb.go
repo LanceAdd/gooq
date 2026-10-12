@@ -5,11 +5,14 @@ package mariadb
 import (
 	"context"
 	"database/sql/driver"
+	"fmt"
+	"net/url"
 	"strings"
+
+	mysqldriver "github.com/go-sql-driver/mysql"
 
 	"github.com/lanceadd/gooq"
 	"github.com/lanceadd/gooq/db"
-	"github.com/lanceadd/gooq/drivers/internal/mysqlwire"
 )
 
 type mariadbDriver struct{}
@@ -24,18 +27,40 @@ func (mariadbDriver) Names() []string { return []string{"mariadb"} }
 
 func (mariadbDriver) Dialect() gooq.Dialect { return gooq.DialectMariaDB }
 
-func (mariadbDriver) SQLDriver() string { return mysqlwire.SQLDriver() }
+func (mariadbDriver) SQLDriver() string { return "mysql" }
 
-func (mariadbDriver) Underlying() driver.Driver { return mysqlwire.Underlying() }
+func (mariadbDriver) Underlying() driver.Driver { return &mysqldriver.MySQLDriver{} }
 
-func (mariadbDriver) DSN(link db.ParsedLink) (string, error) { return mysqlwire.DSN(link) }
+func (mariadbDriver) DSN(link db.ParsedLink) (string, error) {
+	dsn := fmt.Sprintf("%s:%s@%s(%s:%s)/%s?parseTime=true", link.User, link.Pass, link.Protocol, link.Host, link.Port, link.Name)
+	if link.Port == "" {
+		dsn = fmt.Sprintf("%s:%s@%s(%s)/%s?parseTime=true", link.User, link.Pass, link.Protocol, link.Host, link.Name)
+	}
+	if link.Extra == "" {
+		return dsn, nil
+	}
+	extra, err := url.ParseQuery(link.Extra)
+	if err != nil {
+		return "", fmt.Errorf("gooq: mariadb link extra: %w", err)
+	}
+	if extra.Get("parseTime") == "" {
+		extra.Set("parseTime", "true")
+	}
+	return fmt.Sprintf("%s:%s@%s(%s:%s)/%s?%s", link.User, link.Pass, link.Protocol, link.Host, link.Port, link.Name, extra.Encode()), nil
+}
 
 func (mariadbDriver) ApplySession(dsn string, cfg db.Config) string {
-	return mysqlwire.ApplySession(dsn, cfg)
+	if cfg.Charset != "" && !strings.Contains(dsn, "charset=") {
+		dsn += "&charset=" + cfg.Charset
+	}
+	if cfg.Timezone != "" && !strings.Contains(dsn, "loc=") {
+		dsn += "&loc=" + cfg.Timezone
+	}
+	return dsn
 }
 
 func (mariadbDriver) Tables(ctx context.Context, query db.Queryer) ([]string, error) {
-	return mysqlwire.Tables(ctx, query)
+	return db.QueryStrings(ctx, query, "SHOW TABLES")
 }
 
 func (mariadbDriver) Columns(ctx context.Context, query db.Queryer, table string) ([]db.Column, error) {
@@ -97,5 +122,9 @@ ORDER BY c.ORDINAL_POSITION`, table)
 }
 
 func (mariadbDriver) SchemaSQL(name string) (string, error) {
-	return mysqlwire.SchemaSQL(gooq.DialectMariaDB, name)
+	quoted, err := db.QuoteIdent(gooq.DialectMariaDB, name)
+	if err != nil {
+		return "", err
+	}
+	return "USE " + quoted, nil
 }
