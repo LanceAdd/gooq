@@ -43,7 +43,7 @@ func Median(field gooq.Expression) *FuncExpr {
 			if spec := rc.Spec(); spec != nil {
 				return spec.RenderMedian(argsSQL[0]), nil
 			}
-			return fmt.Sprintf("MEDIAN(%s)", argsSQL[0]), nil
+			return "", nil
 		},
 	)
 }

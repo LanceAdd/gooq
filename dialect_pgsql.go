@@ -69,6 +69,11 @@ func (PostgresDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (str
 	return renderConflict(rc, clause)
 }
 
+// RenderExcluded 渲染本次插入的列值。
+func (PostgresDialect) RenderExcluded(rc *RenderContext, column string) string {
+	return "EXCLUDED." + rc.Quote(column)
+}
+
 // RenderDelete 渲染 DELETE。带连接时使用 USING，连接条件并入 WHERE。
 func (PostgresDialect) RenderDelete(rc *RenderContext, target string, joins []JoinRender, where string) (string, error) {
 	if len(joins) == 0 {

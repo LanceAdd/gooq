@@ -43,3 +43,24 @@ func TestDialectSpec_BuiltinAndOverride(t *testing.T) {
 		t.Assert(spec.InsertKeyword(true), "INSERT IGNORE")
 	})
 }
+
+func TestRenderExcluded(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		cases := []struct {
+			dialect Dialect
+			want    string
+		}{
+			{DialectMySQL, "VALUES(`name`)"},
+			{DialectPgsql, `EXCLUDED."name"`},
+			{DialectSQLite, `EXCLUDED."name"`},
+		}
+		for _, c := range cases {
+			sql, args := Excluded(testUser.Name).(Renderer).Render(NewRenderContext(c.dialect))
+			t.Assert(sql, c.want)
+			t.Assert(len(args), 0)
+		}
+		sql, args := Excluded(testUser.Name).(Renderer).Render(NewRenderContext("missing"))
+		t.Assert(sql, "")
+		t.Assert(len(args), 0)
+	})
+}

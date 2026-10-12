@@ -1,8 +1,6 @@
 package fn
 
 import (
-	"fmt"
-
 	"github.com/lanceadd/gooq"
 )
 
@@ -14,7 +12,7 @@ func DateFormat(field gooq.Expression, format string) *FuncExpr {
 			if spec := rc.Spec(); spec != nil {
 				return spec.RenderDateFormat(argsSQL[0], format), nil
 			}
-			return fmt.Sprintf("DATE_FORMAT(%s, '%s')", argsSQL[0], format), nil
+			return "", nil
 		},
 	)
 }

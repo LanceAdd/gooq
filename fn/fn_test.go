@@ -196,6 +196,31 @@ func TestFn_DialectFunctions(t *testing.T) {
 	})
 }
 
+func TestFn_DirectRenderWithoutShape(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, _ := DateAdd(testUser.CreatedAt, 1, "WEEK").Render(gooq.NewRenderContext(gooq.DialectMySQL))
+		t.Assert(sql, "")
+
+		_, _, err := dsl.Select(DateAdd(testUser.CreatedAt, 1, "WEEK")).From(testUser).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), `DATE_ADD unit "WEEK" is not supported`), true)
+
+		missing := gooq.NewRenderContext("missing")
+		for _, expr := range []*FuncExpr{
+			IfNull(testUser.Name, gooq.Str("unknown")),
+			CurDate(),
+			DateAdd(testUser.CreatedAt, 1, "DAY"),
+			DateDiff(testUser.CreatedAt, Now()),
+			Round(testUser.Age, 2),
+			DateFormat(testUser.CreatedAt, "%Y-%m-%d"),
+			Median(testUser.Age),
+		} {
+			sql, _ = expr.Render(missing)
+			t.Assert(sql, "")
+		}
+	})
+}
+
 func TestFn_DateFormat(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, args, err := dsl.Select(DateFormat(testUser.CreatedAt, "%Y-%m-%d")).From(testUser).ToSql(gooq.DialectMySQL)

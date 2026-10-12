@@ -69,6 +69,11 @@ func (SQLiteDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (strin
 	return renderConflict(rc, clause)
 }
 
+// RenderExcluded 渲染本次插入的列值。
+func (SQLiteDialect) RenderExcluded(rc *RenderContext, column string) string {
+	return "EXCLUDED." + rc.Quote(column)
+}
+
 // RenderDelete 渲染 DELETE。SQLite 不支持带连接的删除。
 func (SQLiteDialect) RenderDelete(rc *RenderContext, target string, joins []JoinRender, where string) (string, error) {
 	if len(joins) > 0 {

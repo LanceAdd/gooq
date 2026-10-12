@@ -465,6 +465,42 @@ func TestDsl_Upsert(t *testing.T) {
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `age` = ?, `name` = VALUES(`name`)")
+
+		sql, args, err = Insert(testUser).
+			Columns(testUser.Name, testUser.Age).
+			Values("a", 1).
+			OnConflictKey(testUser.Id).
+			DoUpdate(testUser.Name, gooq.Excluded(testUser.Name)).
+			ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("name", "age") VALUES (?, ?) ON CONFLICT ("id") DO UPDATE SET "name" = EXCLUDED."name"`)
+		t.AssertEQ(args, []any{"a", 1})
+	})
+}
+
+func TestDsl_UnregisteredDialect(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		const want = `gooq: dialect "missing" is not registered`
+		sql, args, err := Select(testUser.Id).From(testUser).ToSql("missing")
+		t.Assert(err.Error(), want)
+		t.Assert(sql, "")
+		t.Assert(args, nil)
+
+		sql, args, err = Update(testUser).Set(testUser.Name, "a").ToSql("missing")
+		t.Assert(err.Error(), want)
+		t.Assert(sql, "")
+		t.Assert(args, nil)
+
+		sql, args, err = Delete(testUser).ToSql("missing")
+		t.Assert(err.Error(), want)
+		t.Assert(sql, "")
+		t.Assert(args, nil)
+
+		rc := gooq.NewRenderContext("missing")
+		sql, args, err = Update(testUser).Set(testUser.Name, "a").renderUpdate(rc)
+		t.Assert(err.Error(), want)
+		t.Assert(sql, "")
+		t.Assert(args, nil)
 	})
 }
 

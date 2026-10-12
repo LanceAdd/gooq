@@ -1,8 +1,6 @@
 package fn
 
 import (
-	"fmt"
-
 	"github.com/lanceadd/gooq"
 )
 
@@ -117,7 +115,7 @@ func Round(e gooq.Expression, decimals any) *FuncExpr {
 		if spec := rc.Spec(); spec != nil {
 			return spec.RenderRound(argsSQL[0], argsSQL[1]), nil
 		}
-		return fmt.Sprintf("ROUND(%s, %s)", argsSQL[0], argsSQL[1]), nil
+		return "", nil
 	})
 }
 
@@ -143,7 +141,7 @@ func IfNull(a, b gooq.Expression) *FuncExpr {
 		if spec := rc.Spec(); spec != nil {
 			return spec.RenderIfNull(argsSQL[0], argsSQL[1]), nil
 		}
-		return fmt.Sprintf("IFNULL(%s, %s)", argsSQL[0], argsSQL[1]), nil
+		return "", nil
 	})
 }
 
@@ -157,7 +155,7 @@ func CurDate() *FuncExpr {
 		if spec := rc.Spec(); spec != nil {
 			return spec.RenderCurDate(), nil
 		}
-		return "CURDATE()", nil
+		return "", nil
 	})
 }
 
@@ -174,7 +172,7 @@ func DateAdd(date gooq.Expression, count any, unit string) *FuncExpr {
 	return f.RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
 		spec := rc.Spec()
 		if spec == nil {
-			return fmt.Sprintf("DATE_ADD(%s, INTERVAL %s %s)", argsSQL[0], argsSQL[1], unit), nil
+			return "", nil
 		}
 		sqlStr, err := spec.RenderDateAdd(argsSQL[0], argsSQL[1], unit)
 		if err != nil {
@@ -189,7 +187,7 @@ func DateDiff(a, b gooq.Expression) *FuncExpr {
 		if spec := rc.Spec(); spec != nil {
 			return spec.RenderDateDiff(argsSQL[0], argsSQL[1]), nil
 		}
-		return fmt.Sprintf("DATEDIFF(%s, %s)", argsSQL[0], argsSQL[1]), nil
+		return "", nil
 	})
 }
 

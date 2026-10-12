@@ -664,7 +664,7 @@ func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error)
 	}
 	spec := rc.Spec()
 	if spec == nil {
-		spec = gooq.MySQLDialect{}
+		return "", nil, fmt.Errorf("gooq: dialect %q is not registered", rc.Dialect())
 	}
 	target := renderTableName(rc, b.table)
 	sets := b.renderSets(rc)

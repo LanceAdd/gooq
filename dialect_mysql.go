@@ -70,11 +70,16 @@ func (MySQLDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (string
 	if clause.DoNothing {
 		return "", nil
 	}
-	sets, err := renderUpsertSets(rc, clause.Updates, true)
+	sets, err := renderUpsertSets(rc, clause.Updates)
 	if err != nil {
 		return "", err
 	}
 	return " ON DUPLICATE KEY UPDATE " + sets, nil
+}
+
+// RenderExcluded 渲染本次插入的列值。
+func (MySQLDialect) RenderExcluded(rc *RenderContext, column string) string {
+	return "VALUES(" + rc.Quote(column) + ")"
 }
 
 // RenderDelete 渲染 DELETE。带连接时写出 DELETE alias FROM ... JOIN。

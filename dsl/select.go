@@ -491,6 +491,9 @@ func (b *SelectBuilder) Condition() (string, []any) {
 	return b.Render(gooq.NewRenderContext(gooq.DialectMySQL))
 }
 
+// Render 渲染带括号的子查询。
+// spec == nil 时，标识符用双引号，占位符用 ?，共享锁用 FOR SHARE。
+// LIMIT 与 FOR UPDATE 保持现在的通用写法。调用方要得到方言错误，使用 ToSql。
 func (b *SelectBuilder) Render(rc *gooq.RenderContext) (string, []any) {
 	sql, args := b.renderSelect(rc)
 	sql = "(" + sql + ")"

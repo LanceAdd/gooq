@@ -180,7 +180,7 @@ func Str(s string) Expression {
 	return &rawExpr{sql: "'" + s + "'"}
 }
 
-// excludedExpr 表示本次插入行里的一列。渲染由 RenderUpsert 按方言决定。
+// excludedExpr 表示本次插入行里的一列。文本由 DialectSpec.RenderExcluded 决定。
 type excludedExpr struct {
 	column string
 }
@@ -196,11 +196,11 @@ func (e *excludedExpr) Condition() (string, []any) {
 }
 
 func (e *excludedExpr) Render(rc *RenderContext) (string, []any) {
-	quoted := rc.Quote(e.column)
-	if rc.Dialect() == DialectMySQL {
-		return "VALUES(" + quoted + ")", nil
+	spec := rc.Spec()
+	if spec == nil {
+		return "", nil
 	}
-	return "EXCLUDED." + quoted, nil
+	return spec.RenderExcluded(rc, e.column), nil
 }
 
 type distinctExpr struct {

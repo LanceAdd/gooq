@@ -85,6 +85,10 @@ type DialectSpec interface {
 	// RenderUpsert 返回 INSERT 语句末尾的冲突子句。不需要额外子句时返回空字符串。
 	// 冲突目标缺失且需要 DO UPDATE 时，PostgreSQL 和 SQLite 返回错误。
 	RenderUpsert(rc *RenderContext, clause UpsertClause) (string, error)
+	// RenderExcluded 渲染冲突更新里本次插入的列值。
+	// MySQL 返回 VALUES(quoted)。PostgreSQL 和 SQLite 返回 EXCLUDED.quoted。
+	// 列名引用不会失败，所以只返回字符串。
+	RenderExcluded(rc *RenderContext, column string) string
 	// RenderDelete 渲染硬删除。joins 为空时只删除目标表。
 	// SQLite 在带连接时返回错误。
 	RenderDelete(rc *RenderContext, target string, joins []JoinRender, where string) (string, error)
@@ -195,18 +199,18 @@ func renderConflict(rc *RenderContext, clause UpsertClause) (string, error) {
 	if clause.DoNothing {
 		return fmt.Sprintf(" ON CONFLICT (%s) DO NOTHING", target), nil
 	}
-	sets, err := renderUpsertSets(rc, clause.Updates, false)
+	sets, err := renderUpsertSets(rc, clause.Updates)
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf(" ON CONFLICT (%s) DO UPDATE SET %s", target, sets), nil
 }
 
-func renderUpsertSets(rc *RenderContext, updates map[string]any, mysql bool) (string, error) {
+func renderUpsertSets(rc *RenderContext, updates map[string]any) (string, error) {
 	cols := sortedMapKeys(updates)
 	sets := make([]string, 0, len(cols))
 	for _, col := range cols {
-		valueSQL, err := renderUpsertValue(rc, updates[col], mysql)
+		valueSQL, err := renderUpsertValue(rc, updates[col])
 		if err != nil {
 			return "", err
 		}
@@ -215,13 +219,12 @@ func renderUpsertSets(rc *RenderContext, updates map[string]any, mysql bool) (st
 	return strings.Join(sets, ", "), nil
 }
 
-func renderUpsertValue(rc *RenderContext, value any, mysql bool) (string, error) {
+func renderUpsertValue(rc *RenderContext, value any) (string, error) {
 	if excluded, ok := value.(*excludedExpr); ok {
-		quoted := rc.Quote(excluded.column)
-		if mysql {
-			return "VALUES(" + quoted + ")", nil
+		if spec := rc.Spec(); spec != nil {
+			return spec.RenderExcluded(rc, excluded.column), nil
 		}
-		return "EXCLUDED." + quoted, nil
+		return "", nil
 	}
 	if expr, ok := value.(Expression); ok {
 		sql, _ := rc.Render(expr)
