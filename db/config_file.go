@@ -37,10 +37,10 @@ type configNode struct {
 	MaxIdleConnTime  time.Duration
 }
 
-// LoadConfig reads gooq.database and gooq.logger through gcfg.
-// With no config argument it uses gcfg.Instance(). Existing groups are left unchanged.
-// gooq.logger configures the SQL logger for every group loaded from this file.
-// debug on a node turns SQL logging on for that group.
+// LoadConfig 通过 gcfg 读取 gooq.database 和 gooq.logger。
+// 不传配置时使用 gcfg.Instance()。已经注册的组保持不变。节点列表为空的组会跳过。
+// gooq.logger 配置本次从文件载入的每一组的 SQL 日志器。
+// 节点上的 debug 会在该组打开后打开 SQL 日志。
 func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 	if ctx == nil {
 		ctx = context.Background()

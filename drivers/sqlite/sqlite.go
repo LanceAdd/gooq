@@ -1,4 +1,4 @@
-// Package sqlite registers the SQLite connection driver for gooq/db.
+// Package sqlite 为 gooq/db 注册 SQLite 连接驱动。
 package sqlite
 
 import (

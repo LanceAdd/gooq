@@ -6,10 +6,10 @@ import (
 	"strings"
 )
 
-// linkPattern matches type:user:pass@protocol(host:port)/name?extra.
+// linkPattern 匹配 type:user:pass@protocol(host:port)/name?extra。
 var linkPattern = regexp.MustCompile(`^(\w+):(.*?):(.*?)@(\w+?)\((.+?)\)/{0,1}([^\?]*)\?{0,1}(.*?)$`)
 
-// ParsedLink is a GoFrame database link split into its parts.
+// ParsedLink 是拆开后的 GoFrame 数据库链接。
 type ParsedLink struct {
 	Type     string
 	User     string
@@ -42,8 +42,8 @@ func parseLink(link string) (ParsedLink, error) {
 	return parsed, nil
 }
 
-// splitHostPort splits host:port. Brackets mark an IPv6 host, so colons inside
-// them are not a port separator. The port is the :port after the closing bracket.
+// splitHostPort 拆分 host:port。方括号标出 IPv6 主机，括号内的冒号不作为端口分隔符。
+// 端口是右括号后面的 :port。
 func splitHostPort(hostPort string) (host, port string) {
 	if strings.HasPrefix(hostPort, "[") {
 		if end := strings.IndexByte(hostPort, ']'); end >= 0 {

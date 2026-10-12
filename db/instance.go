@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	// DefaultGroupName is the group used when Instance is called without a name.
+	// DefaultGroupName 是 Instance 不传名字时使用的组。
 	DefaultGroupName = "default"
 )
 
@@ -19,7 +19,7 @@ var (
 	groupInstances = gmap.NewKVMap[string, *DB](true)
 )
 
-// SetDefaultGroup selects which configuration group Instance uses by default.
+// SetDefaultGroup 选择 Instance 默认使用的配置组。名字为空时改回 default。
 func SetDefaultGroup(name string) {
 	if name == "" {
 		name = DefaultGroupName
@@ -27,9 +27,9 @@ func SetDefaultGroup(name string) {
 	defaultGroup.Set(name)
 }
 
-// SetConfig registers one or more nodes for a group.
-// An empty group name means the default group. The first master is required.
-// A node with an empty Role is a master. A later Instance call opens the group once.
+// SetConfig 为一组注册一个或多个节点。
+// 组名为空时使用默认组。Role 为空的节点视为主库。打开该组时至少要有一个主库。
+// 配置先保存，Instance 再打开。再次调用会关掉已经打开的实例。
 func SetConfig(group string, nodes ...Config) error {
 	if group == "" {
 		group = DefaultGroupName
@@ -50,7 +50,7 @@ func SetConfig(group string, nodes ...Config) error {
 	return nil
 }
 
-// RemoveConfig drops a group and closes its open instance.
+// RemoveConfig 去掉一组配置，并关闭已经打开的实例。
 func RemoveConfig(group string) error {
 	if group == "" {
 		group = DefaultGroupName
@@ -63,8 +63,8 @@ func RemoveConfig(group string) error {
 	return nil
 }
 
-// Instance returns the shared database for a configuration group.
-// With no name, it returns the default group, the same role as gdb.Instance.
+// Instance 返回配置组对应的共享数据库。
+// 不传名字时返回默认组，作用和 gdb.Instance 相同。
 func Instance(name ...string) (*DB, error) {
 	group := defaultGroup.Val()
 	if len(name) > 0 && name[0] != "" {

@@ -52,8 +52,8 @@ func readValue(ctx context.Context, query Queryer, driver Driver, statement stri
 	return value, err
 }
 
-// readScalar reads the first column of the first row.
-// found is false when the query returns no rows. A NULL column is found with a nil value.
+// readScalar 读取第一行的第一列。
+// 查询没有行时 found 为 false。列为 NULL 时 found 为 true，值为 nil。
 func readScalar(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (value any, found bool, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {

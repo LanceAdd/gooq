@@ -1,4 +1,4 @@
-// Package pgsql registers the PostgreSQL connection driver for gooq/db.
+// Package pgsql 为 gooq/db 注册 PostgreSQL 连接驱动。
 package pgsql
 
 import (
@@ -72,9 +72,9 @@ func (postgresDriver) DSN(link db.ParsedLink) (string, error) {
 	return strings.Join(parts, " "), nil
 }
 
-// quoteDSNValue quotes a lib/pq keyword value.
-// An empty string, or a value containing a space, quote, or backslash, is wrapped in single quotes.
-// Quotes and backslashes inside the value are escaped with a backslash.
+// quoteDSNValue 按 lib/pq 的规则给关键字的值加引号。
+// 空串，或包含空格、单引号、反斜杠的值，用单引号包起来。
+// 值内部的单引号和反斜杠再加一个反斜杠。
 func quoteDSNValue(value string) string {
 	if value == "" || strings.ContainsAny(value, " '\\") {
 		return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value) + "'"

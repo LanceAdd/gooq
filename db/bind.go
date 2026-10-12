@@ -1,20 +1,20 @@
 package db
 
-// ValueBinder rewrites a parameter before it reaches database/sql.
-// Drivers that do not implement it leave arguments unchanged.
+// ValueBinder 在参数进入 database/sql 之前改写它。
+// 驱动没有实现这个接口时，参数保持原样。
 type ValueBinder interface {
 	Bind(v any) any
 }
 
-// ValueDecoder rewrites a scanned value before it is stored on a Record.
-// Drivers that do not implement it leave values unchanged.
-// Decode may receive a ColumnValue when the column type name is known.
-// Returning that same ColumnValue means the value was not decoded.
+// ValueDecoder 在扫描值写入 Record 之前改写它。
+// 驱动没有实现这个接口时，值保持原样。
+// 列类型名已知时，Decode 可能收到 ColumnValue。
+// 原样返回同一个 ColumnValue 表示这个值没有被解码。
 type ValueDecoder interface {
 	Decode(v any) any
 }
 
-// ColumnValue is a scanned value plus the database type name from the driver.
+// ColumnValue 是扫描到的值，加上驱动给出的数据库类型名。
 type ColumnValue struct {
 	DBType string
 	Value  any

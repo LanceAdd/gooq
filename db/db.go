@@ -1,5 +1,4 @@
-// Package db opens MySQL, PostgreSQL, and SQLite connections and executes SQL
-// that gooq has already rendered.
+// Package db 打开 MySQL、PostgreSQL 和 SQLite 连接，并执行 gooq 已经渲染好的 SQL。
 package db
 
 import (
@@ -17,29 +16,29 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-// Role selects which pool a node belongs to.
+// Role 选择节点属于主库还是从库。
 type Role string
 
 const (
-	// RoleMaster serves writes and is the fallback when no slave exists.
+	// RoleMaster 承担写入。没有从库时，读取也走主库。
 	RoleMaster Role = "master"
-	// RoleSlave serves reads when a query does not force the master.
+	// RoleSlave 承担读取，除非这次操作强制走主库。
 	RoleSlave Role = "slave"
 )
 
-// Route forces a later operation onto one pool.
+// Route 把后续操作固定到一个连接池。
 type Route int
 
 const (
-	// RouteAuto sends reads to a slave when one exists, and writes to a master.
+	// RouteAuto 有从库时读取走从库，写入走主库。
 	RouteAuto Route = iota
-	// RouteMaster sends the operation to a master.
+	// RouteMaster 把操作发到主库。
 	RouteMaster
-	// RouteSlave sends the operation to a slave, or a master when no slave exists.
+	// RouteSlave 把操作发到从库。没有从库时用主库。
 	RouteSlave
 )
 
-// Config is one connection node. Role defaults to master. Weight defaults to 1.
+// Config 是一个连接节点。Role 为空时视为主库。Weight 小于等于 0 时按 1 计。
 type Config struct {
 	Link            string
 	Role            Role
@@ -65,7 +64,7 @@ type node struct {
 	maxIdleFor time.Duration
 }
 
-// DB is a group of master and slave pools that share one dialect.
+// DB 是一组共用同一方言的主库和从库连接池。
 type DB struct {
 	group   string
 	masters []node
@@ -80,7 +79,7 @@ type DB struct {
 	logger  *glog.Logger
 }
 
-// Tx is a transaction started on a master connection.
+// Tx 是在主库连接上开启的事务。
 type Tx struct {
 	sql     *sql.Tx
 	db      *DB
@@ -90,13 +89,13 @@ type Tx struct {
 	closed  bool
 }
 
-// Queryer is the subset of a connection used to read rows and run catalog statements.
+// Queryer 是连接上用来读行和执行目录语句的部分。
 type Queryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-// Open parses a GoFrame-style link and pings the database.
+// Open 解析 GoFrame 风格的链接，并探测数据库是否可连。
 //
 //	mysql:user:pass@tcp(127.0.0.1:3306)/app
 //	pgsql:user:pass@tcp(127.0.0.1:5432)/app
@@ -227,7 +226,7 @@ func openSQL(driverName, dsn, initSQL string, cfg Config) (*sql.DB, error) {
 	return sqlDB, nil
 }
 
-// Close closes every master and slave pool.
+// Close 关闭全部主库和从库连接池。共享视图什么都不做。
 func (d *DB) Close() error {
 	if d == nil || d.shared {
 		return nil
@@ -246,24 +245,24 @@ func (d *DB) Close() error {
 	return errors.Join(errs...)
 }
 
-// Group returns the configuration group name. An empty name means the DB came from Open.
+// Group 返回配置组名。空字符串表示这个 DB 来自 Open。
 func (d *DB) Group() string {
 	return d.group
 }
 
-// Master returns a view that sends every operation to a master.
+// Master 返回把后续操作都发到主库的视图。
 func (d *DB) Master() *DB {
 	return d.WithRoute(RouteMaster)
 }
 
-// Slave returns a view that sends every operation to a slave when one is configured.
+// Slave 返回把后续操作发到从库的视图。没有从库时仍落到主库。
 func (d *DB) Slave() *DB {
 	return d.WithRoute(RouteSlave)
 }
 
-// WithRoute returns a view that uses route. The underlying pools are shared.
-// Closing the view does not close those pools. Close the original DB to release them.
-// When d already uses route, WithRoute returns d itself.
+// WithRoute 返回使用 route 的视图，底层连接池与原对象共享。
+// 关闭视图不会关闭这些连接池，要关闭原来的 DB。
+// route 已经相同时返回 d 本身。
 func (d *DB) WithRoute(route Route) *DB {
 	if d.route == route {
 		return d
@@ -319,17 +318,17 @@ func pick(nodes []node) (*sql.DB, error) {
 	return nodes[len(nodes)-1].sql, nil
 }
 
-// Dialect returns the dialect used to render SQL for this connection.
+// Dialect 返回这条连接渲染 SQL 所用的方言。
 func (d *DB) Dialect() gooq.Dialect {
 	return d.dialect
 }
 
-// Dialect returns the dialect of the transaction's connection.
+// Dialect 返回事务所属连接的方言。
 func (t *Tx) Dialect() gooq.Dialect {
 	return t.dialect
 }
 
-// Query runs a read query and returns the raw rows. The caller closes the rows.
+// Query 执行查询并返回原始行。调用方负责关闭 rows。有从库时走从库。
 func (d *DB) Query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	var rows *sql.Rows
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
@@ -343,7 +342,7 @@ func (d *DB) Query(ctx context.Context, query string, args ...any) (*sql.Rows, e
 	return rows, err
 }
 
-// Exec executes a write statement.
+// Exec 在主库上执行写入语句。
 func (d *DB) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	var result sql.Result = dryResult{}
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
@@ -357,7 +356,7 @@ func (d *DB) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 	return result, err
 }
 
-// Query runs a read query inside the transaction. The caller closes the rows.
+// Query 在事务内执行查询并返回原始行。调用方负责关闭 rows。
 func (t *Tx) Query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	var rows *sql.Rows
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
@@ -368,7 +367,7 @@ func (t *Tx) Query(ctx context.Context, query string, args ...any) (*sql.Rows, e
 	return rows, err
 }
 
-// Exec executes a statement inside the transaction.
+// Exec 在事务内执行语句。
 func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	var result sql.Result = dryResult{}
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
@@ -379,7 +378,7 @@ func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 	return result, err
 }
 
-// GetAll reads every row. No rows returns a nil result.
+// GetAll 读取全部行。没有行时返回 nil。
 func (d *DB) GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error) {
 	var result gooq.Result
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
@@ -393,7 +392,7 @@ func (d *DB) GetAll(ctx context.Context, query string, args ...any) (gooq.Result
 	return result, err
 }
 
-// GetAll reads every row inside the transaction.
+// GetAll 在事务内读取全部行。没有行时返回 nil。
 func (t *Tx) GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error) {
 	var result gooq.Result
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
@@ -404,7 +403,7 @@ func (t *Tx) GetAll(ctx context.Context, query string, args ...any) (gooq.Result
 	return result, err
 }
 
-// GetOne reads the first row. No rows returns a nil record.
+// GetOne 读取第一行。没有行时返回 nil。
 func (d *DB) GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error) {
 	var record gooq.Record
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
@@ -418,7 +417,7 @@ func (d *DB) GetOne(ctx context.Context, query string, args ...any) (gooq.Record
 	return record, err
 }
 
-// GetOne reads the first row inside the transaction.
+// GetOne 在事务内读取第一行。没有行时返回 nil。
 func (t *Tx) GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error) {
 	var record gooq.Record
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
@@ -429,7 +428,7 @@ func (t *Tx) GetOne(ctx context.Context, query string, args ...any) (gooq.Record
 	return record, err
 }
 
-// GetValue reads the first column of the first row. No rows returns nil.
+// GetValue 读取第一行的第一列。没有行或值为 NULL 时返回 nil。
 func (d *DB) GetValue(ctx context.Context, query string, args ...any) (any, error) {
 	var value any
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
@@ -443,7 +442,7 @@ func (d *DB) GetValue(ctx context.Context, query string, args ...any) (any, erro
 	return value, err
 }
 
-// GetValue reads the first column of the first row inside the transaction.
+// GetValue 在事务内读取第一行的第一列。没有行或值为 NULL 时返回 nil。
 func (t *Tx) GetValue(ctx context.Context, query string, args ...any) (any, error) {
 	var value any
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
@@ -454,9 +453,9 @@ func (t *Tx) GetValue(ctx context.Context, query string, args ...any) (any, erro
 	return value, err
 }
 
-// Value writes the first column of the first row into dest.
-// dest is a non-nil pointer to one cell, such as *time.Time, *sql.NullString, or *int.
-// No row returns sql.ErrNoRows. NULL writes the zero value. A row struct uses GetScan.
+// Value 把第一行的第一列写入 dest。
+// dest 是指向一个单元格的非空指针，例如 *time.Time、*sql.NullString 或 *int。
+// 没有行时返回 sql.ErrNoRows。NULL 写成零值。行结构体改用 GetScan。
 func (d *DB) Value(ctx context.Context, dest any, query string, args ...any) error {
 	if err := gooq.CheckValue(dest); err != nil {
 		return err
@@ -474,7 +473,7 @@ func (d *DB) Value(ctx context.Context, dest any, query string, args ...any) err
 	return gooq.Assign(dest, value)
 }
 
-// Value writes the first column of the first row into dest inside the transaction.
+// Value 在事务内把第一行的第一列写入 dest。约束与 DB.Value 相同。
 func (t *Tx) Value(ctx context.Context, dest any, query string, args ...any) error {
 	if err := gooq.CheckValue(dest); err != nil {
 		return err
@@ -492,8 +491,8 @@ func (t *Tx) Value(ctx context.Context, dest any, query string, args ...any) err
 	return gooq.Assign(dest, value)
 }
 
-// Column writes the first column of every row into dest.
-// dest is a pointer to a slice of cells. No rows sets an empty slice.
+// Column 把每一行的第一列写入 dest。
+// dest 是单元格切片的指针。没有行时写成空切片。
 func (d *DB) Column(ctx context.Context, dest any, query string, args ...any) error {
 	if err := gooq.CheckColumn(dest); err != nil {
 		return err
@@ -508,7 +507,7 @@ func (d *DB) Column(ctx context.Context, dest any, query string, args ...any) er
 	return assignColumn(dest, values)
 }
 
-// Column writes the first column of every row into dest inside the transaction.
+// Column 在事务内把每一行的第一列写入 dest。没有行时写成空切片。
 func (t *Tx) Column(ctx context.Context, dest any, query string, args ...any) error {
 	if err := gooq.CheckColumn(dest); err != nil {
 		return err
@@ -590,7 +589,7 @@ func assignColumn(dest any, values []any) error {
 	return nil
 }
 
-// GetScan writes the result into dest.
+// GetScan 把查询结果写入 dest。
 func (d *DB) GetScan(ctx context.Context, dest any, query string, args ...any) error {
 	return d.observe(ctx, query, args, func(ctx context.Context) error {
 		conn, err := d.readDB()
@@ -601,14 +600,14 @@ func (d *DB) GetScan(ctx context.Context, dest any, query string, args ...any) e
 	})
 }
 
-// GetScan writes the result into dest inside the transaction.
+// GetScan 在事务内把查询结果写入 dest。
 func (t *Tx) GetScan(ctx context.Context, dest any, query string, args ...any) error {
 	return t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		return scanDest(ctx, t.sql, t.db.driver, dest, query, t.db.bindArgs(args)...)
 	})
 }
 
-// Tables returns user table names in the current schema.
+// Tables 返回当前 schema 里的用户表名。查询在主库上执行。
 func (d *DB) Tables(ctx context.Context) ([]string, error) {
 	conn, err := d.writeDB()
 	if err != nil {
@@ -617,7 +616,7 @@ func (d *DB) Tables(ctx context.Context) ([]string, error) {
 	return d.driver.Tables(ctx, conn)
 }
 
-// TableFields returns columns of one table in definition order.
+// TableFields 按定义顺序返回一张表的列。表名必须是普通标识符。查询在主库上执行。
 func (d *DB) TableFields(ctx context.Context, table string) ([]Column, error) {
 	if err := validIdent(table); err != nil {
 		return nil, err

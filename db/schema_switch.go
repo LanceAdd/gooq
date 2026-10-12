@@ -8,9 +8,9 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-// Schema returns a database view bound to another schema.
-// The registered driver supplies the session statement. An empty statement records the name only.
-// The caller closes a view that opened its own pools. Closing it does not close the original DB.
+// Schema 返回绑定到另一个 schema 的数据库视图。
+// 已注册的驱动提供会话语句。语句为空时只记下名字，不执行语句，关闭这个视图也不会关闭原连接池。
+// 语句非空时为视图打开新的连接池。调用方要关闭这个视图。关闭它不会关闭原来的 DB。
 func (d *DB) Schema(name string) (*DB, error) {
 	if name == "" || name == d.schema {
 		return d, nil
@@ -61,7 +61,7 @@ func (d *DB) Schema(name string) (*DB, error) {
 	return &copied, nil
 }
 
-// GetSchema returns the schema selected by Schema.
+// GetSchema 返回 Schema 选中的 schema 名。没有选过时为空字符串。
 func (d *DB) GetSchema() string {
 	return d.schema
 }
@@ -126,5 +126,5 @@ func execDriver(ctx context.Context, conn driver.Conn, query string) error {
 	return fmt.Errorf("gooq: driver connection cannot execute %s", query)
 }
 
-// Ensure sql.OpenDB accepts the connector.
+// 编译期确认 initConnector 实现 driver.Connector，从而能传给 sql.OpenDB。
 var _ driver.Connector = initConnector{}

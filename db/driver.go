@@ -9,28 +9,28 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-// Driver opens a database and reads its catalog.
-// A driver package calls Register from init. The link prefix selects the driver.
-// SQL rendering stays on gooq.DialectSpec and is registered separately.
+// Driver 打开数据库并读取目录。
+// 驱动包在 init 里调用 Register。链接前缀决定用哪个驱动。
+// SQL 渲染留在 gooq.DialectSpec，另行注册。
 type Driver interface {
-	// Names lists link prefixes this driver accepts.
+	// Names 返回这个驱动接受的链接前缀。
 	Names() []string
-	// Dialect is the rendering dialect for connections this driver opens.
+	// Dialect 返回这个驱动打开的连接所使用的渲染方言。
 	Dialect() gooq.Dialect
-	// SQLDriver is the database/sql driver name passed to sql.Open.
+	// SQLDriver 返回传给 sql.Open 的 database/sql 驱动名。
 	SQLDriver() string
-	// Underlying returns the driver used to run session SQL on a new connection.
+	// Underlying 返回在新连接上执行会话 SQL 的驱动。
 	Underlying() driver.Driver
-	// DSN builds a driver DSN from a parsed GoFrame link.
+	// DSN 把解析后的 GoFrame 链接编成驱动 DSN。
 	DSN(link ParsedLink) (string, error)
-	// ApplySession adds charset and timezone parameters to the DSN.
+	// ApplySession 把字符集和时区参数加进 DSN。
 	ApplySession(dsn string, cfg Config) string
-	// Tables returns user table names.
+	// Tables 返回用户表名。
 	Tables(ctx context.Context, query Queryer) ([]string, error)
-	// Columns returns columns of one table in definition order.
+	// Columns 按定义顺序返回一张表的列。
 	Columns(ctx context.Context, query Queryer, table string) ([]Column, error)
-	// SchemaSQL returns the statement that selects a schema on each new connection.
-	// An empty string records the schema and does not run a statement.
+	// SchemaSQL 返回每条新连接上用来选择 schema 的语句。
+	// 空字符串只记下 schema，不执行语句。
 	SchemaSQL(name string) (string, error)
 }
 
@@ -39,8 +39,8 @@ var (
 	drivers  = map[string]Driver{}
 )
 
-// Register installs a database driver under each of its link prefixes.
-// Registering the same prefix twice returns an error.
+// Register 按驱动的每个链接前缀注册它。
+// 同一个前缀注册两次时返回错误。驱动为空或前缀为空时也返回错误。
 func Register(d Driver) error {
 	if d == nil {
 		return fmt.Errorf("gooq: database driver is nil")

@@ -5,15 +5,15 @@ import (
 	"database/sql"
 )
 
-// Stmt is a prepared statement bound to one pool or transaction.
+// Stmt 是绑定到一个连接池或事务的预编译语句。
 type Stmt struct {
 	stmt  *sql.Stmt
 	db    *DB
 	query string
 }
 
-// Prepare prepares a statement. A true master flag uses a master pool.
-// A transaction in ctx prepares on that transaction.
+// Prepare 预编译语句。master 为 true 时使用主库。
+// ctx 里已有同一组的事务时，改在该事务上预编译。否则走读库。
 func (d *DB) Prepare(ctx context.Context, query string, master ...bool) (*Stmt, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -46,7 +46,7 @@ func (d *DB) Prepare(ctx context.Context, query string, master ...bool) (*Stmt, 
 	return &Stmt{stmt: stmt, db: d, query: query}, nil
 }
 
-// Prepare prepares a statement on the transaction.
+// Prepare 在事务上预编译语句。
 func (t *Tx) Prepare(ctx context.Context, query string) (*Stmt, error) {
 	var stmt *sql.Stmt
 	err := t.db.observe(ctx, query, nil, func(ctx context.Context) error {
@@ -63,7 +63,7 @@ func (t *Tx) Prepare(ctx context.Context, query string) (*Stmt, error) {
 	return &Stmt{stmt: stmt, db: t.db, query: query}, nil
 }
 
-// Exec executes the prepared statement.
+// Exec 执行预编译语句。语句为空时返回空结果，不访问数据库。
 func (s *Stmt) Exec(ctx context.Context, args ...any) (sql.Result, error) {
 	if s.stmt == nil {
 		return dryResult{}, nil
@@ -77,7 +77,7 @@ func (s *Stmt) Exec(ctx context.Context, args ...any) (sql.Result, error) {
 	return result, err
 }
 
-// Query runs the prepared query. The caller closes the rows.
+// Query 执行预编译查询。调用方负责关闭 rows。语句为空时返回 nil, nil。
 func (s *Stmt) Query(ctx context.Context, args ...any) (*sql.Rows, error) {
 	if s.stmt == nil {
 		return nil, nil
@@ -91,7 +91,7 @@ func (s *Stmt) Query(ctx context.Context, args ...any) (*sql.Rows, error) {
 	return rows, err
 }
 
-// Close closes the prepared statement.
+// Close 关闭预编译语句。接收者或语句为空时什么都不做。
 func (s *Stmt) Close() error {
 	if s == nil || s.stmt == nil {
 		return nil

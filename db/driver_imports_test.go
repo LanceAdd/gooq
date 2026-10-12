@@ -1,5 +1,5 @@
-// This external test package imports the built-in drivers so package db tests can open
-// connections without an import cycle between db and the driver packages.
+// 这个外部测试包导入内置驱动，让 db 包的测试可以打开连接，
+// 同时避免 db 和驱动包之间的导入循环。
 
 package db_test
 

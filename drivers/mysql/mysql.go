@@ -1,4 +1,4 @@
-// Package mysql registers the MySQL connection driver for gooq/db.
+// Package mysql 为 gooq/db 注册 MySQL 连接驱动。
 package mysql
 
 import (

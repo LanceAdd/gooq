@@ -206,8 +206,8 @@ func parsePGArray(elem, text string) (any, error) {
 	}
 }
 
-// splitPGArray parses a one-dimensional PostgreSQL array literal.
-// A nil element means SQL NULL. An empty array returns an empty slice.
+// splitPGArray 解析一维 PostgreSQL 数组字面量。
+// 元素为 nil 表示 SQL NULL。空数组返回空切片。
 func splitPGArray(text string) ([]*string, error) {
 	text = strings.TrimSpace(text)
 	if len(text) < 2 || text[0] != '{' || text[len(text)-1] != '}' {

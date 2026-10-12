@@ -9,7 +9,7 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-// Column is one table column used by gooq-gen.
+// Column 是 gooq-gen 使用的一列。
 type Column struct {
 	Name          string
 	DBType        string
@@ -30,10 +30,10 @@ func validIdent(name string) error {
 	return nil
 }
 
-// LocalTypeOf maps a database type name to a gooq local type.
-// Trailing unsigned and zerofill are removed before the width in parentheses.
-// Array types use the PostgreSQL udt name, such as _int4 or _text.
-// Unlisted array names and range types stay strings.
+// LocalTypeOf 把数据库类型名映射成 gooq 的本地类型。
+// 先去掉末尾的 unsigned 和 zerofill，再去掉括号里的宽度。
+// 数组类型使用 PostgreSQL 的 udt 名，例如 _int4、_text。
+// 没有列出的类型映射成 string，包括未列出的数组名和范围类型。
 func LocalTypeOf(dbType string) gooq.LocalType {
 	typed := strings.ToLower(strings.TrimSpace(dbType))
 	changed := true
@@ -97,7 +97,7 @@ func LocalTypeOf(dbType string) gooq.LocalType {
 	}
 }
 
-// QueryStrings scans the first text column of every row.
+// QueryStrings 把每一行的第一列扫成字符串。
 func QueryStrings(ctx context.Context, query Queryer, statement string, args ...any) (names []string, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
@@ -119,7 +119,7 @@ func QueryStrings(ctx context.Context, query Queryer, statement string, args ...
 	return names, nil
 }
 
-// QueryMaps scans every row into a lower-cased column map of text values.
+// QueryMaps 把每一行扫成列名小写的文本映射。NULL 写成空字符串。
 func QueryMaps(ctx context.Context, query Queryer, statement string, args ...any) (records []map[string]string, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {

@@ -21,7 +21,7 @@ func (dryResult) LastInsertId() (int64, error) { return 0, nil }
 
 func (dryResult) RowsAffected() (int64, error) { return 0, nil }
 
-// SetDebug turns SQL logging on or off for this database and its route views.
+// SetDebug 打开或关闭这个数据库及其路由视图的 SQL 日志。debug 还没初始化时什么都不做。
 func (d *DB) SetDebug(enabled bool) {
 	if d.debug == nil {
 		return
@@ -29,7 +29,7 @@ func (d *DB) SetDebug(enabled bool) {
 	d.debug.Set(enabled)
 }
 
-// SetDryRun skips Query, Exec, and reads. Begin, Commit, and Rollback still run.
+// SetDryRun 打开后跳过 Query、Exec、预编译和读取。Begin、Commit、Rollback 仍会执行。
 func (d *DB) SetDryRun(enabled bool) {
 	if d.dryRun == nil {
 		return
@@ -37,7 +37,7 @@ func (d *DB) SetDryRun(enabled bool) {
 	d.dryRun.Set(enabled)
 }
 
-// SetLogger replaces the logger used for SQL debug lines.
+// SetLogger 替换写出 SQL 调试行的日志器。传入 nil 时不替换。
 func (d *DB) SetLogger(logger *glog.Logger) {
 	if logger == nil {
 		return
@@ -45,7 +45,7 @@ func (d *DB) SetLogger(logger *glog.Logger) {
 	d.logger = logger
 }
 
-// Logger returns the SQL logger.
+// Logger 返回 SQL 日志器。
 func (d *DB) Logger() *glog.Logger {
 	return d.logger
 }

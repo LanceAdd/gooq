@@ -7,7 +7,7 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-// gooqAssign copies a scanned driver value into a settable destination.
+// gooqAssign 把扫到的驱动值写入可设置的目标。目标不能取地址时返回错误。
 func gooqAssign(dst reflect.Value, src any) error {
 	if !dst.IsValid() || !dst.CanSet() {
 		return fmt.Errorf("gooq: destination cannot be set")
