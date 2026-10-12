@@ -212,12 +212,21 @@ func TestDsl_Update_Join(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		u := testUser.As("u")
 		r := testRole.As("r")
-		sql, _, err := Update(u).
+		sql, args, err := Update(u).
 			Set(u.Status, "vip").
 			InnerJoin(r).On(r.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "UPDATE `user` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?")
+
+		sql, args, err = Update(u).
+			Set(u.Status, "vip").
+			InnerJoin(r).On(r.Id.Eq(7)).
+			Where(u.Name.Eq("ann")).
+			ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE "r"."id" = $2 AND "u"."name" = $3`)
+		t.AssertEQ(args, []any{"vip", int64(7), "ann"})
 
 		sql, _, err = Update(u).
 			Set(u.Status, "vip").

@@ -111,8 +111,14 @@ func (SQLiteDialect) RenderRound(field, decimals string) string {
 	return fmt.Sprintf("ROUND(%s, %s)", field, decimals)
 }
 
-// UpdateFrom 为 true。多表 UPDATE 使用 FROM。
-func (SQLiteDialect) UpdateFrom() bool { return true }
+// RenderUpdate 渲染 UPDATE。全部内连接时使用 FROM，并把 ON 并入 WHERE。
+// 出现外连接时返回错误。
+func (SQLiteDialect) RenderUpdate(_ *RenderContext, target, sets, where string, joins []JoinRender) (string, error) {
+	if joinsHaveOuter(joins) {
+		return "", fmt.Errorf("gooq: UPDATE with an outer join is not supported by dialect %s", DialectSQLite)
+	}
+	return renderUpdateFrom(target, sets, where, joins), nil
+}
 
 // JoinKeyword 把 INNER JOIN LATERAL 改成 CROSS JOIN LATERAL。
 func (SQLiteDialect) JoinKeyword(keyword string) string {

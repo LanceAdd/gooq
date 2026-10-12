@@ -126,8 +126,14 @@ func (PostgresDialect) RenderRound(field, decimals string) string {
 	return fmt.Sprintf("ROUND((%s)::numeric, %s)", field, decimals)
 }
 
-// UpdateFrom 为 true。多表 UPDATE 使用 FROM。
-func (PostgresDialect) UpdateFrom() bool { return true }
+// RenderUpdate 渲染 UPDATE。全部内连接时使用 FROM，并把 ON 并入 WHERE。
+// 出现外连接时使用锚点子查询，ON 留在连接上。
+func (PostgresDialect) RenderUpdate(rc *RenderContext, target, sets, where string, joins []JoinRender) (string, error) {
+	if joinsHaveOuter(joins) {
+		return renderUpdateAnchor(target, sets, where, joins, rc.Quote("_gooq")), nil
+	}
+	return renderUpdateFrom(target, sets, where, joins), nil
+}
 
 // JoinKeyword 原样返回连接关键字。
 func (PostgresDialect) JoinKeyword(keyword string) string { return keyword }

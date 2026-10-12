@@ -121,8 +121,17 @@ func (MySQLDialect) RenderRound(field, decimals string) string {
 	return fmt.Sprintf("ROUND(%s, %s)", field, decimals)
 }
 
-// UpdateFrom 为 false。MySQL 多表 UPDATE 使用 JOIN。
-func (MySQLDialect) UpdateFrom() bool { return false }
+// RenderUpdate 渲染 UPDATE。有连接时写成 UPDATE target JOIN ... SET。
+func (MySQLDialect) RenderUpdate(_ *RenderContext, target, sets, where string, joins []JoinRender) (string, error) {
+	if len(joins) == 0 {
+		return renderUpdateBase(target, sets, where), nil
+	}
+	sqlStr := "UPDATE " + target + " " + renderJoined(joins) + " SET " + sets
+	if where != "" {
+		sqlStr += " WHERE " + where
+	}
+	return sqlStr, nil
+}
 
 // JoinKeyword 原样返回连接关键字。
 func (MySQLDialect) JoinKeyword(keyword string) string { return keyword }

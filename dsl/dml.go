@@ -662,30 +662,17 @@ func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error)
 	if len(b.setValues) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
 	}
-	useFrom := rc.Spec() != nil && rc.Spec().UpdateFrom()
-	outer := hasOuterJoin(b.joins)
-	if useFrom && outer && rc.Dialect() == gooq.DialectSQLite {
-		return "", nil, fmt.Errorf("gooq: UPDATE with an outer join is not supported by dialect %s", gooq.DialectSQLite)
+	spec := rc.Spec()
+	if spec == nil {
+		spec = gooq.MySQLDialect{}
 	}
-	var sqlStr string
-	switch {
-	case len(b.joins) == 0:
-		sqlStr = fmt.Sprintf("UPDATE %s SET %s", renderTableName(rc, b.table), b.renderSets(rc))
-	case useFrom && outer:
-		sqlStr = fmt.Sprintf(
-			"UPDATE %s SET %s FROM (SELECT 1) AS %s %s",
-			renderTableName(rc, b.table),
-			b.renderSets(rc),
-			rc.Quote("_gooq"),
-			b.renderJoinClauses(rc),
-		)
-	case useFrom:
-		sqlStr = fmt.Sprintf("UPDATE %s SET %s FROM %s", renderTableName(rc, b.table), b.renderSets(rc), b.renderJoinTables(rc))
-	default:
-		sqlStr = fmt.Sprintf("UPDATE %s %s SET %s", renderTableName(rc, b.table), b.renderJoinClauses(rc), b.renderSets(rc))
-	}
-	if where := b.renderWhere(rc, useFrom && len(b.joins) > 0 && !outer); where != "" {
-		sqlStr += " WHERE " + where
+	target := renderTableName(rc, b.table)
+	sets := b.renderSets(rc)
+	joins := b.joinRenders(rc)
+	where := b.renderWhere(rc)
+	sqlStr, err := spec.RenderUpdate(rc, target, sets, where, joins)
+	if err != nil {
+		return "", nil, err
 	}
 	if returning, err := b.renderReturning(rc); err != nil {
 		return "", nil, err
@@ -778,7 +765,7 @@ func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error)
 	if spec == nil {
 		return "", nil, fmt.Errorf("gooq: dialect %q is not registered", rc.Dialect())
 	}
-	sqlStr, err := spec.RenderDelete(rc, renderTableName(rc, b.table), b.joinRenders(rc), b.renderWhere(rc, false))
+	sqlStr, err := spec.RenderDelete(rc, renderTableName(rc, b.table), b.joinRenders(rc), b.renderWhere(rc))
 	if err != nil {
 		return "", nil, err
 	}
@@ -790,16 +777,9 @@ func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error)
 	return sqlStr, rc.Args(), nil
 }
 
-func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext, mergeOn bool) string {
-	var conditions []gooq.Expression
-	if mergeOn {
-		for _, j := range b.joins {
-			conditions = append(conditions, j.on...)
-		}
-	}
-	conditions = append(conditions, b.conditions...)
+func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
 	var parts []string
-	for _, c := range conditions {
+	for _, c := range b.conditions {
 		condSQL, _ := rc.Render(c)
 		if condSQL != "" {
 			parts = append(parts, condSQL)
@@ -828,20 +808,6 @@ func renderSetValue(rc *gooq.RenderContext, cv columnValue) string {
 	return fmt.Sprintf("%s = %s", rc.Quote(cv.column), rc.AddArg(cv.value))
 }
 
-func hasOuterJoin(joins []*joinClause) bool {
-	for _, j := range joins {
-		switch j.joinType {
-		case joinLeft, joinRight, joinFull:
-			return true
-		}
-	}
-	return false
-}
-
-func (b *DMLBuilder) renderJoinClauses(rc *gooq.RenderContext) string {
-	return renderJoinedSQL(b.joinRenders(rc))
-}
-
 func (b *DMLBuilder) joinRenders(rc *gooq.RenderContext) []gooq.JoinRender {
 	out := make([]gooq.JoinRender, 0, len(b.joins))
 	for _, j := range b.joins {
@@ -856,27 +822,6 @@ func (b *DMLBuilder) joinRenders(rc *gooq.RenderContext) []gooq.JoinRender {
 		})
 	}
 	return out
-}
-
-func renderJoinedSQL(joins []gooq.JoinRender) string {
-	parts := make([]string, 0, len(joins))
-	for _, join := range joins {
-		part := join.Keyword + " " + join.Table
-		if join.On != "" {
-			part += " ON " + join.On
-		}
-		parts = append(parts, part)
-	}
-	return strings.Join(parts, " ")
-}
-
-// renderJoinTables 渲染 FROM 表列表（PG/SQLite 的 UPDATE...FROM 语法，无 ON 条件）。
-func (b *DMLBuilder) renderJoinTables(rc *gooq.RenderContext) string {
-	var tables []string
-	for _, j := range b.joins {
-		tables = append(tables, renderTableName(rc, j.table))
-	}
-	return strings.Join(tables, ", ")
 }
 
 func (b *DMLBuilder) renderJoinCond(rc *gooq.RenderContext, j *joinClause) string {

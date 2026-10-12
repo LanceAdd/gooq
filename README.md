@@ -548,7 +548,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - `ToSql` requires a registered `DialectSpec`. An unknown dialect returns an error. Embed `MySQLDialect`, `PostgresDialect`, or `SQLiteDialect` and override the methods that differ, then call `RegisterDialect`.
 - Opening a connection requires a blank import of the matching driver package (`drivers/mysql`, `drivers/pgsql`, `drivers/sqlite`). The driver registers itself with `db.Register`. `gooq-gen` imports the three built-in drivers.
 - Schema-qualified tables render `schema.table.column` (alias shadows schema); gooq-gen fills schema for PG only (`current_schema()`).
-- Dialect-sensitive SQL lives on `DialectSpec`: pagination, row locks, `JOIN` rewrites, upsert, delete, `UPDATE ... FROM`, `DATE_FORMAT`, `GROUP_CONCAT`, and `IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`. SQLite upsert uses `ON CONFLICT`.
+- Dialect-sensitive SQL lives on `DialectSpec`: pagination, row locks, `JOIN` rewrites, upsert, delete, multi-table `UPDATE` (`RenderUpdate`), `DATE_FORMAT`, `GROUP_CONCAT`, and `IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`. SQLite upsert uses `ON CONFLICT`.
 - Table, column, and function aliases go through `Quote`. `numeric` / `decimal` generate `string`. PostgreSQL arrays generate a slice of the element type.
 - PostgreSQL 16 can run `STRING_AGG(DISTINCT ...)`, `JSON_ARRAYAGG`, and `ANY_VALUE`.
 

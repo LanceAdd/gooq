@@ -544,7 +544,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - `ToSql` 要求方言已注册为 `DialectSpec`。未知方言直接返回错误。可嵌入 `MySQLDialect`、`PostgresDialect` 或 `SQLiteDialect`，只覆盖有差异的方法，再调用 `RegisterDialect`。
 - 打开连接需要空白导入对应驱动包（`drivers/mysql`、`drivers/pgsql`、`drivers/sqlite`）。驱动在 `init` 里调用 `db.Register`。`gooq-gen` 会导入这三种内置驱动。
 - 带 schema 的表渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；gooq-gen 仅对 PG 填充 schema（`current_schema()`）。
-- 方言敏感 SQL 都在 `DialectSpec` 上：分页、行锁、`JOIN` 改写、upsert、删除、`UPDATE ... FROM`、`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`。SQLite 的 upsert 使用 `ON CONFLICT`。
+- 方言敏感 SQL 都在 `DialectSpec` 上：分页、行锁、`JOIN` 改写、upsert、删除、多表 `UPDATE`（`RenderUpdate`）、`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`。SQLite 的 upsert 使用 `ON CONFLICT`。
 - 表别名、列别名和函数别名都走 `Quote`。`numeric` / `decimal` 生成 `string`。PostgreSQL 数组按元素类型生成切片。
 - PostgreSQL 16 起可用 `STRING_AGG(DISTINCT ...)`、`JSON_ARRAYAGG` 和 `ANY_VALUE`。
 

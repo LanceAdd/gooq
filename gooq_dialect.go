@@ -88,9 +88,13 @@ type DialectSpec interface {
 	// RenderDelete 渲染硬删除。joins 为空时只删除目标表。
 	// SQLite 在带连接时返回错误。
 	RenderDelete(rc *RenderContext, target string, joins []JoinRender, where string) (string, error)
-	// UpdateFrom 为 true 时，多表 UPDATE 使用 FROM。
-	// 全部是内连接时，连接条件并入 WHERE。出现外连接时使用锚点子查询。
-	UpdateFrom() bool
+	// RenderUpdate 渲染 UPDATE。where 只包含调用方自己的条件，不含连接条件。
+	// 没有连接时写成 UPDATE target SET sets。
+	// MySQL 有连接时把 JOIN 写在 SET 前面，并保留连接类型。
+	// PostgreSQL 和 SQLite 在全部为内连接时使用 FROM，并把各连接的 ON 并入 WHERE，调用方条件放在最后。
+	// 只要出现外连接，PostgreSQL 使用 (SELECT 1) AS "_gooq" 锚点，ON 留在连接上。
+	// SQLite 出现外连接时返回错误。
+	RenderUpdate(rc *RenderContext, target, sets, where string, joins []JoinRender) (string, error)
 	// JoinKeyword 改写连接关键字。大多数方言原样返回。
 	JoinKeyword(keyword string) string
 	// SupportsGroup 检查 GROUP BY 扩展。不支持时返回错误。
@@ -266,6 +270,56 @@ func renderJoined(joins []JoinRender) string {
 
 func renderDeleteFrom(target, where string) string {
 	sqlStr := "DELETE FROM " + target
+	if where != "" {
+		sqlStr += " WHERE " + where
+	}
+	return sqlStr
+}
+
+func renderUpdateBase(target, sets, where string) string {
+	sqlStr := "UPDATE " + target + " SET " + sets
+	if where != "" {
+		sqlStr += " WHERE " + where
+	}
+	return sqlStr
+}
+
+func joinsHaveOuter(joins []JoinRender) bool {
+	for _, join := range joins {
+		switch {
+		case strings.HasPrefix(join.Keyword, "LEFT"),
+			strings.HasPrefix(join.Keyword, "RIGHT"),
+			strings.HasPrefix(join.Keyword, "FULL"):
+			return true
+		}
+	}
+	return false
+}
+
+func renderUpdateFrom(target, sets, where string, joins []JoinRender) string {
+	if len(joins) == 0 {
+		return renderUpdateBase(target, sets, where)
+	}
+	tables := make([]string, len(joins))
+	ons := make([]string, 0, len(joins)+1)
+	for i, join := range joins {
+		tables[i] = join.Table
+		if join.On != "" {
+			ons = append(ons, join.On)
+		}
+	}
+	sqlStr := "UPDATE " + target + " SET " + sets + " FROM " + strings.Join(tables, ", ")
+	if where != "" {
+		ons = append(ons, where)
+	}
+	if len(ons) > 0 {
+		sqlStr += " WHERE " + strings.Join(ons, " AND ")
+	}
+	return sqlStr
+}
+
+func renderUpdateAnchor(target, sets, where string, joins []JoinRender, anchor string) string {
+	sqlStr := "UPDATE " + target + " SET " + sets + " FROM (SELECT 1) AS " + anchor + " " + renderJoined(joins)
 	if where != "" {
 		sqlStr += " WHERE " + where
 	}
