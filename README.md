@@ -100,11 +100,11 @@ err := db.SetConfig(db.DefaultGroupName, db.Config{
     Link: "mysql:root:pass@tcp(127.0.0.1:3306)/app",
 })
 
-users := []model.UserModel{}
-err = dsl.Select(User.AllFields()).From(User).
-    DB().
+var users []model.UserModel
+rows, err := dsl.Select(User.AllFields()).From(User).
     Where(User.Age.Gt(18)).
-    Scan(ctx, &users)
+    Rows(ctx)
+err = rows.Structs(&users)
 ```
 
 ## Select
@@ -175,13 +175,13 @@ dsl.Select(u.Id, r.Name).From(u).
     InnerJoin(r).On(r.Id.EqExpr(ur.RoleId)).
     Where(r.Name.Eq("admin")).
     ToSql(gooq.DialectMySQL)
-// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL
+// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL AND `r`.`deleted_at` IS NULL
 
 // Self-join: two alias instances of the same table.
 u1 := User.As("u1")
 u2 := User.As("u2")
 dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
-// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id`
+// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL AND `u2`.`deleted_at` IS NULL
 
 // LATERAL derived tables (InnerLateral maps to CROSS JOIN LATERAL on SQLite).
 lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
@@ -314,13 +314,13 @@ dsl.Select(fn.New("JSON_EXTRACT", User.Name, gooq.Str("$.key"))).From(User)
 
 // Attach a dialect render strategy to any FuncExpr (instance-scoped, no global registry):
 concatPipe := fn.New("CONCAT", User.Name, gooq.Str("-x")).
-    RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+    RenderWith(func(rc *gooq.RenderContext, argsSQL []string) string {
         if rc.Dialect() == gooq.DialectPgsql {
-            return "(" + argsSQL[0] + " || " + argsSQL[1] + ")", nil
+            return "(" + argsSQL[0] + " || " + argsSQL[1] + ")"
         }
-        return "CONCAT(" + argsSQL[0] + ", " + argsSQL[1] + ")", nil
+        return "CONCAT(" + argsSQL[0] + ", " + argsSQL[1] + ")"
     })
-// Full custom expression nodes can implement gooq.Expression + gooq.Renderer instead.
+// A custom expression node implements gooq.Expression. Render returns SQL; arguments go through rc.AddArg.
 ```
 
 ### Row locks
@@ -570,7 +570,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority.
 - Templates: `<hack>/template/table.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
-- Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `Scan` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
+- Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
 - Built-in connection drivers live in `drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/oceanbase`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/dm`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses. Link prefixes are `mysql`, `mariadb`, `tidb`, `oceanbase`, `pgsql`/`postgres`, `gaussdb`, `dm`, and `sqlite`.
 

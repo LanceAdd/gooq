@@ -99,11 +99,11 @@ err := db.SetConfig(db.DefaultGroupName, db.Config{
     Link: "mysql:root:pass@tcp(127.0.0.1:3306)/app",
 })
 
-users := []model.UserModel{}
-err = dsl.Select(User.AllFields()).From(User).
-    DB().
+var users []model.UserModel
+rows, err := dsl.Select(User.AllFields()).From(User).
     Where(User.Age.Gt(18)).
-    Scan(ctx, &users)
+    Rows(ctx)
+err = rows.Structs(&users)
 ```
 
 ## 查询
@@ -174,13 +174,13 @@ dsl.Select(u.Id, r.Name).From(u).
     InnerJoin(r).On(r.Id.EqExpr(ur.RoleId)).
     Where(r.Name.Eq("admin")).
     ToSql(gooq.DialectMySQL)
-// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL
+// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL AND `r`.`deleted_at` IS NULL
 
 // 自连接：同一表的两个别名实例。
 u1 := User.As("u1")
 u2 := User.As("u2")
 dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
-// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id`
+// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL AND `u2`.`deleted_at` IS NULL
 
 // LATERAL 派生表（InnerLateral 在 SQLite 下映射为 CROSS JOIN LATERAL）。
 lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
@@ -313,13 +313,13 @@ dsl.Select(fn.New("JSON_EXTRACT", User.Name, gooq.Str("$.key"))).From(User)
 
 // 任意 FuncExpr 可挂方言渲染策略（实例级，无全局注册表）：
 concatPipe := fn.New("CONCAT", User.Name, gooq.Str("-x")).
-    RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+    RenderWith(func(rc *gooq.RenderContext, argsSQL []string) string {
         if rc.Dialect() == gooq.DialectPgsql {
-            return "(" + argsSQL[0] + " || " + argsSQL[1] + ")", nil
+            return "(" + argsSQL[0] + " || " + argsSQL[1] + ")"
         }
-        return "CONCAT(" + argsSQL[0] + ", " + argsSQL[1] + ")", nil
+        return "CONCAT(" + argsSQL[0] + ", " + argsSQL[1] + ")"
     })
-// 完全自定义的表达式节点则实现 gooq.Expression + gooq.Renderer。
+// 自定义表达式节点实现 gooq.Expression。Render 只返回 SQL，参数经 rc.AddArg 累积。
 ```
 
 ### 行锁
@@ -566,7 +566,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。
 - 模板：`<hack>/template/table.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
-- 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `Scan` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
+- 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与表基方法同名的列加 `Field` 后缀（`meta` → `MetaField`）。
 - 内置连接驱动在 `drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。链接前缀分别是 `mysql`、`mariadb`、`tidb`、`oceanbase`、`pgsql`/`postgres`、`gaussdb`、`dm`、`sqlite`。
 
