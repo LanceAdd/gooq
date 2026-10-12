@@ -98,6 +98,69 @@ CREATE TABLE user (
 	}
 }
 
+func TestSQLiteAutoIncrement(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "autoinc.db")
+	database, err := Open(Config{Link: "sqlite::@file(" + filepath.ToSlash(path) + ")"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := database.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	tables := []struct {
+		name string
+		ddl  string
+		want map[string]bool
+	}{
+		{
+			name: "integer_pk",
+			ddl:  `CREATE TABLE integer_pk (id INTEGER PRIMARY KEY, name TEXT)`,
+			want: map[string]bool{"id": true, "name": false},
+		},
+		{
+			name: "integer_pk_lower",
+			ddl:  `CREATE TABLE integer_pk_lower (id integer primary key, name TEXT)`,
+			want: map[string]bool{"id": true, "name": false},
+		},
+		{
+			name: "composite_pk",
+			ddl:  `CREATE TABLE composite_pk (a INTEGER, b INTEGER, PRIMARY KEY(a, b))`,
+			want: map[string]bool{"a": false, "b": false},
+		},
+		{
+			name: "int_pk",
+			ddl:  `CREATE TABLE int_pk (id INT PRIMARY KEY)`,
+			want: map[string]bool{"id": false},
+		},
+		{
+			name: "without_rowid",
+			ddl:  `CREATE TABLE without_rowid (id INTEGER PRIMARY KEY, name TEXT) WITHOUT ROWID`,
+			want: map[string]bool{"id": false, "name": false},
+		},
+	}
+	for _, table := range tables {
+		if _, err = database.Exec(ctx, table.ddl); err != nil {
+			t.Fatal(err)
+		}
+		columns, err := database.TableFields(ctx, table.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(columns) != len(table.want) {
+			t.Fatalf("%s columns: %+v", table.name, columns)
+		}
+		for _, column := range columns {
+			want, ok := table.want[column.Name]
+			if !ok || column.AutoIncrement != want {
+				t.Fatalf("%s column %s auto=%v want=%v ok=%v", table.name, column.Name, column.AutoIncrement, want, ok)
+			}
+		}
+	}
+}
+
 func TestRouteViewCloseKeepsPool(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "route.db")
