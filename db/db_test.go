@@ -30,6 +30,13 @@ func TestParseLink(t *testing.T) {
 	if parsed.Protocol != "file" || parsed.Name != ":memory:" {
 		t.Fatalf("parsed sqlite link: %+v", parsed)
 	}
+	parsed, err = parseLink("pgsql:gooq:gooq@tcp([::1]:5432)/gooq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Host != "::1" || parsed.Port != "5432" || parsed.Name != "gooq" {
+		t.Fatalf("parsed ipv6 link: %+v", parsed)
+	}
 }
 
 func TestSQLiteScanAndSchema(t *testing.T) {

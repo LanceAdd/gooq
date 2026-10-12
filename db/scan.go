@@ -10,7 +10,7 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-func readAll(ctx context.Context, query Queryer, statement string, args ...any) (result gooq.Result, err error) {
+func readAll(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (result gooq.Result, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
@@ -22,8 +22,9 @@ func readAll(ctx context.Context, query Queryer, statement string, args ...any) 
 	if err != nil {
 		return nil, err
 	}
+	dbTypes := columnTypeNames(rows)
 	for rows.Next() {
-		record, err := scanRecord(rows, columns)
+		record, err := scanRecord(rows, columns, dbTypes, driver)
 		if err != nil {
 			return nil, err
 		}
@@ -38,22 +39,22 @@ func readAll(ctx context.Context, query Queryer, statement string, args ...any) 
 	return result, nil
 }
 
-func readOne(ctx context.Context, query Queryer, statement string, args ...any) (gooq.Record, error) {
-	result, err := readAll(ctx, query, statement, args...)
+func readOne(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (gooq.Record, error) {
+	result, err := readAll(ctx, query, driver, statement, args...)
 	if err != nil || len(result) == 0 {
 		return nil, err
 	}
 	return result[0], nil
 }
 
-func readValue(ctx context.Context, query Queryer, statement string, args ...any) (any, error) {
-	value, _, err := readScalar(ctx, query, statement, args...)
+func readValue(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (any, error) {
+	value, _, err := readScalar(ctx, query, driver, statement, args...)
 	return value, err
 }
 
 // readScalar reads the first column of the first row.
 // found is false when the query returns no rows. A NULL column is found with a nil value.
-func readScalar(ctx context.Context, query Queryer, statement string, args ...any) (value any, found bool, err error) {
+func readScalar(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (value any, found bool, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, false, err
@@ -71,7 +72,7 @@ func readScalar(ctx context.Context, query Queryer, statement string, args ...an
 	if err != nil {
 		return nil, false, err
 	}
-	record, err := scanRecord(rows, columns)
+	record, err := scanRecord(rows, columns, columnTypeNames(rows), driver)
 	if err != nil {
 		return nil, false, err
 	}
@@ -84,7 +85,7 @@ func readScalar(ctx context.Context, query Queryer, statement string, args ...an
 	return record[columns[0]], true, nil
 }
 
-func scanDest(ctx context.Context, query Queryer, dest any, statement string, args ...any) error {
+func scanDest(ctx context.Context, query Queryer, driver Driver, dest any, statement string, args ...any) error {
 	if err := gooq.CheckScan(dest); err != nil {
 		return err
 	}
@@ -96,7 +97,7 @@ func scanDest(ctx context.Context, query Queryer, dest any, statement string, ar
 	switch elem.Kind() {
 	case reflect.Slice:
 		if isStructSlice(elem.Type()) {
-			result, err := readAll(ctx, query, statement, args...)
+			result, err := readAll(ctx, query, driver, statement, args...)
 			if err != nil {
 				return err
 			}
@@ -105,10 +106,10 @@ func scanDest(ctx context.Context, query Queryer, dest any, statement string, ar
 			}
 			return result.Structs(dest)
 		}
-		return scanScalarSlice(ctx, query, elem, statement, args...)
+		return scanScalarSlice(ctx, query, driver, elem, statement, args...)
 	case reflect.Pointer:
 		if elem.Type().Elem().Kind() == reflect.Struct {
-			result, err := readAll(ctx, query, statement, args...)
+			result, err := readAll(ctx, query, driver, statement, args...)
 			if err != nil {
 				return err
 			}
@@ -118,7 +119,7 @@ func scanDest(ctx context.Context, query Queryer, dest any, statement string, ar
 			return result[0].Struct(dest)
 		}
 	case reflect.Struct:
-		result, err := readAll(ctx, query, statement, args...)
+		result, err := readAll(ctx, query, driver, statement, args...)
 		if err != nil {
 			return err
 		}
@@ -128,15 +129,15 @@ func scanDest(ctx context.Context, query Queryer, dest any, statement string, ar
 		return result[0].Struct(dest)
 	default:
 	}
-	value, err := readValue(ctx, query, statement, args...)
+	value, err := readValue(ctx, query, driver, statement, args...)
 	if err != nil {
 		return err
 	}
 	return gooqAssign(elem, value)
 }
 
-func scanScalarSlice(ctx context.Context, query Queryer, slice reflect.Value, statement string, args ...any) error {
-	values, err := readColumn(ctx, query, statement, args...)
+func scanScalarSlice(ctx context.Context, query Queryer, driver Driver, slice reflect.Value, statement string, args ...any) error {
+	values, err := readColumn(ctx, query, driver, statement, args...)
 	if err != nil {
 		return err
 	}
@@ -153,7 +154,7 @@ func scanScalarSlice(ctx context.Context, query Queryer, slice reflect.Value, st
 	return nil
 }
 
-func readColumn(ctx context.Context, query Queryer, statement string, args ...any) (values []any, err error) {
+func readColumn(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (values []any, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, err
@@ -165,8 +166,9 @@ func readColumn(ctx context.Context, query Queryer, statement string, args ...an
 	if err != nil {
 		return nil, err
 	}
+	dbTypes := columnTypeNames(rows)
 	for rows.Next() {
-		record, scanErr := scanRecord(rows, columns)
+		record, scanErr := scanRecord(rows, columns, dbTypes, driver)
 		if scanErr != nil {
 			return nil, scanErr
 		}
@@ -198,7 +200,21 @@ func isStructSlice(sliceType reflect.Type) bool {
 	return elem.Kind() == reflect.Pointer && elem.Elem().Kind() == reflect.Struct
 }
 
-func scanRecord(rows *sql.Rows, columns []string) (gooq.Record, error) {
+func columnTypeNames(rows *sql.Rows) []string {
+	types, err := rows.ColumnTypes()
+	if err != nil || len(types) == 0 {
+		return nil
+	}
+	names := make([]string, len(types))
+	for i, typ := range types {
+		if typ != nil {
+			names[i] = typ.DatabaseTypeName()
+		}
+	}
+	return names
+}
+
+func scanRecord(rows *sql.Rows, columns, dbTypes []string, driver Driver) (gooq.Record, error) {
 	values := make([]any, len(columns))
 	targets := make([]any, len(columns))
 	for i := range values {
@@ -209,9 +225,25 @@ func scanRecord(rows *sql.Rows, columns []string) (gooq.Record, error) {
 	}
 	record := make(gooq.Record, len(columns))
 	for i, column := range columns {
-		record[column] = normalize(values[i])
+		dbType := ""
+		if i < len(dbTypes) {
+			dbType = dbTypes[i]
+		}
+		record[column] = normalizeValue(driver, dbType, values[i])
 	}
 	return record, nil
+}
+
+func normalizeValue(driver Driver, dbType string, value any) any {
+	if dec, ok := driver.(ValueDecoder); ok {
+		decoded := dec.Decode(ColumnValue{DBType: dbType, Value: value})
+		if kept, same := decoded.(ColumnValue); same {
+			value = kept.Value
+		} else {
+			return decoded
+		}
+	}
+	return normalize(value)
 }
 
 func normalize(value any) any {

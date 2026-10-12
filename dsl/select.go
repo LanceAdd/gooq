@@ -495,7 +495,7 @@ func (b *SelectBuilder) Render(rc *gooq.RenderContext) (string, []any) {
 	sql, args := b.renderSelect(rc)
 	sql = "(" + sql + ")"
 	if b.alias != "" {
-		sql += " AS " + b.alias
+		sql += " AS " + rc.Quote(b.alias)
 	}
 	return sql, args
 }
@@ -1248,14 +1248,16 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 		sql.WriteString(" ORDER BY ")
 		sql.WriteString(strings.Join(orders, ", "))
 	}
-	if b.limit > 0 {
+	if b.limit > 0 || b.offset > 0 {
 		if spec := rc.Spec(); spec != nil {
 			sql.WriteString(spec.RenderLimit(rc, b.limit, b.offset))
-		} else {
+		} else if b.limit > 0 {
 			sql.WriteString(fmt.Sprintf(" LIMIT %d", b.limit))
 			if b.offset > 0 {
 				sql.WriteString(fmt.Sprintf(" OFFSET %d", b.offset))
 			}
+		} else {
+			sql.WriteString(fmt.Sprintf(" OFFSET %d", b.offset))
 		}
 	}
 	if b.lock != lockNone && (rc.Spec() == nil || !rc.Spec().OmitLock()) {
@@ -1279,11 +1281,15 @@ func (b *SelectBuilder) renderTable(rc *gooq.RenderContext, t gooq.Table) string
 func renderTableName(rc *gooq.RenderContext, t gooq.Table) string {
 	if sub, ok := t.(*SelectBuilder); ok {
 		subSQL, _ := sub.renderSelect(rc)
-		return "(" + subSQL + ") AS " + sub.alias
+		sql := "(" + subSQL + ")"
+		if sub.alias != "" {
+			sql += " AS " + rc.Quote(sub.alias)
+		}
+		return sql
 	}
 	var sql = tableNameSQL(rc, t)
 	if t.AliasName() != "" {
-		sql += " AS " + t.AliasName()
+		sql += " AS " + rc.Quote(t.AliasName())
 	}
 	return sql
 }

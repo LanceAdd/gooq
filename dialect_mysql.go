@@ -2,7 +2,6 @@ package gooq
 
 import (
 	"fmt"
-	"strings"
 )
 
 // MySQLDialect 是 MySQL 的 SQL 渲染实现。
@@ -49,8 +48,11 @@ func (MySQLDialect) ShareLock() string { return "LOCK IN SHARE MODE" }
 // Returning 返回空字符串。MySQL 不支持 RETURNING。
 func (MySQLDialect) Returning() string { return "" }
 
-// RenderLimit 渲染 LIMIT/OFFSET。
+// RenderLimit 渲染 LIMIT/OFFSET。只有偏移时用最大无符号 bigint 表示不限制行数。
 func (MySQLDialect) RenderLimit(rc *RenderContext, limit, offset int) string {
+	if limit <= 0 && offset > 0 {
+		return fmt.Sprintf(" LIMIT 18446744073709551615 OFFSET %d", offset)
+	}
 	return renderLimitOffset(rc, limit, offset)
 }
 
@@ -63,16 +65,60 @@ func (MySQLDialect) InsertKeyword(doNothing bool) string {
 }
 
 // RenderUpsert 渲染 ON DUPLICATE KEY UPDATE。INSERT IGNORE 不再追加子句。
-func (MySQLDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) string {
+// MySQL 没有冲突目标，DoUpdate 不需要 OnConflictKey。
+func (MySQLDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (string, error) {
 	if clause.DoNothing {
-		return ""
+		return "", nil
 	}
-	cols := sortedMapKeys(clause.Updates)
-	sets := make([]string, 0, len(cols))
-	for _, col := range cols {
-		sets = append(sets, fmt.Sprintf("%s = VALUES(%s)", rc.Quote(col), rc.Quote(col)))
+	sets, err := renderUpsertSets(rc, clause.Updates, true)
+	if err != nil {
+		return "", err
 	}
-	return " ON DUPLICATE KEY UPDATE " + strings.Join(sets, ", ")
+	return " ON DUPLICATE KEY UPDATE " + sets, nil
+}
+
+// RenderDelete 渲染 DELETE。带连接时写出 DELETE alias FROM ... JOIN。
+func (MySQLDialect) RenderDelete(rc *RenderContext, target string, joins []JoinRender, where string) (string, error) {
+	if len(joins) == 0 {
+		return renderDeleteFrom(target, where), nil
+	}
+	sqlStr := "DELETE " + deleteTargetAlias(target) + " FROM " + target + " " + renderJoined(joins)
+	if where != "" {
+		sqlStr += " WHERE " + where
+	}
+	return sqlStr, nil
+}
+
+// QuoteLiteral 转义 MySQL 字符串字面量。
+// 默认 sql_mode 把反斜杠当转义符，所以同时转义 \ 和 '。
+// NO_BACKSLASH_ESCAPES 打开时反斜杠是普通字符，这里仍会加倍，多写出一个反斜杠。
+func (MySQLDialect) QuoteLiteral(s string) string { return quoteLiteralMySQL(s) }
+
+// RenderIfNull 渲染 IFNULL。
+func (MySQLDialect) RenderIfNull(a, b string) string {
+	return fmt.Sprintf("IFNULL(%s, %s)", a, b)
+}
+
+// RenderCurDate 渲染 CURDATE()。
+func (MySQLDialect) RenderCurDate() string { return "CURDATE()" }
+
+// RenderDateAdd 渲染 DATE_ADD。单位必须在白名单内。
+func (MySQLDialect) RenderDateAdd(field, count, unit string) (string, error) {
+	canonical, err := canonicalDateUnit(unit)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("DATE_ADD(%s, INTERVAL %s %s)", field, count, canonical), nil
+}
+
+// RenderDateDiff 渲染 DATEDIFF。
+func (MySQLDialect) RenderDateDiff(a, b string) string {
+	return fmt.Sprintf("DATEDIFF(%s, %s)", a, b)
+}
+
+// RenderRound 渲染 ROUND。
+func (MySQLDialect) RenderRound(field, decimals string) string {
+	return fmt.Sprintf("ROUND(%s, %s)", field, decimals)
 }
 
 // UpdateFrom 为 false。MySQL 多表 UPDATE 使用 JOIN。
@@ -99,7 +145,7 @@ func (MySQLDialect) OmitLock() bool { return false }
 
 // RenderDateFormat 渲染 DATE_FORMAT。
 func (MySQLDialect) RenderDateFormat(fieldSQL, format string) string {
-	return fmt.Sprintf("DATE_FORMAT(%s, '%s')", fieldSQL, format)
+	return fmt.Sprintf("DATE_FORMAT(%s, %s)", fieldSQL, quoteLiteralMySQL(format))
 }
 
 // RenderGroupConcat 渲染带 DISTINCT、ORDER BY 和 SEPARATOR 的 GROUP_CONCAT。
@@ -113,7 +159,7 @@ func (MySQLDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
 		sqlStr += " ORDER BY " + in.OrderSQL
 	}
 	if in.Separator != "" && in.Separator != "," {
-		sqlStr += " SEPARATOR '" + in.Separator + "'"
+		sqlStr += " SEPARATOR " + quoteLiteralMySQL(in.Separator)
 	}
 	return sqlStr + ")", nil
 }

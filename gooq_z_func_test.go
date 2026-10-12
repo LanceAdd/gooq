@@ -51,7 +51,7 @@ func TestDsl_Case(t *testing.T) {
 			When(testUser.Age.Gt(18)).Then(Str("adult")).
 			Else(Str("young")).
 			End().As("bucket"))
-		t.Assert(sql, "CASE WHEN `user`.`age` > ? THEN 'old' WHEN `user`.`age` > ? THEN 'adult' ELSE 'young' END AS bucket")
+		t.Assert(sql, "CASE WHEN `user`.`age` > ? THEN 'old' WHEN `user`.`age` > ? THEN 'adult' ELSE 'young' END AS `bucket`")
 		t.AssertEQ(args, []any{60, 18})
 	})
 }

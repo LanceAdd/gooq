@@ -113,7 +113,12 @@ func Abs(e gooq.Expression) *FuncExpr {
 }
 
 func Round(e gooq.Expression, decimals any) *FuncExpr {
-	return New("ROUND", e, decimals)
+	return New("ROUND", e, decimals).RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+		if spec := rc.Spec(); spec != nil {
+			return spec.RenderRound(argsSQL[0], argsSQL[1]), nil
+		}
+		return fmt.Sprintf("ROUND(%s, %s)", argsSQL[0], argsSQL[1]), nil
+	})
 }
 
 func Ceil(e gooq.Expression) *FuncExpr {
@@ -134,7 +139,12 @@ func Coalesce(args ...any) *FuncExpr {
 }
 
 func IfNull(a, b gooq.Expression) *FuncExpr {
-	return New("IFNULL", a, b)
+	return New("IFNULL", a, b).RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+		if spec := rc.Spec(); spec != nil {
+			return spec.RenderIfNull(argsSQL[0], argsSQL[1]), nil
+		}
+		return fmt.Sprintf("IFNULL(%s, %s)", argsSQL[0], argsSQL[1]), nil
+	})
 }
 
 // 日期函数。
@@ -143,19 +153,44 @@ func Now() *FuncExpr {
 }
 
 func CurDate() *FuncExpr {
-	return New("CURDATE")
+	return New("CURDATE").RenderWith(func(rc *gooq.RenderContext, _ []string) (string, []any) {
+		if spec := rc.Spec(); spec != nil {
+			return spec.RenderCurDate(), nil
+		}
+		return "CURDATE()", nil
+	})
 }
 
 func DateAdd(date gooq.Expression, count any, unit string) *FuncExpr {
-	return New("DATE_ADD", date, count).RenderWith(
-		func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+	f := New("DATE_ADD", date, count)
+	f.validate = func(d gooq.Dialect) error {
+		spec, err := gooq.DialectSpecOf(d)
+		if err != nil {
+			return err
+		}
+		_, err = spec.RenderDateAdd("d", "1", unit)
+		return err
+	}
+	return f.RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+		spec := rc.Spec()
+		if spec == nil {
 			return fmt.Sprintf("DATE_ADD(%s, INTERVAL %s %s)", argsSQL[0], argsSQL[1], unit), nil
-		},
-	)
+		}
+		sqlStr, err := spec.RenderDateAdd(argsSQL[0], argsSQL[1], unit)
+		if err != nil {
+			return "", nil
+		}
+		return sqlStr, nil
+	})
 }
 
 func DateDiff(a, b gooq.Expression) *FuncExpr {
-	return New("DATEDIFF", a, b)
+	return New("DATEDIFF", a, b).RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+		if spec := rc.Spec(); spec != nil {
+			return spec.RenderDateDiff(argsSQL[0], argsSQL[1]), nil
+		}
+		return fmt.Sprintf("DATEDIFF(%s, %s)", argsSQL[0], argsSQL[1]), nil
+	})
 }
 
 // 窗口函数。

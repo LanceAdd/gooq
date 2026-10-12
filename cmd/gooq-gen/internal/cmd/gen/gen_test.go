@@ -20,6 +20,7 @@ import (
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/text/gstr"
 
+	"github.com/lanceadd/gooq"
 	"github.com/lanceadd/gooq/db"
 	_ "github.com/lanceadd/gooq/drivers/sqlite"
 )
@@ -165,6 +166,37 @@ func TestGen_Sqlite(t *testing.T) {
 		// 不再生成 do/entity 产物。
 		t.Assert(gfile.Exists(filepath.Join(genPath, "do")), false)
 		t.Assert(gfile.Exists(filepath.Join(genPath, "entity")), false)
+	})
+}
+
+func TestGenerateSpecialTypes(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		database, err := db.Open(db.Config{Link: "sqlite::@file(:memory:)"})
+		t.AssertNil(err)
+		defer func() { t.AssertNil(database.Close()) }()
+		columns := []db.Column{
+			{Name: "amount", LocalType: gooq.LocalTypeDecimal},
+			{Name: "tags", LocalType: gooq.LocalTypeStringSlice},
+			{Name: "ids", LocalType: gooq.LocalTypeUUIDSlice},
+			{Name: "span", LocalType: gooq.LocalTypeString},
+			{Name: "email", LocalType: gooq.LocalTypeString, Unique: true},
+		}
+		content, err := generateTableContent(context.Background(), database, "sample", "table", columns)
+		t.AssertNil(err)
+		t.Assert(gstr.Contains(content, "gooq.Field[string]"), true)
+		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalType("decimal")`), true)
+		t.Assert(gstr.Contains(content, "gooq.Field[[]string]"), true)
+		t.Assert(gstr.Contains(content, "gooq.Field[[]uuid.UUID]"), true)
+		t.Assert(gstr.Contains(content, `"github.com/google/uuid"`), true)
+		t.Assert(gstr.Contains(content, "Unique: true"), true)
+		t.Assert(gstr.Contains(content, "gooq.Field[float64]"), false)
+
+		modelContent, recordContent, err := generateModelContent(context.Background(), "sample", "model", columns)
+		t.AssertNil(err)
+		t.Assert(gstr.Contains(modelContent, `"github.com/google/uuid"`), true)
+		t.Assert(gstr.Contains(recordContent, `"github.com/google/uuid"`), true)
+		t.Assert(gstr.Contains(recordContent, "[]uuid.UUID"), true)
+		t.Assert(gstr.Contains(recordContent, "gooq.Property[string]"), true)
 	})
 }
 

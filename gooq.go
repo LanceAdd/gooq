@@ -28,6 +28,7 @@ const (
 	LocalTypeUint64Bytes  LocalType = "uint64-bytes"
 	LocalTypeFloat32      LocalType = "float32"
 	LocalTypeFloat64      LocalType = "float64"
+	LocalTypeDecimal      LocalType = "decimal"
 	LocalTypeFloat32Slice LocalType = "[]float32"
 	LocalTypeFloat64Slice LocalType = "[]float64"
 	LocalTypeBytes        LocalType = "[]byte"

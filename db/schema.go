@@ -31,8 +31,21 @@ func validIdent(name string) error {
 }
 
 // LocalTypeOf maps a database type name to a gooq local type.
+// Trailing unsigned and zerofill are removed before the width in parentheses.
+// Array types use the PostgreSQL udt name, such as _int4 or _text.
+// Unlisted array names and range types stay strings.
 func LocalTypeOf(dbType string) gooq.LocalType {
 	typed := strings.ToLower(strings.TrimSpace(dbType))
+	changed := true
+	for changed {
+		changed = false
+		for _, suffix := range []string{" unsigned", " zerofill"} {
+			if strings.HasSuffix(typed, suffix) {
+				typed = strings.TrimSpace(strings.TrimSuffix(typed, suffix))
+				changed = true
+			}
+		}
+	}
 	if index := strings.IndexByte(typed, '('); index > 0 {
 		typed = strings.TrimSpace(typed[:index])
 	}
@@ -43,8 +56,10 @@ func LocalTypeOf(dbType string) gooq.LocalType {
 		return gooq.LocalTypeInt
 	case "bigint", "int8":
 		return gooq.LocalTypeInt64
-	case "float", "float4", "float8", "double", "real", "numeric", "decimal":
+	case "float", "float4", "float8", "double", "real":
 		return gooq.LocalTypeFloat64
+	case "numeric", "decimal":
+		return gooq.LocalTypeDecimal
 	case "date":
 		return gooq.LocalTypeDate
 	case "time", "timetz":
@@ -59,10 +74,25 @@ func LocalTypeOf(dbType string) gooq.LocalType {
 		return gooq.LocalTypeUUID
 	case "bytea", "blob", "binary", "varbinary":
 		return gooq.LocalTypeBytes
+	case "_int2", "_int4", "_int":
+		return gooq.LocalTypeIntSlice
+	case "_int8":
+		return gooq.LocalTypeInt64Slice
+	case "_text", "_varchar", "_bpchar":
+		return gooq.LocalTypeStringSlice
+	case "_bool":
+		return gooq.LocalTypeBoolSlice
+	case "_float4":
+		return gooq.LocalTypeFloat32Slice
+	case "_float8":
+		return gooq.LocalTypeFloat64Slice
+	case "_bytea":
+		return gooq.LocalTypeBytesSlice
+	case "_uuid":
+		return gooq.LocalTypeUUIDSlice
+	case "interval", "inet", "cidr", "macaddr":
+		return gooq.LocalTypeString
 	default:
-		if strings.Contains(typed, "int") {
-			return gooq.LocalTypeInt
-		}
 		return gooq.LocalTypeString
 	}
 }

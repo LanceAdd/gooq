@@ -534,11 +534,15 @@ func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error)
 		strings.Join(rows, ", "),
 	)
 	if b.upsert != nil && spec != nil {
-		sqlStr += spec.RenderUpsert(rc, gooq.UpsertClause{
+		upsertSQL, err := spec.RenderUpsert(rc, gooq.UpsertClause{
 			DoNothing:    b.upsert.doNothing,
 			ConflictCols: b.upsert.conflictCols,
 			Updates:      b.upsert.updateMap,
 		})
+		if err != nil {
+			return "", nil, err
+		}
+		sqlStr += upsertSQL
 	}
 	if returning, err := b.renderReturning(rc); err != nil {
 		return "", nil, err
@@ -658,16 +662,29 @@ func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error)
 	if len(b.setValues) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
 	}
+	useFrom := rc.Spec() != nil && rc.Spec().UpdateFrom()
+	outer := hasOuterJoin(b.joins)
+	if useFrom && outer && rc.Dialect() == gooq.DialectSQLite {
+		return "", nil, fmt.Errorf("gooq: UPDATE with an outer join is not supported by dialect %s", gooq.DialectSQLite)
+	}
 	var sqlStr string
 	switch {
 	case len(b.joins) == 0:
 		sqlStr = fmt.Sprintf("UPDATE %s SET %s", renderTableName(rc, b.table), b.renderSets(rc))
-	case rc.Spec() != nil && rc.Spec().UpdateFrom():
+	case useFrom && outer:
+		sqlStr = fmt.Sprintf(
+			"UPDATE %s SET %s FROM (SELECT 1) AS %s %s",
+			renderTableName(rc, b.table),
+			b.renderSets(rc),
+			rc.Quote("_gooq"),
+			b.renderJoinClauses(rc),
+		)
+	case useFrom:
 		sqlStr = fmt.Sprintf("UPDATE %s SET %s FROM %s", renderTableName(rc, b.table), b.renderSets(rc), b.renderJoinTables(rc))
 	default:
 		sqlStr = fmt.Sprintf("UPDATE %s %s SET %s", renderTableName(rc, b.table), b.renderJoinClauses(rc), b.renderSets(rc))
 	}
-	if where := b.renderWhere(rc); where != "" {
+	if where := b.renderWhere(rc, useFrom && len(b.joins) > 0 && !outer); where != "" {
 		sqlStr += " WHERE " + where
 	}
 	if returning, err := b.renderReturning(rc); err != nil {
@@ -751,26 +768,19 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error) {
 	if !b.unscoped && b.table.Meta() != nil {
 		if softField := b.table.Meta().SoftDeleteField(); softField != nil {
-			sqlStr := fmt.Sprintf(
-				"UPDATE %s SET %s = %s",
-				tableNameSQL(rc, b.table),
-				rc.Quote(softField.ColumnName),
-				rc.AddArg(time.Now()),
-			)
-			if where := b.renderWhere(rc); where != "" {
-				sqlStr += " WHERE " + where
-			}
-			if returning, err := b.renderReturning(rc); err != nil {
-				return "", nil, err
-			} else if returning != "" {
-				sqlStr += returning
-			}
-			return sqlStr, rc.Args(), nil
+			saved := b.setValues
+			b.setValues = []columnValue{{column: softField.ColumnName, value: time.Now()}}
+			defer func() { b.setValues = saved }()
+			return b.renderUpdate(rc)
 		}
 	}
-	var sqlStr = "DELETE FROM " + tableNameSQL(rc, b.table)
-	if where := b.renderWhere(rc); where != "" {
-		sqlStr += " WHERE " + where
+	spec := rc.Spec()
+	if spec == nil {
+		return "", nil, fmt.Errorf("gooq: dialect %q is not registered", rc.Dialect())
+	}
+	sqlStr, err := spec.RenderDelete(rc, renderTableName(rc, b.table), b.joinRenders(rc), b.renderWhere(rc, false))
+	if err != nil {
+		return "", nil, err
 	}
 	if returning, err := b.renderReturning(rc); err != nil {
 		return "", nil, err
@@ -780,13 +790,14 @@ func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error)
 	return sqlStr, rc.Args(), nil
 }
 
-func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
-	conditions := b.conditions
-	if len(b.joins) > 0 && rc.Spec() != nil && rc.Spec().UpdateFrom() {
+func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext, mergeOn bool) string {
+	var conditions []gooq.Expression
+	if mergeOn {
 		for _, j := range b.joins {
 			conditions = append(conditions, j.on...)
 		}
 	}
+	conditions = append(conditions, b.conditions...)
 	var parts []string
 	for _, c := range conditions {
 		condSQL, _ := rc.Render(c)
@@ -817,12 +828,46 @@ func renderSetValue(rc *gooq.RenderContext, cv columnValue) string {
 	return fmt.Sprintf("%s = %s", rc.Quote(cv.column), rc.AddArg(cv.value))
 }
 
-func (b *DMLBuilder) renderJoinClauses(rc *gooq.RenderContext) string {
-	var joins []string
-	for _, j := range b.joins {
-		joins = append(joins, joinKeyword[j.joinType]+" "+renderTableName(rc, j.table)+b.renderJoinOn(rc, j))
+func hasOuterJoin(joins []*joinClause) bool {
+	for _, j := range joins {
+		switch j.joinType {
+		case joinLeft, joinRight, joinFull:
+			return true
+		}
 	}
-	return strings.Join(joins, " ")
+	return false
+}
+
+func (b *DMLBuilder) renderJoinClauses(rc *gooq.RenderContext) string {
+	return renderJoinedSQL(b.joinRenders(rc))
+}
+
+func (b *DMLBuilder) joinRenders(rc *gooq.RenderContext) []gooq.JoinRender {
+	out := make([]gooq.JoinRender, 0, len(b.joins))
+	for _, j := range b.joins {
+		keyword := joinKeyword[j.joinType]
+		if spec := rc.Spec(); spec != nil {
+			keyword = spec.JoinKeyword(keyword)
+		}
+		out = append(out, gooq.JoinRender{
+			Keyword: keyword,
+			Table:   renderTableName(rc, j.table),
+			On:      b.renderJoinCond(rc, j),
+		})
+	}
+	return out
+}
+
+func renderJoinedSQL(joins []gooq.JoinRender) string {
+	parts := make([]string, 0, len(joins))
+	for _, join := range joins {
+		part := join.Keyword + " " + join.Table
+		if join.On != "" {
+			part += " ON " + join.On
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " ")
 }
 
 // renderJoinTables 渲染 FROM 表列表（PG/SQLite 的 UPDATE...FROM 语法，无 ON 条件）。
@@ -834,7 +879,7 @@ func (b *DMLBuilder) renderJoinTables(rc *gooq.RenderContext) string {
 	return strings.Join(tables, ", ")
 }
 
-func (b *DMLBuilder) renderJoinOn(rc *gooq.RenderContext, j *joinClause) string {
+func (b *DMLBuilder) renderJoinCond(rc *gooq.RenderContext, j *joinClause) string {
 	if len(j.on) == 0 {
 		return ""
 	}
@@ -845,7 +890,7 @@ func (b *DMLBuilder) renderJoinOn(rc *gooq.RenderContext, j *joinClause) string 
 			ons = append(ons, onSQL)
 		}
 	}
-	return " ON " + strings.Join(ons, " AND ")
+	return strings.Join(ons, " AND ")
 }
 
 func (b *DMLBuilder) renderReturning(rc *gooq.RenderContext) (string, error) {

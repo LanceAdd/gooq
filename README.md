@@ -115,12 +115,13 @@ err = dsl.Select(User.AllFields()).From(User).
 // All columns / set difference / alias / distinct
 dsl.Select(User.AllFields()).From(User)                                     // SELECT `user`.`id`, `user`.`name`, ...
 dsl.Select(User.Id).From(User).FieldsEx(User.CreatedAt, User.DeletedAt)     // difference: remaining columns
-dsl.Select(User.Name.As("nickname")).From(User)                             // SELECT `user`.`name` AS nickname
+dsl.Select(User.Name.As("nickname")).From(User)                             // SELECT `user`.`name` AS `nickname`
 dsl.Select(User.Id).From(User).Distinct()                                   // SELECT DISTINCT ...
 
 // Paging
 dsl.Select(User.Id).From(User).Limit(10)              // ... LIMIT 10
 dsl.Select(User.Id).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
+dsl.Select(User.Id).From(User).Offset(20)             // MySQL: LIMIT 18446744073709551615 OFFSET 20; PG/SQLite: OFFSET 20
 dsl.Select(User.Id).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（1-based pages）
 
 // Ordering: direction is part of the expression (Field.Asc()/Desc(), gooq.OrderAscExpr/DescExpr)
@@ -174,19 +175,19 @@ dsl.Select(u.Id, r.Name).From(u).
     InnerJoin(r).On(r.Id.EqExpr(ur.RoleId)).
     Where(r.Name.Eq("admin")).
     ToSql(gooq.DialectMySQL)
-// SELECT `u`.`id`, `r`.`name` FROM `user` AS u INNER JOIN `user_role` AS ur ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS r ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL
+// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL
 
 // Self-join: two alias instances of the same table.
 u1 := User.As("u1")
 u2 := User.As("u2")
 dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
-// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS u1 INNER JOIN `user` AS u2 ON `u1`.`id` = `u2`.`id`
+// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id`
 
 // LATERAL derived tables (InnerLateral maps to CROSS JOIN LATERAL on SQLite).
 lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
     From(UserRole).Where(UserRole.UserId.EqExpr(u.Id)).As("lt")
 dsl.Select(u.Id, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).ToSql(gooq.DialectPgsql)
-// ... LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt ON 1 = 1 ...
+// ... LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS "cnt" FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS "lt" ON 1 = 1 ...
 ```
 
 ### Subqueries
@@ -205,7 +206,7 @@ dsl.Select(User.Id).From(User).Where(gooq.NotExists(sub))
 dsl.Select(User.Id).From(
     dsl.Select(User.Id).From(User).Where(User.Age.Gt(18)).As("t"),
 )
-// SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS t
+// SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS `t`
 
 // Correlated subqueries: reference the outer alias inside.
 u := User.As("u")
@@ -213,7 +214,7 @@ ur := UserRole.As("ur")
 dsl.Select(u.Id).From(u).Where(gooq.Exists(
     dsl.Select(ur.UserId).From(ur).Where(ur.UserId.EqExpr(u.Id)),
 ))
-// ... WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS ur WHERE `ur`.`user_id` = `u`.`id`) ...
+// ... WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS `ur` WHERE `ur`.`user_id` = `u`.`id`) ...
 ```
 
 ### Grouping & aggregation
@@ -280,7 +281,7 @@ fn.GroupConcat(fn.GroupConcatOptions{
 
 // Window functions.
 fn.Rank().Over([]gooq.Expression{User.Status}, []gooq.Expression{User.Age.Desc()}).As("r")
-// RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r
+// RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS `r`
 fn.RowNumber().Over(nil, []gooq.Expression{User.Id.Asc()})
 // ROW_NUMBER() OVER (ORDER BY `user`.`id` ASC)
 fn.Sum(User.Age).OverFrame(
@@ -294,7 +295,7 @@ fn.Sum(User.Age).OverFrame(
 gooq.Case().When(User.Age.Gt(60)).Then(gooq.Str("old")).
     When(User.Age.Gt(18)).Then(gooq.Str("adult")).
     Else(gooq.Str("young")).End().As("bucket")
-// CASE WHEN `user`.`age` > ? THEN 'old' WHEN `user`.`age` > ? THEN 'adult' ELSE 'young' END AS bucket
+// CASE WHEN `user`.`age` > ? THEN 'old' WHEN `user`.`age` > ? THEN 'adult' ELSE 'young' END AS `bucket`
 
 // Arithmetic & casting.
 User.Age.Mul(2)                                 // (`user`.`age` * ?)
@@ -385,9 +386,11 @@ dsl.Update(User).ValuesOf(
 // Multi-table update (MySQL JOIN / PG+SQLite FROM).
 u := User.As("u"); r := Role.As("r")
 dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectMySQL)
-// UPDATE `user` AS u INNER JOIN `role` AS r ON `r`.`id` = `u`.`id` SET `status` = ?
+// UPDATE `user` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?
 dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectPgsql)
-// UPDATE "user" AS u SET "status" = $1 FROM "role" AS r WHERE "r"."id" = "u"."id"
+// UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE "r"."id" = "u"."id"
+// Any LEFT / RIGHT / FULL join makes PostgreSQL use an anchor: (SELECT 1) AS "_gooq", then the original joins.
+// SQLite UPDATE FROM cannot express an outer join and returns an error at render time.
 ```
 
 ### Delete
@@ -415,9 +418,14 @@ dsl.Delete(User).ValuesOf(
 ### Upsert & Returning
 
 ```go
-// MySQL: ON DUPLICATE KEY UPDATE.
+// MySQL: DoUpdate writes the given value. OnConflictKey is optional.
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
     OnConflictKey(User.Id).DoUpdate(User.Name, "x").ToSql(gooq.DialectMySQL)
+// INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = ?
+
+// Write the value from this insert: VALUES(col) on MySQL, EXCLUDED.col on PostgreSQL / SQLite.
+dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
+    DoUpdate(User.Name, gooq.Excluded(User.Name)).ToSql(gooq.DialectMySQL)
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)
 
 // MySQL: INSERT IGNORE.
@@ -540,7 +548,9 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - `ToSql` requires a registered `DialectSpec`. An unknown dialect returns an error. Embed `MySQLDialect`, `PostgresDialect`, or `SQLiteDialect` and override the methods that differ, then call `RegisterDialect`.
 - Opening a connection requires a blank import of the matching driver package (`drivers/mysql`, `drivers/pgsql`, `drivers/sqlite`). The driver registers itself with `db.Register`. `gooq-gen` imports the three built-in drivers.
 - Schema-qualified tables render `schema.table.column` (alias shadows schema); gooq-gen fills schema for PG only (`current_schema()`).
-- Dialect-sensitive SQL lives on `DialectSpec`: pagination, row locks, `JOIN` rewrites, upsert, `UPDATE ... FROM`, `DATE_FORMAT`, and `GROUP_CONCAT`. SQLite upsert uses `ON CONFLICT`.
+- Dialect-sensitive SQL lives on `DialectSpec`: pagination, row locks, `JOIN` rewrites, upsert, delete, `UPDATE ... FROM`, `DATE_FORMAT`, `GROUP_CONCAT`, and `IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`. SQLite upsert uses `ON CONFLICT`.
+- Table, column, and function aliases go through `Quote`. `numeric` / `decimal` generate `string`. PostgreSQL arrays generate a slice of the element type.
+- PostgreSQL 16 can run `STRING_AGG(DISTINCT ...)`, `JSON_ARRAYAGG`, and `ANY_VALUE`.
 
 ## gooq-gen (codegen tool)
 

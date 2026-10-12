@@ -32,6 +32,18 @@ func TestDsl_Select_Basic(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL LIMIT 10 OFFSET 20")
 
+		sql, _, err = Select(testUser.Id).From(testUser).Offset(20).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL LIMIT 18446744073709551615 OFFSET 20")
+
+		sql, _, err = Select(testUser.Id).From(testUser).Offset(20).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL OFFSET 20`)
+
+		sql, _, err = Select(testUser.Id).From(testUser).Offset(20).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL OFFSET 20`)
+
 		sql, _, err = Select(testUser.Id).From(testUser).Page(2, 10).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL LIMIT 10 OFFSET 10")
@@ -74,7 +86,7 @@ func TestDsl_Schema(t *testing.T) {
 		u1 := su.As("u1")
 		sql, _, err = Select(u1.Id).From(u1).ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `SELECT "u1"."id" FROM "public"."user" AS u1`)
+		t.Assert(sql, `SELECT "u1"."id" FROM "public"."user" AS "u1"`)
 
 		// DML：INSERT 与 DELETE 目标表带 schema 限定。
 		sql, _, err = Insert(su).Columns(su.Name).Values("a").ToSql(gooq.DialectPgsql)
@@ -118,14 +130,14 @@ func TestDsl_Select_Join(t *testing.T) {
 			Where(r.Name.Eq("admin")).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `u`.`id`, `r`.`name` FROM `user` AS u INNER JOIN `user_role` AS ur ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS r ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL")
 		t.AssertEQ(args, []any{"admin"})
 
 		sql, _, err = Select(u.Id).From(u).
 			LeftJoin(r).On(r.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `u`.`id` FROM `user` AS u LEFT JOIN `role` AS r ON `r`.`id` = `u`.`id` WHERE `u`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT `u`.`id` FROM `user` AS `u` LEFT JOIN `role` AS `r` ON `r`.`id` = `u`.`id` WHERE `u`.`deleted_at` IS NULL")
 
 		// 无别名 JOIN：字段自动带表名前缀（避免同名列冲突）。
 		sql, _, err = Select(testUser.Id).From(testUser).
@@ -146,26 +158,26 @@ func TestDsl_Select_Lateral(t *testing.T) {
 			LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS u LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt ON 1 = 1 WHERE "u"."deleted_at" IS NULL`)
+		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS "u" LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS "cnt" FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS "lt" ON 1 = 1 WHERE "u"."deleted_at" IS NULL`)
 
 		sql, _, err = Select(u.Id, lt.Field("cnt")).From(u).
 			InnerJoinLateral(lt).On(gooq.Raw("1 = 1")).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `u`.`id`, `lt`.`cnt` FROM `user` AS u INNER JOIN LATERAL (SELECT COUNT(`user_role`.`user_id`) AS cnt FROM `user_role` WHERE `user_role`.`user_id` = `u`.`id`) AS lt ON 1 = 1 WHERE `u`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT `u`.`id`, `lt`.`cnt` FROM `user` AS `u` INNER JOIN LATERAL (SELECT COUNT(`user_role`.`user_id`) AS `cnt` FROM `user_role` WHERE `user_role`.`user_id` = `u`.`id`) AS `lt` ON 1 = 1 WHERE `u`.`deleted_at` IS NULL")
 
 		// SQLite：INNER JOIN LATERAL 语法不支持，映射为 CROSS JOIN LATERAL。
 		sql, _, err = Select(u.Id, lt.Field("cnt")).From(u).
 			InnerJoinLateral(lt).On(gooq.Raw("1 = 1")).
 			ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
-		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS u CROSS JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt ON 1 = 1 WHERE "u"."deleted_at" IS NULL`)
+		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS "u" CROSS JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS "cnt" FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS "lt" ON 1 = 1 WHERE "u"."deleted_at" IS NULL`)
 
 		sql, _, err = Select(u.Id, lt.Field("cnt")).From(u).
 			CrossJoinLateral(lt).
 			ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
-		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS u CROSS JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt WHERE "u"."deleted_at" IS NULL`)
+		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS "u" CROSS JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS "cnt" FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS "lt" WHERE "u"."deleted_at" IS NULL`)
 	})
 }
 
@@ -179,7 +191,7 @@ func TestDsl_Select_SelfJoin(t *testing.T) {
 			InnerJoin(u2).On(u1.Id.EqExpr(u2.Id)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `u1`.`id`, `u2`.`id` FROM `user` AS u1 INNER JOIN `user` AS u2 ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL")
 	})
 }
 
@@ -209,7 +221,7 @@ func TestDsl_Select_Subquery(t *testing.T) {
 		sql, _, err = Select(testUser.Id).From(Select(testUser.Id).From(testUser).Where(testUser.Age.Gt(18)).As("t")).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS t")
+		t.Assert(sql, "SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS `t`")
 	})
 }
 
@@ -224,7 +236,7 @@ func TestDsl_Select_Correlated(t *testing.T) {
 			)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `u`.`id` FROM `user` AS u WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS ur WHERE `ur`.`user_id` = `u`.`id`) AND `u`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT `u`.`id` FROM `user` AS `u` WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS `ur` WHERE `ur`.`user_id` = `u`.`id`) AND `u`.`deleted_at` IS NULL")
 	})
 }
 
@@ -403,10 +415,10 @@ func TestDsl_Select_CountGroup(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, _, err := SelectFrom(testUser).Group(testUser.Status).countSQL(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT COUNT(*) FROM (SELECT * FROM `user` WHERE `user`.`deleted_at` IS NULL GROUP BY `user`.`status`) AS t")
+		t.Assert(sql, "SELECT COUNT(*) FROM (SELECT * FROM `user` WHERE `user`.`deleted_at` IS NULL GROUP BY `user`.`status`) AS `t`")
 
 		sql, _, err = SelectFrom(testUser).Group(testUser.Status).countSQL(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `SELECT COUNT(*) FROM (SELECT * FROM "user" WHERE "user"."deleted_at" IS NULL GROUP BY "user"."status") AS t`)
+		t.Assert(sql, `SELECT COUNT(*) FROM (SELECT * FROM "user" WHERE "user"."deleted_at" IS NULL GROUP BY "user"."status") AS "t"`)
 	})
 }

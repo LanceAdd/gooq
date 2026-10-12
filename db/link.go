@@ -37,11 +37,28 @@ func parseLink(link string) (ParsedLink, error) {
 		parsed.Name = match[5]
 		return parsed, nil
 	}
-	hostPort := strings.Split(match[5], ":")
-	parsed.Host = hostPort[0]
-	if len(hostPort) == 2 {
-		parsed.Port = hostPort[1]
-	}
+	parsed.Host, parsed.Port = splitHostPort(match[5])
 	parsed.Name = match[6]
 	return parsed, nil
+}
+
+// splitHostPort splits host:port. Brackets mark an IPv6 host, so colons inside
+// them are not a port separator. The port is the :port after the closing bracket.
+func splitHostPort(hostPort string) (host, port string) {
+	if strings.HasPrefix(hostPort, "[") {
+		if end := strings.IndexByte(hostPort, ']'); end >= 0 {
+			host = hostPort[1:end]
+			rest := hostPort[end+1:]
+			if strings.HasPrefix(rest, ":") {
+				port = rest[1:]
+			}
+			return host, port
+		}
+	}
+	parts := strings.Split(hostPort, ":")
+	host = parts[0]
+	if len(parts) == 2 {
+		port = parts[1]
+	}
+	return host, port
 }

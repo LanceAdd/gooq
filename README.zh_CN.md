@@ -114,12 +114,13 @@ err = dsl.Select(User.AllFields()).From(User).
 // 全列 / 差集 / 别名 / 去重
 dsl.Select(User.AllFields()).From(User)                                     // SELECT `user`.`id`, `user`.`name`, ...
 dsl.Select(User.Id).From(User).FieldsEx(User.CreatedAt, User.DeletedAt)     // 差集：其余列
-dsl.Select(User.Name.As("nickname")).From(User)                             // SELECT `user`.`name` AS nickname
+dsl.Select(User.Name.As("nickname")).From(User)                             // SELECT `user`.`name` AS `nickname`
 dsl.Select(User.Id).From(User).Distinct()                                   // SELECT DISTINCT ...
 
 // 分页
 dsl.Select(User.Id).From(User).Limit(10)              // ... LIMIT 10
 dsl.Select(User.Id).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
+dsl.Select(User.Id).From(User).Offset(20)             // MySQL: LIMIT 18446744073709551615 OFFSET 20；PG/SQLite: OFFSET 20
 dsl.Select(User.Id).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（页码从 1 起）
 
 // 排序：方向属于表达式本身（Field.Asc()/Desc()、gooq.OrderAscExpr/DescExpr）
@@ -173,19 +174,19 @@ dsl.Select(u.Id, r.Name).From(u).
     InnerJoin(r).On(r.Id.EqExpr(ur.RoleId)).
     Where(r.Name.Eq("admin")).
     ToSql(gooq.DialectMySQL)
-// SELECT `u`.`id`, `r`.`name` FROM `user` AS u INNER JOIN `user_role` AS ur ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS r ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL
+// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL
 
 // 自连接：同一表的两个别名实例。
 u1 := User.As("u1")
 u2 := User.As("u2")
 dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
-// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS u1 INNER JOIN `user` AS u2 ON `u1`.`id` = `u2`.`id`
+// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id`
 
 // LATERAL 派生表（InnerLateral 在 SQLite 下映射为 CROSS JOIN LATERAL）。
 lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
     From(UserRole).Where(UserRole.UserId.EqExpr(u.Id)).As("lt")
 dsl.Select(u.Id, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).ToSql(gooq.DialectPgsql)
-// ... LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS cnt FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS lt ON 1 = 1 ...
+// ... LEFT JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS "cnt" FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS "lt" ON 1 = 1 ...
 ```
 
 ### 子查询
@@ -204,7 +205,7 @@ dsl.Select(User.Id).From(User).Where(gooq.NotExists(sub))
 dsl.Select(User.Id).From(
     dsl.Select(User.Id).From(User).Where(User.Age.Gt(18)).As("t"),
 )
-// SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS t
+// SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS `t`
 
 // 相关子查询：子查询内引用外层别名。
 u := User.As("u")
@@ -212,7 +213,7 @@ ur := UserRole.As("ur")
 dsl.Select(u.Id).From(u).Where(gooq.Exists(
     dsl.Select(ur.UserId).From(ur).Where(ur.UserId.EqExpr(u.Id)),
 ))
-// ... WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS ur WHERE `ur`.`user_id` = `u`.`id`) ...
+// ... WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS `ur` WHERE `ur`.`user_id` = `u`.`id`) ...
 ```
 
 ### 分组聚合
@@ -279,7 +280,7 @@ fn.GroupConcat(fn.GroupConcatOptions{
 
 // 窗口函数。
 fn.Rank().Over([]gooq.Expression{User.Status}, []gooq.Expression{User.Age.Desc()}).As("r")
-// RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r
+// RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS `r`
 fn.RowNumber().Over(nil, []gooq.Expression{User.Id.Asc()})
 // ROW_NUMBER() OVER (ORDER BY `user`.`id` ASC)
 fn.Sum(User.Age).OverFrame(
@@ -293,7 +294,7 @@ fn.Sum(User.Age).OverFrame(
 gooq.Case().When(User.Age.Gt(60)).Then(gooq.Str("old")).
     When(User.Age.Gt(18)).Then(gooq.Str("adult")).
     Else(gooq.Str("young")).End().As("bucket")
-// CASE WHEN `user`.`age` > ? THEN 'old' WHEN `user`.`age` > ? THEN 'adult' ELSE 'young' END AS bucket
+// CASE WHEN `user`.`age` > ? THEN 'old' WHEN `user`.`age` > ? THEN 'adult' ELSE 'young' END AS `bucket`
 
 // 算术与类型转换。
 User.Age.Mul(2)                                 // (`user`.`age` * ?)
@@ -384,9 +385,11 @@ dsl.Update(User).ValuesOf(
 // 多表更新（MySQL JOIN / PG+SQLite FROM）。
 u := User.As("u"); r := Role.As("r")
 dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectMySQL)
-// UPDATE `user` AS u INNER JOIN `role` AS r ON `r`.`id` = `u`.`id` SET `status` = ?
+// UPDATE `user` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?
 dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectPgsql)
-// UPDATE "user" AS u SET "status" = $1 FROM "role" AS r WHERE "r"."id" = "u"."id"
+// UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE "r"."id" = "u"."id"
+// 连接里只要有 LEFT / RIGHT / FULL，PostgreSQL 改用锚点：(SELECT 1) AS "_gooq" 后面保持原来的连接。
+// SQLite 的 UPDATE FROM 不能表达外连接，渲染期返回错误。
 ```
 
 ### 删除
@@ -414,9 +417,14 @@ dsl.Delete(User).ValuesOf(
 ### Upsert 与 Returning
 
 ```go
-// MySQL：ON DUPLICATE KEY UPDATE。
+// MySQL：DoUpdate 写入传入的值。不需要 OnConflictKey。
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
     OnConflictKey(User.Id).DoUpdate(User.Name, "x").ToSql(gooq.DialectMySQL)
+// INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = ?
+
+// 写回本次插入的值：MySQL 为 VALUES(col)，PostgreSQL / SQLite 为 EXCLUDED.col。
+dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).
+    DoUpdate(User.Name, gooq.Excluded(User.Name)).ToSql(gooq.DialectMySQL)
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)
 
 // MySQL：INSERT IGNORE。
@@ -536,7 +544,9 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - `ToSql` 要求方言已注册为 `DialectSpec`。未知方言直接返回错误。可嵌入 `MySQLDialect`、`PostgresDialect` 或 `SQLiteDialect`，只覆盖有差异的方法，再调用 `RegisterDialect`。
 - 打开连接需要空白导入对应驱动包（`drivers/mysql`、`drivers/pgsql`、`drivers/sqlite`）。驱动在 `init` 里调用 `db.Register`。`gooq-gen` 会导入这三种内置驱动。
 - 带 schema 的表渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；gooq-gen 仅对 PG 填充 schema（`current_schema()`）。
-- 方言敏感 SQL 都在 `DialectSpec` 上：分页、行锁、`JOIN` 改写、upsert、`UPDATE ... FROM`、`DATE_FORMAT`、`GROUP_CONCAT`。SQLite 的 upsert 使用 `ON CONFLICT`。
+- 方言敏感 SQL 都在 `DialectSpec` 上：分页、行锁、`JOIN` 改写、upsert、删除、`UPDATE ... FROM`、`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`。SQLite 的 upsert 使用 `ON CONFLICT`。
+- 表别名、列别名和函数别名都走 `Quote`。`numeric` / `decimal` 生成 `string`。PostgreSQL 数组按元素类型生成切片。
+- PostgreSQL 16 起可用 `STRING_AGG(DISTINCT ...)`、`JSON_ARRAYAGG` 和 `ANY_VALUE`。
 
 ## gooq-gen（代码生成工具）
 

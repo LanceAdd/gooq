@@ -71,7 +71,7 @@ func (s *Stmt) Exec(ctx context.Context, args ...any) (sql.Result, error) {
 	var result sql.Result
 	err := s.db.observe(ctx, s.query, args, func(ctx context.Context) error {
 		var err error
-		result, err = s.stmt.ExecContext(ctx, args...)
+		result, err = s.stmt.ExecContext(ctx, s.db.bindArgs(args)...)
 		return err
 	})
 	return result, err
@@ -85,7 +85,7 @@ func (s *Stmt) Query(ctx context.Context, args ...any) (*sql.Rows, error) {
 	var rows *sql.Rows
 	err := s.db.observe(ctx, s.query, args, func(ctx context.Context) error {
 		var err error
-		rows, err = s.stmt.QueryContext(ctx, args...)
+		rows, err = s.stmt.QueryContext(ctx, s.db.bindArgs(args)...)
 		return err
 	})
 	return rows, err

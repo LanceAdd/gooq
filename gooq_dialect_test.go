@@ -25,10 +25,11 @@ func TestDialectSpec_BuiltinAndOverride(t *testing.T) {
 		sqlite, err := DialectSpecOf(DialectSQLite)
 		t.AssertNil(err)
 		rc := NewRenderContext(DialectSQLite)
-		sqlText := sqlite.RenderUpsert(rc, UpsertClause{
+		sqlText, err := sqlite.RenderUpsert(rc, UpsertClause{
 			ConflictCols: []string{"id"},
 			Updates:      map[string]any{"name": "x"},
 		})
+		t.AssertNil(err)
 		t.Assert(strings.Contains(sqlText, "ON CONFLICT"), true)
 		t.Assert(strings.Contains(sqlText, "ON DUPLICATE KEY"), false)
 

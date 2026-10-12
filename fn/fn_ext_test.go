@@ -50,11 +50,11 @@ func TestExt_CustomFunction(t *testing.T) {
 		// 自定义函数可直接用于 SELECT 字段，As/Over 等链式能力与内建函数一致。
 		sql, _, err := dsl.Select(concatPipe(u.Name, gooq.Str("-x")).As("tag")).From(u).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT CONCAT(`user`.`name`, '-x') AS tag FROM `user`")
+		t.Assert(sql, "SELECT CONCAT(`user`.`name`, '-x') AS `tag` FROM `user`")
 
 		sql, _, err = dsl.Select(concatPipe(u.Name, gooq.Str("-x")).As("tag")).From(u).ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `SELECT ("user"."name" || '-x') AS tag FROM "user"`)
+		t.Assert(sql, `SELECT ("user"."name" || '-x') AS "tag" FROM "user"`)
 
 		// 条件位置同样可用。
 		sql, _, err = dsl.Select(u.Id).From(u).

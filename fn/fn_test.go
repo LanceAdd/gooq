@@ -8,6 +8,7 @@
 package fn
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -153,6 +154,48 @@ func TestFn_Aggregate(t *testing.T) {
 	})
 }
 
+func TestFn_DialectFunctions(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, _, err := dsl.Select(IfNull(testUser.Name, gooq.Str("unknown"))).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT COALESCE("user"."name", 'unknown') FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(CurDate()).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT CURRENT_DATE FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, args, err := dsl.Select(DateAdd(testUser.CreatedAt, 1, "DAY")).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT ("user"."created_at" + make_interval(days => $1::int)) FROM "user" WHERE "user"."deleted_at" IS NULL`)
+		t.AssertEQ(args, []any{1})
+
+		sql, _, err = dsl.Select(DateDiff(testUser.CreatedAt, Now())).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT ("user"."created_at")::date - (NOW())::date FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, args, err = dsl.Select(Round(testUser.Age, 2)).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT ROUND(("user"."age")::numeric, $1) FROM "user" WHERE "user"."deleted_at" IS NULL`)
+		t.AssertEQ(args, []any{2})
+
+		sql, _, err = dsl.Select(CurDate()).From(testUser).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT date('now') FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(DateAdd(testUser.CreatedAt, 1, "DAY")).From(testUser).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT datetime("user"."created_at", printf('%+d days', ?)) FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		_, _, err = dsl.Select(DateAdd(testUser.CreatedAt, 1, "WEEK")).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
+
+		u := testUser.As("User")
+		sql, _, err = dsl.Select(u.Name.As("nickName")).From(u).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "User"."name" AS "nickName" FROM "user" AS "User" WHERE "User"."deleted_at" IS NULL`)
+	})
+}
+
 func TestFn_DateFormat(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, args, err := dsl.Select(DateFormat(testUser.CreatedAt, "%Y-%m-%d")).From(testUser).ToSql(gooq.DialectMySQL)
@@ -211,9 +254,25 @@ func TestFn_GroupConcat(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, `SELECT STRING_AGG("user"."name", ',') FROM "user" WHERE "user"."deleted_at" IS NULL`)
 
-		_, _, err = dsl.Select(GroupConcat(GroupConcatOptions{Field: testUser.Name, Distinct: true})).
+		sql, _, err = dsl.Select(GroupConcat(GroupConcatOptions{Field: testUser.Name, Distinct: true})).
 			From(testUser).ToSql(gooq.DialectPgsql)
-		t.AssertNE(err, nil)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT STRING_AGG(DISTINCT "user"."name", ',') FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(GroupConcat(GroupConcatOptions{Field: testUser.Name, Separator: "a'b"})).
+			From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT STRING_AGG("user"."name", 'a''b') FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(GroupConcat(GroupConcatOptions{Field: testUser.Name, Separator: `a\b`})).
+			From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT STRING_AGG("user"."name", 'a\b') FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(GroupConcat(GroupConcatOptions{Field: testUser.Name, Separator: `a\b`})).
+			From(testUser).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT GROUP_CONCAT(`user`.`name` SEPARATOR 'a\\\\b') FROM `user` WHERE `user`.`deleted_at` IS NULL")
 	})
 }
 
@@ -224,7 +283,7 @@ func TestFn_Window(t *testing.T) {
 				As("r"),
 		).From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS r FROM `user` WHERE `user`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT RANK() OVER (PARTITION BY `user`.`status` ORDER BY `user`.`age` DESC) AS `r` FROM `user` WHERE `user`.`deleted_at` IS NULL")
 
 		sql, _, err = dsl.Select(
 			RowNumber().Over(nil, []gooq.Expression{testUser.Id.Asc()}),
@@ -253,19 +312,26 @@ func TestFn_Window(t *testing.T) {
 		).From(testUser).ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
 
-		_, _, err = dsl.Select(
+		sql, _, err = dsl.Select(
 			Rank().Over([]gooq.Expression{
 				GroupConcat(GroupConcatOptions{Field: testUser.Name, Distinct: true}),
 			}, nil),
 		).From(testUser).ToSql(gooq.DialectPgsql)
-		t.AssertNE(err, nil)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, `STRING_AGG(DISTINCT "user"."name", ',')`), true)
 
-		_, _, err = dsl.Select(
+		sql, _, err = dsl.Select(
 			Rank().Over(nil, []gooq.Expression{
 				GroupConcat(GroupConcatOptions{Field: testUser.Name, Distinct: true}),
 			}),
 		).From(testUser).ToSql(gooq.DialectPgsql)
-		t.AssertNE(err, nil)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, `STRING_AGG(DISTINCT "user"."name", ',')`), true)
+
+		sql, _, err = dsl.Select(
+			PercentRank().Over([]gooq.Expression{testUser.Status}, []gooq.Expression{testUser.Age.Desc()}),
+		).From(testUser).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
 		t.Assert(sql, `SELECT PERCENT_RANK() OVER (PARTITION BY "user"."status" ORDER BY "user"."age" DESC) FROM "user" WHERE "user"."deleted_at" IS NULL`)
 	})
 }
@@ -341,18 +407,18 @@ func TestFn_Chaining(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, _, err := dsl.Select(DateFormat(testUser.CreatedAt, "%Y").As("y")).From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT DATE_FORMAT(`user`.`created_at`, '%Y') AS y FROM `user` WHERE `user`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT DATE_FORMAT(`user`.`created_at`, '%Y') AS `y` FROM `user` WHERE `user`.`deleted_at` IS NULL")
 
 		sql, _, err = dsl.Select(GroupConcat(GroupConcatOptions{Field: testUser.Name}).As("names")).
 			From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT GROUP_CONCAT(`user`.`name`) AS names FROM `user` WHERE `user`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT GROUP_CONCAT(`user`.`name`) AS `names` FROM `user` WHERE `user`.`deleted_at` IS NULL")
 
 		sql, _, err = dsl.Select(
 			Count(testUser.Id).Over([]gooq.Expression{testUser.Status}, nil).As("cnt"),
 		).From(testUser).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT COUNT(`user`.`id`) OVER (PARTITION BY `user`.`status`) AS cnt FROM `user` WHERE `user`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT COUNT(`user`.`id`) OVER (PARTITION BY `user`.`status`) AS `cnt` FROM `user` WHERE `user`.`deleted_at` IS NULL")
 	})
 }
 

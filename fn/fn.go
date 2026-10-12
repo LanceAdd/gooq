@@ -95,7 +95,7 @@ func (f *FuncExpr) Render(rc *gooq.RenderContext) (string, []any) {
 		sql += " OVER (" + renderOver(rc, f.over) + ")"
 	}
 	if f.alias != "" {
-		sql += " AS " + f.alias
+		sql += " AS " + rc.Quote(f.alias)
 	}
 	return sql, argsAll
 }

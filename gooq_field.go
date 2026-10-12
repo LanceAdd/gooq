@@ -61,7 +61,7 @@ func (f Field[T]) Render(rc *RenderContext) (string, []any) {
 		sql = rc.Quote(f.columnName)
 	}
 	if f.alias != "" {
-		sql += " AS " + f.alias
+		sql += " AS " + rc.Quote(f.alias)
 	}
 	return sql, nil
 }

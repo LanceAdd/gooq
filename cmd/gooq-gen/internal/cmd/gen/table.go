@@ -151,10 +151,12 @@ func tableFieldTypes(field db.Column, hasStdTime, hasUUID *bool) (goType string,
 		goType = "int64"
 	case gooq.LocalTypeUint64Bytes:
 		goType = "uint64"
-	case gooq.LocalTypeJson, gooq.LocalTypeJsonb:
+	case gooq.LocalTypeJson, gooq.LocalTypeJsonb, gooq.LocalTypeDecimal:
 		goType = "string"
 	case gooq.LocalTypeUUID:
 		goType = "uuid.UUID"
+		*hasUUID = true
+	case gooq.LocalTypeUUIDSlice:
 		*hasUUID = true
 	}
 	return goType, localTypeStr

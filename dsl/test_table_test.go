@@ -82,7 +82,7 @@ func (f *testFunc) Render(rc *gooq.RenderContext) (string, []any) {
 	fieldSQL, args := rc.Render(f.field)
 	sql := f.name + "(" + fieldSQL + ")"
 	if f.alias != "" {
-		sql += " AS " + f.alias
+		sql += " AS " + rc.Quote(f.alias)
 	}
 	return sql, args
 }

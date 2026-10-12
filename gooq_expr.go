@@ -75,7 +75,7 @@ func (e *caseExpr) Render(rc *RenderContext) (string, []any) {
 	}
 	sql := "CASE " + strings.Join(parts, " ") + " END"
 	if e.alias != "" {
-		sql += " AS " + e.alias
+		sql += " AS " + rc.Quote(e.alias)
 	}
 	return sql, allArg
 }
@@ -178,6 +178,29 @@ func Div(left, right any) Expression {
 
 func Str(s string) Expression {
 	return &rawExpr{sql: "'" + s + "'"}
+}
+
+// excludedExpr 表示本次插入行里的一列。渲染由 RenderUpsert 按方言决定。
+type excludedExpr struct {
+	column string
+}
+
+// Excluded 表示冲突更新时写回本次插入的列值。
+// MySQL 渲染为 VALUES(col)，PostgreSQL 和 SQLite 渲染为 EXCLUDED.col。
+func Excluded(col interface{ ColumnName() string }) Expression {
+	return &excludedExpr{column: col.ColumnName()}
+}
+
+func (e *excludedExpr) Condition() (string, []any) {
+	return e.Render(NewRenderContext(DialectMySQL))
+}
+
+func (e *excludedExpr) Render(rc *RenderContext) (string, []any) {
+	quoted := rc.Quote(e.column)
+	if rc.Dialect() == DialectMySQL {
+		return "VALUES(" + quoted + ")", nil
+	}
+	return "EXCLUDED." + quoted, nil
 }
 
 type distinctExpr struct {

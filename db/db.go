@@ -337,7 +337,7 @@ func (d *DB) Query(ctx context.Context, query string, args ...any) (*sql.Rows, e
 		if err != nil {
 			return err
 		}
-		rows, err = conn.QueryContext(ctx, query, args...)
+		rows, err = conn.QueryContext(ctx, query, d.bindArgs(args)...)
 		return err
 	})
 	return rows, err
@@ -351,10 +351,21 @@ func (d *DB) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 		if err != nil {
 			return err
 		}
-		result, err = conn.ExecContext(ctx, query, args...)
+		result, err = conn.ExecContext(ctx, query, d.bindArgs(args)...)
 		return err
 	})
 	return result, err
+}
+
+// Query runs a read query inside the transaction. The caller closes the rows.
+func (t *Tx) Query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	var rows *sql.Rows
+	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
+		var err error
+		rows, err = t.sql.QueryContext(ctx, query, t.db.bindArgs(args)...)
+		return err
+	})
+	return rows, err
 }
 
 // Exec executes a statement inside the transaction.
@@ -362,7 +373,7 @@ func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 	var result sql.Result = dryResult{}
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
-		result, err = t.sql.ExecContext(ctx, query, args...)
+		result, err = t.sql.ExecContext(ctx, query, t.db.bindArgs(args)...)
 		return err
 	})
 	return result, err
@@ -376,7 +387,7 @@ func (d *DB) GetAll(ctx context.Context, query string, args ...any) (gooq.Result
 		if err != nil {
 			return err
 		}
-		result, err = readAll(ctx, conn, query, args...)
+		result, err = readAll(ctx, conn, d.driver, query, d.bindArgs(args)...)
 		return err
 	})
 	return result, err
@@ -387,7 +398,7 @@ func (t *Tx) GetAll(ctx context.Context, query string, args ...any) (gooq.Result
 	var result gooq.Result
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
-		result, err = readAll(ctx, t.sql, query, args...)
+		result, err = readAll(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
 		return err
 	})
 	return result, err
@@ -401,7 +412,7 @@ func (d *DB) GetOne(ctx context.Context, query string, args ...any) (gooq.Record
 		if err != nil {
 			return err
 		}
-		record, err = readOne(ctx, conn, query, args...)
+		record, err = readOne(ctx, conn, d.driver, query, d.bindArgs(args)...)
 		return err
 	})
 	return record, err
@@ -412,7 +423,7 @@ func (t *Tx) GetOne(ctx context.Context, query string, args ...any) (gooq.Record
 	var record gooq.Record
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
-		record, err = readOne(ctx, t.sql, query, args...)
+		record, err = readOne(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
 		return err
 	})
 	return record, err
@@ -426,7 +437,7 @@ func (d *DB) GetValue(ctx context.Context, query string, args ...any) (any, erro
 		if err != nil {
 			return err
 		}
-		value, err = readValue(ctx, conn, query, args...)
+		value, err = readValue(ctx, conn, d.driver, query, d.bindArgs(args)...)
 		return err
 	})
 	return value, err
@@ -437,7 +448,7 @@ func (t *Tx) GetValue(ctx context.Context, query string, args ...any) (any, erro
 	var value any
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
-		value, err = readValue(ctx, t.sql, query, args...)
+		value, err = readValue(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
 		return err
 	})
 	return value, err
@@ -522,7 +533,7 @@ func (d *DB) scalar(ctx context.Context, query string, args ...any) (any, bool, 
 		if err != nil {
 			return err
 		}
-		value, found, err = readScalar(ctx, conn, query, args...)
+		value, found, err = readScalar(ctx, conn, d.driver, query, d.bindArgs(args)...)
 		return err
 	})
 	return value, found, err
@@ -535,7 +546,7 @@ func (t *Tx) scalar(ctx context.Context, query string, args ...any) (any, bool, 
 	)
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
-		value, found, err = readScalar(ctx, t.sql, query, args...)
+		value, found, err = readScalar(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
 		return err
 	})
 	return value, found, err
@@ -548,7 +559,7 @@ func (d *DB) column(ctx context.Context, query string, args ...any) ([]any, erro
 		if err != nil {
 			return err
 		}
-		values, err = readColumn(ctx, conn, query, args...)
+		values, err = readColumn(ctx, conn, d.driver, query, d.bindArgs(args)...)
 		return err
 	})
 	return values, err
@@ -558,7 +569,7 @@ func (t *Tx) column(ctx context.Context, query string, args ...any) ([]any, erro
 	var values []any
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
-		values, err = readColumn(ctx, t.sql, query, args...)
+		values, err = readColumn(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
 		return err
 	})
 	return values, err
@@ -586,14 +597,14 @@ func (d *DB) GetScan(ctx context.Context, dest any, query string, args ...any) e
 		if err != nil {
 			return err
 		}
-		return scanDest(ctx, conn, dest, query, args...)
+		return scanDest(ctx, conn, d.driver, dest, query, d.bindArgs(args)...)
 	})
 }
 
 // GetScan writes the result into dest inside the transaction.
 func (t *Tx) GetScan(ctx context.Context, dest any, query string, args ...any) error {
 	return t.db.observe(ctx, query, args, func(ctx context.Context) error {
-		return scanDest(ctx, t.sql, dest, query, args...)
+		return scanDest(ctx, t.sql, t.db.driver, dest, query, t.db.bindArgs(args)...)
 	})
 }
 

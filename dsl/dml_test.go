@@ -217,14 +217,43 @@ func TestDsl_Update_Join(t *testing.T) {
 			InnerJoin(r).On(r.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` AS u INNER JOIN `role` AS r ON `r`.`id` = `u`.`id` SET `status` = ?")
+		t.Assert(sql, "UPDATE `user` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?")
 
 		sql, _, err = Update(u).
 			Set(u.Status, "vip").
 			InnerJoin(r).On(r.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `UPDATE "user" AS u SET "status" = $1 FROM "role" AS r WHERE "r"."id" = "u"."id"`)
+		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE "r"."id" = "u"."id"`)
+
+		sql, _, err = Update(u).
+			Set(u.Status, "vip").
+			LeftJoin(r).On(r.Id.EqExpr(u.Id)).
+			ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM (SELECT 1) AS "_gooq" LEFT JOIN "role" AS "r" ON "r"."id" = "u"."id"`)
+
+		sql, _, err = Update(u).
+			Set(u.Status, "vip").
+			LeftJoin(r).On(r.Id.EqExpr(u.Id)).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "UPDATE `user` AS `u` LEFT JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?")
+
+		r2 := testRole.As("r2")
+		sql, _, err = Update(u).
+			Set(u.Status, "vip").
+			InnerJoin(r).On(r.Id.EqExpr(u.Id)).
+			LeftJoin(r2).On(r2.Id.EqExpr(u.Id)).
+			ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM (SELECT 1) AS "_gooq" INNER JOIN "role" AS "r" ON "r"."id" = "u"."id" LEFT JOIN "role" AS "r2" ON "r2"."id" = "u"."id"`)
+
+		_, _, err = Update(u).
+			Set(u.Status, "vip").
+			LeftJoin(r).On(r.Id.EqExpr(u.Id)).
+			ToSql(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
 	})
 }
 
@@ -279,16 +308,47 @@ func TestDsl_Delete(t *testing.T) {
 		t.Assert(len(sqls), 1)
 		t.Assert(sqls[0], "DELETE FROM `x` WHERE `id` = ?")
 		t.AssertEQ(argss[0], []any{int64(1)})
+
+		u := testUserRole.As("u")
+		r := testRole.As("r")
+		sql, _, err = Delete(u).Where(u.Id.Eq(1)).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `DELETE FROM "user_role" AS "u" WHERE "u"."id" = $1`)
+
+		sql, _, err = Delete(u).InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `DELETE FROM "user_role" AS "u" USING "role" AS "r" WHERE "r"."id" = "u"."id"`)
+
+		sql, _, err = Delete(u).InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "DELETE `u` FROM `user_role` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id`")
+
+		sql, _, err = Delete(testUser.As("u")).LeftJoin(r).On(r.Id.EqExpr(testUser.As("u").Id)).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, `FROM (SELECT 1) AS "_gooq"`), true)
+		t.Assert(strings.Contains(sql, `LEFT JOIN "role" AS "r"`), true)
+
+		_, _, err = Delete(u).InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
 	})
 }
 
 func TestDsl_Upsert(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		sql, _, err := Insert(testUser).
+		sql, args, err := Insert(testUser).
 			Columns(testUser.Name, testUser.Age).
 			Values("a", 1).
 			OnConflictKey(testUser.Id).
 			DoUpdate(testUser.Name, "x").
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = ?")
+		t.AssertEQ(args, []any{"a", 1, "x"})
+
+		sql, _, err = Insert(testUser).
+			Columns(testUser.Name, testUser.Age).
+			Values("a", 1).
+			DoUpdate(testUser.Name, gooq.Excluded(testUser.Name)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = VALUES(`name`)")
@@ -301,7 +361,7 @@ func TestDsl_Upsert(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, "INSERT IGNORE INTO `user` (`name`) VALUES (?)")
 
-		sql, args, err := Insert(testUser).
+		sql, args, err = Insert(testUser).
 			Columns(testUser.Name, testUser.Age).
 			Values("a", 1).
 			OnConflictKey(testUser.Id).
@@ -311,6 +371,17 @@ func TestDsl_Upsert(t *testing.T) {
 		t.Assert(sql, `INSERT INTO "user" ("name", "age") VALUES ($1, $2) ON CONFLICT ("id") DO UPDATE SET "name" = $3`)
 		t.AssertEQ(args, []any{"a", 1, "x"})
 
+		sql, args, err = Insert(testUser).
+			Columns(testUser.Name, testUser.Age).
+			Values("a", 1).
+			Values("b", 2).
+			OnConflictKey(testUser.Id).
+			DoUpdate(testUser.Name, gooq.Excluded(testUser.Name)).
+			ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("name", "age") VALUES ($1, $2), ($3, $4) ON CONFLICT ("id") DO UPDATE SET "name" = EXCLUDED."name"`)
+		t.AssertEQ(args, []any{"a", 1, "b", 2})
+
 		sql, _, err = Insert(testUser).
 			Columns(testUser.Name).
 			Values("a").
@@ -319,6 +390,22 @@ func TestDsl_Upsert(t *testing.T) {
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
 		t.Assert(sql, `INSERT INTO "user" ("name") VALUES ($1) ON CONFLICT ("id") DO NOTHING`)
+
+		sql, _, err = Insert(testUser).
+			Columns(testUser.Name).
+			Values("a").
+			DoNothing().
+			ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("name") VALUES ($1) ON CONFLICT DO NOTHING`)
+
+		_, _, err = Insert(testUser).
+			Columns(testUser.Name).
+			Values("a").
+			DoUpdate(testUser.Name, "x").
+			ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "ON CONFLICT DO UPDATE requires a conflict target"), true)
 
 		sql, args, err = Insert(testUser).
 			Columns(testUser.Name, testUser.Age).
@@ -350,7 +437,7 @@ func TestDsl_Upsert(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sqlAgain, sql)
 
-		sql, _, err = Insert(testUser).
+		sql, args, err = Insert(testUser).
 			Columns(testUser.Name, testUser.Age).
 			Values("a", 1).
 			OnConflictKey(testUser.Id).
@@ -358,7 +445,17 @@ func TestDsl_Upsert(t *testing.T) {
 			DoUpdate(testUser.Age, 2).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `age` = VALUES(`age`), `name` = VALUES(`name`)")
+		t.Assert(sql, "INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `age` = ?, `name` = ?")
+		t.AssertEQ(args, []any{"a", 1, 2, "x"})
+
+		sql, _, err = Insert(testUser).
+			Columns(testUser.Name, testUser.Age).
+			Values("a", 1).
+			DoUpdate(testUser.Age, 2).
+			DoUpdate(testUser.Name, gooq.Excluded(testUser.Name)).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "INSERT INTO `user` (`name`, `age`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `age` = ?, `name` = VALUES(`name`)")
 	})
 }
 

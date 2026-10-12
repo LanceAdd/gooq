@@ -56,7 +56,7 @@ func (PostgresDialect) ShareLock() string { return "FOR SHARE" }
 // Returning 返回 RETURNING。
 func (PostgresDialect) Returning() string { return "RETURNING" }
 
-// RenderLimit 渲染 LIMIT/OFFSET。
+// RenderLimit 渲染 LIMIT/OFFSET。只有偏移时不写 LIMIT。
 func (PostgresDialect) RenderLimit(rc *RenderContext, limit, offset int) string {
 	return renderLimitOffset(rc, limit, offset)
 }
@@ -65,8 +65,65 @@ func (PostgresDialect) RenderLimit(rc *RenderContext, limit, offset int) string 
 func (PostgresDialect) InsertKeyword(bool) string { return "INSERT" }
 
 // RenderUpsert 渲染 ON CONFLICT。
-func (PostgresDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) string {
+func (PostgresDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (string, error) {
 	return renderConflict(rc, clause)
+}
+
+// RenderDelete 渲染 DELETE。带连接时使用 USING，连接条件并入 WHERE。
+func (PostgresDialect) RenderDelete(rc *RenderContext, target string, joins []JoinRender, where string) (string, error) {
+	if len(joins) == 0 {
+		return renderDeleteFrom(target, where), nil
+	}
+	tables := make([]string, len(joins))
+	var ons []string
+	for i, join := range joins {
+		tables[i] = join.Table
+		if join.On != "" {
+			ons = append(ons, join.On)
+		}
+	}
+	sqlStr := "DELETE FROM " + target + " USING " + strings.Join(tables, ", ")
+	if where != "" {
+		ons = append(ons, where)
+	}
+	if len(ons) > 0 {
+		sqlStr += " WHERE " + strings.Join(ons, " AND ")
+	}
+	return sqlStr, nil
+}
+
+// QuoteLiteral 转义 PostgreSQL 字符串字面量。只加倍单引号，反斜杠保持原样。
+func (PostgresDialect) QuoteLiteral(s string) string { return quoteLiteralStandard(s) }
+
+// RenderIfNull 渲染 COALESCE。
+func (PostgresDialect) RenderIfNull(a, b string) string {
+	return fmt.Sprintf("COALESCE(%s, %s)", a, b)
+}
+
+// RenderCurDate 渲染 CURRENT_DATE。
+func (PostgresDialect) RenderCurDate() string { return "CURRENT_DATE" }
+
+// RenderDateAdd 渲染 make_interval。单位映射到具名参数。
+func (PostgresDialect) RenderDateAdd(field, count, unit string) (string, error) {
+	canonical, err := canonicalDateUnit(unit)
+	if err != nil {
+		return "", err
+	}
+	arg := map[string]string{
+		"YEAR": "years", "MONTH": "months", "DAY": "days",
+		"HOUR": "hours", "MINUTE": "mins", "SECOND": "secs",
+	}[canonical]
+	return fmt.Sprintf("(%s + make_interval(%s => %s::int))", field, arg, count), nil
+}
+
+// RenderDateDiff 渲染两个 date 相减。
+func (PostgresDialect) RenderDateDiff(a, b string) string {
+	return fmt.Sprintf("(%s)::date - (%s)::date", a, b)
+}
+
+// RenderRound 先转成 numeric，避免 round(double precision, integer)。
+func (PostgresDialect) RenderRound(field, decimals string) string {
+	return fmt.Sprintf("ROUND((%s)::numeric, %s)", field, decimals)
 }
 
 // UpdateFrom 为 true。多表 UPDATE 使用 FROM。
@@ -86,19 +143,20 @@ func (PostgresDialect) OmitLock() bool { return false }
 
 // RenderDateFormat 把 MySQL 格式符转换成 TO_CHAR。
 func (PostgresDialect) RenderDateFormat(fieldSQL, format string) string {
-	return fmt.Sprintf("TO_CHAR(%s, '%s')", fieldSQL, pgFormatReplacer.Replace(format))
+	return fmt.Sprintf("TO_CHAR(%s, %s)", fieldSQL, quoteLiteralStandard(pgFormatReplacer.Replace(format)))
 }
 
-// RenderGroupConcat 渲染 STRING_AGG。DISTINCT 返回错误。
+// RenderGroupConcat 渲染 STRING_AGG。DISTINCT 自 PostgreSQL 16 起可用。
 func (PostgresDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
-	if in.Distinct {
-		return "", fmt.Errorf("gooq: GROUP_CONCAT DISTINCT is not supported by dialect %s", DialectPgsql)
-	}
 	separator := in.Separator
 	if separator == "" {
 		separator = ","
 	}
-	sqlStr := fmt.Sprintf("STRING_AGG(%s, '%s'", in.FieldSQL, separator)
+	distinct := ""
+	if in.Distinct {
+		distinct = "DISTINCT "
+	}
+	sqlStr := fmt.Sprintf("STRING_AGG(%s%s, %s", distinct, in.FieldSQL, quoteLiteralStandard(separator))
 	if in.OrderSQL != "" {
 		sqlStr += " ORDER BY " + in.OrderSQL
 	}
