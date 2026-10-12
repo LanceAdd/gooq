@@ -17,6 +17,12 @@ const (
 	DialectPgsql Dialect = "pgsql"
 	// DialectSQLite 是 SQLite 渲染方言。
 	DialectSQLite Dialect = "sqlite"
+	// DialectMariaDB 是 MariaDB 渲染方言。语句形状与 MySQL 相同。
+	DialectMariaDB Dialect = "mariadb"
+	// DialectTiDB 是 TiDB 渲染方言。语句形状与 MySQL 相同。
+	DialectTiDB Dialect = "tidb"
+	// DialectGaussDB 是 GaussDB（openGauss）渲染方言。
+	DialectGaussDB Dialect = "gaussdb"
 )
 
 const (
@@ -165,6 +171,9 @@ func init() {
 	RegisterDialect(MySQLDialect{})
 	RegisterDialect(PostgresDialect{})
 	RegisterDialect(SQLiteDialect{})
+	RegisterDialect(MariaDBDialect{})
+	RegisterDialect(TiDBDialect{})
+	RegisterDialect(GaussDBDialect{})
 }
 
 func castType(table map[LocalType]string, localType LocalType) string {

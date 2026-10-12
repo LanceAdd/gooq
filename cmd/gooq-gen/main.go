@@ -14,9 +14,12 @@ import (
 
 	"github.com/lanceadd/gooq/cmd/gooq-gen/gfcmd"
 	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/mlog"
+	_ "github.com/lanceadd/gooq/drivers/gaussdb"
+	_ "github.com/lanceadd/gooq/drivers/mariadb"
 	_ "github.com/lanceadd/gooq/drivers/mysql"
 	_ "github.com/lanceadd/gooq/drivers/pgsql"
 	_ "github.com/lanceadd/gooq/drivers/sqlite"
+	_ "github.com/lanceadd/gooq/drivers/tidb"
 )
 
 func main() {

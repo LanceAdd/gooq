@@ -4,7 +4,7 @@
 
 - **Type-safe** — `Field[T]` carries the column type at compile time: `User.Age.Gt(18)` compiles, `User.Age.Gt("x")` doesn't.
 - **Offline rendering** — `ToSql(dialect)` produces SQL + args anywhere, without a database connection; execute with the standard library or `gooq/db`.
-- **Dialect aware** — MySQL / PostgreSQL / SQLite each implement `DialectSpec`. A new dialect registers the whole spec. Connection drivers register separately through `db.Register`.
+- **Dialect aware** — MySQL / MariaDB / TiDB / PostgreSQL / GaussDB / SQLite each implement `DialectSpec`. A new dialect registers the whole spec. Connection drivers register separately through `db.Register`.
 - **Zero runtime guessing** — soft-delete conditions and the full column list come from static `TableMeta` written at codegen time. INSERT and UPDATE write only columns that were set.
 - **Layered packages** — `gooq` (core: fields, tables, expression language, dialects, render contract), `gooq/db` (connections, transactions, scanning), `gooq/dsl` (query and DML builders), `gooq/fn` (function library); generated table code only imports `gooq`.
 
@@ -541,12 +541,14 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 | Dialect | Placeholder | Quote | Pagination |
 | --- | --- | --- | --- |
-| mysql | `?` | `` ` `` | LIMIT |
-| pgsql | `$n` | `"` | LIMIT |
+| mysql, mariadb, tidb | `?` | `` ` `` | LIMIT |
+| pgsql, gaussdb | `$n` | `"` | LIMIT |
 | sqlite | `?` | `"` | LIMIT |
 
 - `ToSql` requires a registered `DialectSpec`. An unknown dialect returns an error. Embed `MySQLDialect`, `PostgresDialect`, or `SQLiteDialect` and override the methods that differ, then call `RegisterDialect`.
-- Opening a connection requires a blank import of the matching driver package (`drivers/mysql`, `drivers/pgsql`, `drivers/sqlite`). The driver registers itself with `db.Register`. `gooq-gen` imports the three built-in drivers.
+- Opening a connection requires a blank import of the matching driver package (`drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/sqlite`). The driver registers itself with `db.Register`. `gooq-gen` imports these drivers.
+- MariaDB and TiDB use the MySQL wire protocol and the MySQL statement shape. MariaDB reads columns from `information_schema`, so a JSON value stored as `longtext` with a `json_valid` check is reported as `json`.
+- GaussDB means openGauss. Quoting, placeholders, row locks, `RETURNING`, deletes, and updates follow PostgreSQL. Upsert is `ON DUPLICATE KEY UPDATE`, and the inserted value is `VALUES(col)`. `DoNothing` returns an error because GaussDB has no `ON CONFLICT DO NOTHING`. The `database/sql` driver name is `opengauss`.
 - Schema-qualified tables render `schema.table.column` (alias shadows schema); gooq-gen fills schema for PG only (`current_schema()`).
 - Dialect-sensitive SQL lives on `DialectSpec`: pagination, row locks, `JOIN` rewrites, upsert, delete, multi-table `UPDATE` (`RenderUpdate`), `DATE_FORMAT`, `GROUP_CONCAT`, and `IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`. SQLite upsert uses `ON CONFLICT`.
 - Table, column, and function aliases go through `Quote`. `numeric` / `decimal` generate `string`. PostgreSQL arrays generate a slice of the element type.
@@ -565,7 +567,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `Scan` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
-- Built-in connection drivers live in `drivers/mysql`, `drivers/pgsql`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses.
+- Built-in connection drivers live in `drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/pgsql`, `drivers/gaussdb`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses. Link prefixes are `mysql`, `mariadb`, `tidb`, `pgsql`/`postgres`, `gaussdb`, and `sqlite`.
 
 ## Testing
 

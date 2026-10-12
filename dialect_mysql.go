@@ -143,9 +143,13 @@ func (MySQLDialect) JoinKeyword(keyword string) string { return keyword }
 
 // SupportsGroup 拒绝 CUBE 和 GROUPING SETS。
 func (MySQLDialect) SupportsGroup(ext string) error {
+	return rejectMySQLGroups(DialectMySQL, ext)
+}
+
+func rejectMySQLGroups(dialect Dialect, ext string) error {
 	switch ext {
 	case GroupCube, GroupGroupingSets:
-		return fmt.Errorf("gooq: GROUP BY %s is not supported by dialect %s", ext, DialectMySQL)
+		return fmt.Errorf("gooq: GROUP BY %s is not supported by dialect %s", ext, dialect)
 	default:
 		return nil
 	}

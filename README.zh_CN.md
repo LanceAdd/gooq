@@ -4,7 +4,7 @@
 
 - **类型安全** — `Field[T]` 在编译期携带列类型，`User.Age.Gt(18)` 编译通过，`User.Age.Gt("x")` 直接报错。
 - **离线渲染** — `ToSql(dialect)` 在任何环境产出 SQL + 参数，不连库；执行可用标准库或 `gooq/db`。
-- **方言感知** — MySQL / PostgreSQL / SQLite 各自实现 `DialectSpec`。新方言整体注册。连接驱动通过 `db.Register` 单独注册。
+- **方言感知** — MySQL / MariaDB / TiDB / PostgreSQL / GaussDB / SQLite 各自实现 `DialectSpec`。新方言整体注册。连接驱动通过 `db.Register` 单独注册。
 - **运行时零猜测** — 软删除自动条件、全列派生来自生成期静态化的 `TableMeta`。INSERT 和 UPDATE 只写被设置过的列。
 - **分层子包** — `gooq`（核心：字段/表/表达式语言/方言与渲染契约）、`gooq/db`（连接、事务、扫描）、`gooq/dsl`（查询与 DML 构建器）、`gooq/fn`（函数库）；生成代码只依赖 `gooq`。
 
@@ -537,12 +537,14 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 | 方言 | 占位符 | 引号 | 分页 |
 | --- | --- | --- | --- |
-| mysql | `?` | `` ` `` | LIMIT |
-| pgsql | `$n` | `"` | LIMIT |
+| mysql、mariadb、tidb | `?` | `` ` `` | LIMIT |
+| pgsql、gaussdb | `$n` | `"` | LIMIT |
 | sqlite | `?` | `"` | LIMIT |
 
 - `ToSql` 要求方言已注册为 `DialectSpec`。未知方言直接返回错误。可嵌入 `MySQLDialect`、`PostgresDialect` 或 `SQLiteDialect`，只覆盖有差异的方法，再调用 `RegisterDialect`。
-- 打开连接需要空白导入对应驱动包（`drivers/mysql`、`drivers/pgsql`、`drivers/sqlite`）。驱动在 `init` 里调用 `db.Register`。`gooq-gen` 会导入这三种内置驱动。
+- 打开连接需要空白导入对应驱动包（`drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/sqlite`）。驱动在 `init` 里调用 `db.Register`。`gooq-gen` 会导入这些驱动。
+- MariaDB 和 TiDB 使用 MySQL 协议，语句形状与 MySQL 相同。MariaDB 从 `information_schema` 读列，因此 `longtext` 加上 `json_valid` 检查的 JSON 列会标成 `json`。
+- GaussDB 指 openGauss。引号、占位符、行锁、`RETURNING`、删除和更新跟随 PostgreSQL。冲突更新是 `ON DUPLICATE KEY UPDATE`，本次插入值写成 `VALUES(col)`。GaussDB 没有 `ON CONFLICT DO NOTHING`，`DoNothing` 返回错误。`database/sql` 的驱动名是 `opengauss`。
 - 带 schema 的表渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；gooq-gen 仅对 PG 填充 schema（`current_schema()`）。
 - 方言敏感 SQL 都在 `DialectSpec` 上：分页、行锁、`JOIN` 改写、upsert、删除、多表 `UPDATE`（`RenderUpdate`）、`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`。SQLite 的 upsert 使用 `ON CONFLICT`。
 - 表别名、列别名和函数别名都走 `Quote`。`numeric` / `decimal` 生成 `string`。PostgreSQL 数组按元素类型生成切片。
@@ -561,7 +563,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
 - 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `Scan` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与表基方法同名的列加 `Field` 后缀（`meta` → `MetaField`）。
-- 内置连接驱动在 `drivers/mysql`、`drivers/pgsql`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。
+- 内置连接驱动在 `drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。链接前缀分别是 `mysql`、`mariadb`、`tidb`、`pgsql`/`postgres`、`gaussdb`、`sqlite`。
 
 ## 测试
 
