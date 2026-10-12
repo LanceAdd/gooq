@@ -349,7 +349,7 @@ dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).Values("b", 2)
 dsl.Insert(User).ValuesOf(
     model.NewUserRecord().SetName("a"),
     model.NewUserRecord().SetName("b"),
-).Batch(100).DB().Exec(ctx)
+).Batch(100).Exec(ctx)
 
 // Rows that set different columns become separate INSERT statements at Exec.
 // Omitted columns keep the table default. ToSql rejects that shape; call Exec.
@@ -380,7 +380,7 @@ dsl.Update(User).ValuesOf(model.NewUserRecord().SetName("x").SetAge(0)).Where(Us
 dsl.Update(User).ValuesOf(
     model.NewUserRecord().SetId(1).SetName("a"),
     model.NewUserRecord().SetId(2).SetName("b"),
-).DB().Exec(ctx)
+).Exec(ctx)
 // UPDATE `user` SET `name` = ? WHERE `id` = ?  ×2
 
 // Multi-table update (MySQL JOIN / PG+SQLite FROM).
@@ -412,7 +412,7 @@ dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 dsl.Delete(User).ValuesOf(
     model.NewUserRecord().SetId(1),
     model.NewUserRecord().SetId(2),
-).DB().Exec(ctx)
+).Exec(ctx)
 ```
 
 ### Upsert & Returning
@@ -449,25 +449,26 @@ dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).
 ## Execution
 
 ```go
-// Query + scan into a struct slice / scalar.
-users := []model.UserModel{}
-err := dsl.Select(User.AllFields()).From(User).
-    DB().Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
-    Scan(ctx, &users)
+// Query into a struct slice. Omitting DB uses the default group.
+var users []model.UserModel
+rows, err := dsl.Select(User.AllFields()).From(User).
+    Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
+    Rows(ctx)
+err = rows.Structs(&users)
 
-count := int64(0)
-err = dsl.Select(fn.Count(User.Id)).From(User).DB().Scan(ctx, &count)
+var count int64
+err = dsl.Select(fn.Count(User.Id)).From(User).Value(ctx, &count)
 
-// One column. time.Time, gtime.Time, and sql.Null* are cells, so they use Value
-// or Column. Scan maps a row struct or a basic value such as int64 or string.
+// One column. time.Time and sql.Null* are cells, so they use Value or Column.
+// A row struct uses Row and db.Record.Struct.
 var created time.Time
-err = dsl.Select(User.CreatedAt).From(User).Where(User.Id.Eq(1)).DB().Value(ctx, &created)
+err = dsl.Select(User.CreatedAt).From(User).Where(User.Id.Eq(1)).Value(ctx, &created)
 var names []string
-err = dsl.Select(User.Name).From(User).DB().Column(ctx, &names)
+err = dsl.Select(User.Name).From(User).Column(ctx, &names)
 
 // DML.
-_, err = dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john")).DB().Exec(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).DB().Exec(ctx)
+_, err = dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john")).Exec(ctx)
+_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
 
 // Transaction puts the tx into ctx. Queries inside the callback join it.
 database, err := db.Instance()
@@ -477,21 +478,21 @@ err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
 })
 
 // Convenience: Count auto-wraps COUNT(*), Exists wraps SELECT EXISTS(...).
-total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).DB().Count(ctx)
-exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).DB().Exists(ctx)
+total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).Count(ctx)
+exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).Exists(ctx)
 
 // Typed row reads: the field type T is consumed at compile time.
 row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
-    Where(User.Name.Eq("john")).DB().Row(ctx)
-id := gooq.Get(row, User.Id)      // int64
-name := gooq.Get(row, User.Name)  // string
+    Where(User.Name.Eq("john")).Row(ctx)
+id := db.Get(row, User.Id)      // int64
+name := db.Get(row, User.Name)  // string
 
 // RowOne enforces at most one row: nil when none matched, error when 2+ matched
 // (Take-first-row semantics stay in Row; explicit Limit/Page/Cache is rejected).
 row, err = dsl.Select(User.Id, User.Name).From(User).
-    Where(User.Account.Eq("x")).DB().RowOne(ctx)
+    Where(User.Account.Eq("x")).RowOne(ctx)
 
-// DB() uses the default group. DB("orders") uses that configuration group.
+// DB("orders") uses that configuration group. Omitting DB uses the default group.
 // LoadConfig reads gooq.database and gooq.logger through gcfg.
 // SetDebug logs SQL, SetDryRun skips execution, Prepare prepares a statement,
 // and Schema switches the MySQL database or PostgreSQL search_path.
@@ -506,19 +507,21 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
 dsl.SetCacheAdapter(redisAdapter)
 dsl.SetHashCacheAdapter(redisHashAdapter)
 
-// Single-query cache: all query methods (Scan/Row/Rows/Count/Exists) go through it.
+// Single-query cache: Value, Column, Row, Rows, Count, and Exists go through it.
 // Cache() with no arg or a zero option disables caching; a custom Name fixes the key
-// (useful for manual invalidation).
-err := dsl.Select(User.AllFields()).From(User).
+// (useful for manual invalidation). Argument keys include the type name, so
+// int64(1) and "1" do not share a key.
+rows, err := dsl.Select(User.AllFields()).From(User).
     Cache(dsl.CacheOption{Duration: time.Minute}).
-    DB().Scan(ctx, &users)
+    Rows(ctx)
 
 // Composite query: count runs first, rows after; count=0 short-circuits without querying rows.
 rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
-    Page(1, 10).DB().RowsAndCount(ctx)
+    Page(1, 10).RowsAndCount(ctx)
 
-// PageCache caches the composite query as one hash record (fields "count" and "rows").
+// PageCache caches a counted page as one hash record (fields "count" and "rows").
+// It applies to RowsAndCount, StructsAndCount, and ColumnAndCount.
 // Requires SetHashCacheAdapter. The key hashes the count SQL and the page SQL together,
 // arguments included, so selected columns, filters, order, and page each change the key.
 // RowsField/CountField override the field names; Force caches empty
@@ -526,15 +529,15 @@ rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
-    Page(1, 10).DB().RowsAndCount(ctx)
+    Page(1, 10).RowsAndCount(ctx)
 
-// ScanAndCount is the typed variant: scans data into dest and returns the total.
-// It shares the same data cache (unified Result JSON, field "rows") with RowsAndCount.
+// StructsAndCount fills a struct slice and returns the total.
+// It is RowsAndCount followed by Result.Structs, and shares that page cache.
 var vips []User
 total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
-    Page(1, 10).DB().ScanAndCount(ctx, &vips)
+    Page(1, 10).StructsAndCount(ctx, &vips)
 ```
 
 ## Dialects
@@ -552,7 +555,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - GaussDB means openGauss. Quoting, placeholders, row locks, `RETURNING`, deletes, and updates follow PostgreSQL. Upsert is `ON DUPLICATE KEY UPDATE`, and the inserted value is `VALUES(col)`. `DoNothing` returns an error because GaussDB has no `ON CONFLICT DO NOTHING`. The `database/sql` driver name is `opengauss`.
 - Dameng (`dm`) quotes identifiers in uppercase so they match names stored from unquoted DDL. Upsert is `MERGE` and needs `OnConflictKey`; the conflict column must be in the insert list. `DoNothing` inserts only when the row is not matched. There is no `RETURNING`. `GROUP_CONCAT` renders as `LISTAGG`, `DATE_FORMAT` as `TO_CHAR`, `IFNULL` as `NVL`, and `DATE_ADD` as `DATEADD`. `time.Time` is bound as a timestamp string; the zero time becomes `NULL`. An IANA timezone in the config becomes a minute offset, and an offset outside ±12 hours fails. `DELETE` with `JOIN` and `UPDATE` with an outer join return an error. Identity columns are not marked `AutoIncrement`. The `database/sql` driver name is `dm`. Link example: `dm:SYSDBA:SYSDBA001@tcp(127.0.0.1:5236)/SYSDBA`.
 - Schema-qualified tables render `schema.table.column` (alias shadows schema); gooq-gen fills schema for PG only (`current_schema()`).
-- Dialect-sensitive SQL lives on `DialectSpec`: pagination, row locks, `JOIN` rewrites, upsert, delete, multi-table `UPDATE` (`RenderUpdate`), `DATE_FORMAT`, `GROUP_CONCAT`, and `IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`. SQLite upsert uses `ON CONFLICT`.
+- `DialectSpec` covers statement shape: pagination, row locks, `JOIN` rewrites, upsert, delete, and multi-table `UPDATE` (`RenderUpdate`). Function SQL such as `DATE_FORMAT`, `GROUP_CONCAT`, `IFNULL`, `CURDATE`, `DATE_ADD`, `DATEDIFF`, `ROUND`, and `MEDIAN` stays on the concrete dialect type. A dialect that does not implement one returns `dialect %q does not support ...` from `ToSql`. SQLite upsert uses `ON CONFLICT`.
 - Table, column, and function aliases go through `Quote`. `numeric` / `decimal` generate `string`. PostgreSQL arrays generate a slice of the element type.
 - PostgreSQL 16 can run `STRING_AGG(DISTINCT ...)`, `JSON_ARRAYAGG`, and `ANY_VALUE`.
 

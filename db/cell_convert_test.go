@@ -1,16 +1,16 @@
-package gooq
+package db
 
 import (
 	"database/sql"
 	"testing"
 	"time"
 
-	"github.com/gogf/gf/v2/os/gtime"
+	"github.com/lanceadd/gooq"
 )
 
 func TestAssignCell(t *testing.T) {
-	created := NewField[time.Time]("item", "created_at")
-	name := NewField[string]("item", "name")
+	created := gooq.NewField[time.Time]("item", "created_at")
+	name := gooq.NewField[string]("item", "name")
 	row := Record{
 		"created_at": "2026-10-10 08:30:00",
 		"name":       "john",
@@ -39,13 +39,9 @@ func TestAssignCell(t *testing.T) {
 	if !Get(Record{"created_at": "not-a-time"}, created).IsZero() {
 		t.Fatal("Get returned a parsed invalid time")
 	}
-
-	var gt gtime.Time
-	if err = Assign(&gt, "2026-10-10 08:30:00"); err != nil {
-		t.Fatal(err)
-	}
-	if gt.Format("Y-m-d H:i:s") != "2026-10-10 08:30:00" {
-		t.Fatalf("gtime %s", gt.String())
+	parsed, err := assignTime("2026-10-10T08:30:00Z")
+	if err != nil || parsed.UTC().Format(time.RFC3339) != "2026-10-10T08:30:00Z" {
+		t.Fatalf("rfc3339 %s err=%v", parsed, err)
 	}
 
 	var ns sql.NullString
@@ -74,7 +70,7 @@ func TestAssignCell(t *testing.T) {
 		t.Fatalf("nil string pointer %v err=%v", textPtr, err)
 	}
 
-	column, err := Column(Result{row, {"created_at": nil}}, created)
+	column, err := ColumnOf(Result{row, {"created_at": nil}}, created)
 	if err != nil || len(column) != 2 || column[0].IsZero() || !column[1].IsZero() {
 		t.Fatalf("column %#v err=%v", column, err)
 	}
@@ -90,12 +86,6 @@ func TestAssignCell(t *testing.T) {
 	}
 
 	var user struct{ Name string }
-	if err = CheckScan(&user); err != nil {
-		t.Fatal(err)
-	}
-	if err = CheckScan(&when); err == nil {
-		t.Fatal("Scan accepted time.Time")
-	}
 	if err = CheckValue(&user); err == nil {
 		t.Fatal("Value accepted a row struct")
 	}
@@ -103,9 +93,6 @@ func TestAssignCell(t *testing.T) {
 		t.Fatal(err)
 	}
 	var times []time.Time
-	if err = CheckScan(&times); err == nil {
-		t.Fatal("Scan accepted []time.Time")
-	}
 	if err = CheckColumn(&times); err != nil {
 		t.Fatal(err)
 	}
@@ -113,4 +100,10 @@ func TestAssignCell(t *testing.T) {
 	if err = CheckColumn(&users); err == nil {
 		t.Fatal("Column accepted a row slice")
 	}
+}
+
+func assignTime(value string) (time.Time, error) {
+	var out time.Time
+	err := Assign(&out, value)
+	return out, err
 }

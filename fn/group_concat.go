@@ -28,27 +28,30 @@ func GroupConcat(options GroupConcatOptions) *FuncExpr {
 		if err != nil {
 			return err
 		}
-		_, err = spec.RenderGroupConcat(gooq.GroupConcatInput{
+		renderer, ok := spec.(groupConcatRenderer)
+		if !ok {
+			return unsupportedDialect(d, "GroupConcat")
+		}
+		_, err = renderer.RenderGroupConcat(gooq.GroupConcatInput{
 			Distinct:  options.Distinct,
 			Separator: options.Separator,
 		})
 		return err
 	}
-	return f.RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
-		spec := rc.Spec()
-		if spec == nil {
-			return "", nil
+	return f.RenderWith(func(rc *gooq.RenderContext, argsSQL []string) string {
+		renderer, ok := dialectSupport[groupConcatRenderer](rc, "GroupConcat")
+		if !ok {
+			return ""
 		}
 		var orderSQL string
 		if len(options.OrderBy) > 0 {
 			parts := make([]string, 0, len(options.OrderBy))
 			for _, o := range options.OrderBy {
-				orderSQLPart, _ := rc.Render(o)
-				parts = append(parts, orderSQLPart)
+				parts = append(parts, rc.Render(o))
 			}
 			orderSQL = strings.Join(parts, ", ")
 		}
-		sqlStr, err := spec.RenderGroupConcat(gooq.GroupConcatInput{
+		sqlStr, err := renderer.RenderGroupConcat(gooq.GroupConcatInput{
 			FieldSQL:  argsSQL[0],
 			Separator: options.Separator,
 			Distinct:  options.Distinct,
@@ -56,8 +59,9 @@ func GroupConcat(options GroupConcatOptions) *FuncExpr {
 		})
 		if err != nil {
 			// ValidateDialect 会先返回这个错误。这里不再拼出错误方言的函数。
-			return "", nil
+			rc.Fail(err)
+			return ""
 		}
-		return sqlStr, nil
+		return sqlStr
 	})
 }

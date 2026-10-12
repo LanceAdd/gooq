@@ -56,12 +56,14 @@ func TestRenderExcluded(t *testing.T) {
 			{DialectDM, `T2."NAME"`},
 		}
 		for _, c := range cases {
-			sql, args := Excluded(testUser.Name).(Renderer).Render(NewRenderContext(c.dialect))
+			rc := NewRenderContext(c.dialect)
+			sql := Excluded(testUser.Name).Render(rc)
 			t.Assert(sql, c.want)
-			t.Assert(len(args), 0)
+			t.Assert(len(rc.Args()), 0)
 		}
-		sql, args := Excluded(testUser.Name).(Renderer).Render(NewRenderContext("missing"))
+		rc := NewRenderContext("missing")
+		sql := Excluded(testUser.Name).Render(rc)
 		t.Assert(sql, "")
-		t.Assert(len(args), 0)
+		t.Assert(len(rc.Args()), 0)
 	})
 }

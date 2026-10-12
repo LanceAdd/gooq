@@ -1,19 +1,13 @@
 package gooq
 
+// Expression 是表达式节点。渲染只返回 SQL，参数经 RenderContext.AddArg 累积。
 type Expression interface {
-	Condition() (where string, args []any)
-}
-
-// Renderer 是表达式节点的方言渲染契约；包外自定义节点实现它即可参与渲染。
-// 片段中的值必须经 RenderContext.AddArg 走占位符，保证参数序号一致。
-type Renderer interface {
-	Render(rc *RenderContext) (sql string, args []any)
+	Render(rc *RenderContext) string
 }
 
 // Subquery 表示可作为子查询使用的表达式（典型为 SELECT 构建器）。
 type Subquery interface {
 	Expression
-	Renderer
 }
 
 // RenderContext 是一次渲染过程的方言与参数状态。
@@ -22,6 +16,7 @@ type RenderContext struct {
 	spec     DialectSpec
 	args     []any
 	argIndex int
+	err      error
 }
 
 func NewRenderContext(dialect Dialect) *RenderContext {
@@ -45,6 +40,18 @@ func (rc *RenderContext) Spec() DialectSpec {
 // Args 返回当前累积的参数列表。
 func (rc *RenderContext) Args() []any {
 	return rc.args
+}
+
+// Err 返回渲染期间记录的第一个错误。
+func (rc *RenderContext) Err() error {
+	return rc.err
+}
+
+// Fail 记录渲染错误。已有错误时保留第一个。
+func (rc *RenderContext) Fail(err error) {
+	if rc.err == nil && err != nil {
+		rc.err = err
+	}
 }
 
 // Quote 按方言引号包裹标识符。未注册方言使用双引号。
@@ -77,18 +84,18 @@ func (rc *RenderContext) ShareLockKeyword() string {
 	return "FOR SHARE"
 }
 
-// Render 渲染表达式节点；非节点值退化为绑定参数。
-func (rc *RenderContext) Render(e Expression) (sql string, args []any) {
-	if r, ok := e.(Renderer); ok {
-		return r.Render(rc)
+// Render 渲染表达式节点。
+func (rc *RenderContext) Render(e Expression) string {
+	if e == nil {
+		return ""
 	}
-	return rc.AddArg(e), nil
+	return e.Render(rc)
 }
 
 // RenderValue 渲染 SET/SELECT 位值：表达式渲染为 SQL 片段，普通值绑定为参数。
-func (rc *RenderContext) RenderValue(v any) (string, []any) {
-	if e, ok := v.(Expression); ok {
-		return rc.Render(e)
+func (rc *RenderContext) RenderValue(v any) string {
+	if e, ok := v.(Expression); ok && e != nil {
+		return e.Render(rc)
 	}
-	return rc.AddArg(v), []any{v}
+	return rc.AddArg(v)
 }

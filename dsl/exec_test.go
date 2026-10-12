@@ -24,7 +24,7 @@ import (
 type fakeExecutor struct {
 	calls   []string
 	queries []string
-	allRows gooq.Result
+	allRows db.Result
 	lastSql string
 	dialect gooq.Dialect
 }
@@ -41,20 +41,15 @@ func (f *fakeExecutor) Dialect() gooq.Dialect {
 	return f.dialect
 }
 
-func (f *fakeExecutor) GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error) {
+func (f *fakeExecutor) GetAll(ctx context.Context, query string, args ...any) (db.Result, error) {
 	f.calls = append(f.calls, "GetAll")
 	f.lastSql = query
 	return f.allRows, nil
 }
 
-func (f *fakeExecutor) GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error) {
+func (f *fakeExecutor) GetOne(ctx context.Context, query string, args ...any) (db.Record, error) {
 	f.calls = append(f.calls, "GetOne")
 	return nil, nil
-}
-
-func (f *fakeExecutor) GetScan(ctx context.Context, dest any, query string, args ...any) error {
-	f.calls = append(f.calls, "GetScan")
-	return nil
 }
 
 func (f *fakeExecutor) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -72,29 +67,16 @@ type scanStructTarget struct {
 	Id int64
 }
 
-func TestScanExec_Routing(t *testing.T) {
+func TestCellDestinationChecks(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		ctx := context.Background()
-
-		fe := &fakeExecutor{}
-		var record *scanStructTarget
-		t.AssertNil(scanExec(ctx, fe, "select 1", nil, &record))
-		t.AssertEQ(fe.calls, []string{"GetScan"})
-
-		fe = &fakeExecutor{}
-		var value scanStructTarget
-		t.AssertNil(scanExec(ctx, fe, "select 1", nil, &value))
-		t.AssertEQ(fe.calls, []string{"GetScan"})
-
-		fe = &fakeExecutor{}
-		var list []*scanStructTarget
-		t.AssertNil(scanExec(ctx, fe, "select 1", nil, &list))
-		t.AssertEQ(fe.calls, []string{"GetScan"})
-
-		fe = &fakeExecutor{}
-		var count int64
-		t.AssertNil(scanExec(ctx, fe, "select 1", nil, &count))
-		t.AssertEQ(fe.calls, []string{"GetValue"})
+		var row scanStructTarget
+		t.AssertNE(db.CheckValue(&row), nil)
+		var id int64
+		t.AssertNil(db.CheckValue(&id))
+		var ids []int64
+		t.AssertNil(db.CheckColumn(&ids))
+		var rows []scanStructTarget
+		t.AssertNE(db.CheckColumn(&rows), nil)
 	})
 }
 
@@ -102,15 +84,15 @@ func TestRowOne(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		ctx := context.Background()
 
-		fe := &fakeExecutor{allRows: gooq.Result{
-			gooq.Record{"id": int64(1), "name": "john"},
+		fe := &fakeExecutor{allRows: db.Result{
+			db.Record{"id": int64(1), "name": "john"},
 		}}
 		b := SelectFrom(testUser).Where(testUser.Name.Eq("john"))
 		b.executor = fe
 		record, err := b.RowOne(ctx)
 		t.AssertNil(err)
-		t.AssertEQ(gooq.Get(record, testUser.Id), int64(1))
-		t.AssertEQ(gooq.Get(record, testUser.Name), "john")
+		t.AssertEQ(db.Get(record, testUser.Id), int64(1))
+		t.AssertEQ(db.Get(record, testUser.Name), "john")
 		t.AssertEQ(fe.calls, []string{"GetAll"})
 		t.Assert(strings.Contains(fe.lastSql, "LIMIT 2"), true)
 		t.AssertEQ(b.limit, 0)
@@ -122,9 +104,9 @@ func TestRowOne(t *testing.T) {
 		t.AssertNil(err)
 		t.AssertNil(record)
 
-		fe = &fakeExecutor{allRows: gooq.Result{
-			gooq.Record{"id": int64(1)},
-			gooq.Record{"id": int64(2)},
+		fe = &fakeExecutor{allRows: db.Result{
+			db.Record{"id": int64(1)},
+			db.Record{"id": int64(2)},
 		}}
 		b = SelectFrom(testUser).Where(testUser.Name.Eq("john"))
 		b.executor = fe
@@ -176,12 +158,13 @@ func TestScanUsesDefaultInstance(t *testing.T) {
 			Id   int64
 			Name string
 		}
-		err = Select(testUser.Id, testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).Unscoped().Scan(ctx, &row)
+		record, err := Select(testUser.Id, testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).Unscoped().Row(ctx)
 		t.AssertNil(err)
+		t.AssertNil(record.Struct(&row))
 		t.AssertEQ(row.Id, int64(1))
 		t.AssertEQ(row.Name, "john")
 
-		err = Select(testUser.Name).From(testUser).DB("missing-group").Scan(ctx, &row.Name)
+		err = Select(testUser.Name).From(testUser).DB("missing-group").Value(ctx, &row.Name)
 		t.AssertNE(err, nil)
 
 		err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -190,7 +173,7 @@ func TestScanUsesDefaultInstance(t *testing.T) {
 				return err
 			}
 			var name string
-			if err = Select(testUser.Name).From(testUser).Where(testUser.Id.Eq(2)).Unscoped().Scan(ctx, &name); err != nil {
+			if err = Select(testUser.Name).From(testUser).Where(testUser.Id.Eq(2)).Unscoped().Value(ctx, &name); err != nil {
 				return err
 			}
 			if name != "tx" {

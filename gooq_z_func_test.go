@@ -15,7 +15,8 @@ import (
 
 // renderExpr 以指定方言渲染表达式并返回 SQL 与参数。
 func renderExpr(dialect Dialect, e Expression) (string, []any) {
-	return NewRenderContext(dialect).Render(e)
+	rc := NewRenderContext(dialect)
+	return rc.Render(e), rc.Args()
 }
 
 func TestDsl_Arith(t *testing.T) {
@@ -81,22 +82,18 @@ func TestDsl_Cast(t *testing.T) {
 	})
 }
 
-// pgAwareConcat 是自定义节点示例：实现 Expression + Renderer（方言分支）即可参与渲染。
+// pgAwareConcat 是自定义节点示例：实现 Expression 即可参与渲染。
 type pgAwareConcat struct {
 	a, b Expression
 }
 
-func (c pgAwareConcat) Condition() (string, []any) {
-	return c.Render(NewRenderContext(DialectMySQL))
-}
-
-func (c pgAwareConcat) Render(rc *RenderContext) (string, []any) {
-	aSQL, aArgs := rc.Render(c.a)
-	bSQL, bArgs := rc.Render(c.b)
+func (c pgAwareConcat) Render(rc *RenderContext) string {
+	aSQL := rc.Render(c.a)
+	bSQL := rc.Render(c.b)
 	if rc.Dialect() == DialectPgsql {
-		return "(" + aSQL + " || " + bSQL + ")", append(aArgs, bArgs...)
+		return "(" + aSQL + " || " + bSQL + ")"
 	}
-	return "CONCAT(" + aSQL + ", " + bSQL + ")", append(aArgs, bArgs...)
+	return "CONCAT(" + aSQL + ", " + bSQL + ")"
 }
 
 func (c pgAwareConcat) SubExpressions() []Expression {

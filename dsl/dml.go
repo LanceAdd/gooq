@@ -294,14 +294,10 @@ func (b *DMLBuilder) Slave() *DMLBuilder {
 }
 
 // DB selects the configuration group used at execution.
-// With no name, it uses the default group, the same as omitting DB.
-func (b *DMLBuilder) DB(name ...string) *DMLBuilder {
-	b.group = ""
-	b.groupSet = false
-	if len(name) > 0 && name[0] != "" {
-		b.group = name[0]
-		b.groupSet = true
-	}
+// An empty name uses the default group, the same as omitting DB.
+func (b *DMLBuilder) DB(name string) *DMLBuilder {
+	b.group = name
+	b.groupSet = name != ""
 	return b
 }
 
@@ -369,25 +365,9 @@ func (r *batchResult) RowsAffected() (int64, error) {
 	return r.affected, nil
 }
 
-func (b *DMLBuilder) Scan(ctx context.Context, dest any) error {
-	restore, err := b.bind(ctx)
-	if err != nil {
-		return err
-	}
-	defer restore()
-	if len(b.returning) == 0 {
-		return fmt.Errorf("gooq: Scan on DML requires Returning fields")
-	}
-	sqlStr, args, err := b.ToSql(b.dmlDialect())
-	if err != nil {
-		return err
-	}
-	return scanExec(ctx, b.executor, sqlStr, args, dest)
-}
-
 // Value writes the first RETURNING column into dest. dest is one cell.
 func (b *DMLBuilder) Value(ctx context.Context, dest any) error {
-	if err := gooq.CheckValue(dest); err != nil {
+	if err := db.CheckValue(dest); err != nil {
 		return err
 	}
 	return b.readReturning(ctx, func(sqlStr string, args []any) error {
@@ -397,7 +377,7 @@ func (b *DMLBuilder) Value(ctx context.Context, dest any) error {
 
 // Column writes the first RETURNING column of every row into dest.
 func (b *DMLBuilder) Column(ctx context.Context, dest any) error {
-	if err := gooq.CheckColumn(dest); err != nil {
+	if err := db.CheckColumn(dest); err != nil {
 		return err
 	}
 	return b.readReturning(ctx, func(sqlStr string, args []any) error {
@@ -445,18 +425,30 @@ func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 		return "", nil, fmt.Errorf("gooq: batch delete/update renders multiple SQL, use Exec")
 	}
 	rc := gooq.NewRenderContext(dialect)
+	var (
+		sql  string
+		args []any
+		err  error
+	)
 	switch b.kind {
 	case dmlInsert:
-		return b.renderInsert(rc)
+		sql, args, err = b.renderInsert(rc)
 	case dmlInsertFrom:
-		return b.renderInsertFrom(rc)
+		sql, args, err = b.renderInsertFrom(rc)
 	case dmlUpdate:
-		return b.renderUpdate(rc)
+		sql, args, err = b.renderUpdate(rc)
 	case dmlDelete:
-		return b.renderDelete(rc)
+		sql, args, err = b.renderDelete(rc)
 	default:
 		return "", nil, fmt.Errorf("gooq: unknown dml kind %d", b.kind)
 	}
+	if err != nil {
+		return "", nil, err
+	}
+	if err = rc.Err(); err != nil {
+		return "", nil, err
+	}
+	return sql, args, nil
 }
 
 func (b *DMLBuilder) renderInsertFrom(rc *gooq.RenderContext) (string, []any, error) {
@@ -475,7 +467,7 @@ func (b *DMLBuilder) renderInsertFrom(rc *gooq.RenderContext) (string, []any, er
 	if len(columns) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert-from columns is empty")
 	}
-	subSQL, _ := b.selectBuilder.renderSelect(rc)
+	subSQL := b.selectBuilder.renderSelect(rc)
 	var sqlStr = fmt.Sprintf(
 		"INSERT INTO %s (%s) %s",
 		tableNameSQL(rc, b.table),
@@ -668,7 +660,7 @@ func placeValue(rc *gooq.RenderContext, row []columnValue, column string) string
 			return "NULL"
 		}
 		if expr, ok := cv.value.(gooq.Expression); ok {
-			valSQL, _ := rc.Render(expr)
+			valSQL := rc.Render(expr)
 			return valSQL
 		}
 		return rc.AddArg(cv.value)
@@ -782,10 +774,7 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error) {
 	if !b.unscoped && b.table.Meta() != nil {
 		if softField := b.table.Meta().SoftDeleteField(); softField != nil {
-			saved := b.setValues
-			b.setValues = []columnValue{{column: softField.ColumnName, value: time.Now()}}
-			defer func() { b.setValues = saved }()
-			return b.renderUpdate(rc)
+			return b.renderSoftDelete(rc, softField)
 		}
 	}
 	spec := rc.Spec()
@@ -804,10 +793,29 @@ func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error)
 	return sqlStr, rc.Args(), nil
 }
 
+// renderSoftDelete 把软删 DELETE 改写成 UPDATE deleted_at = now()。
+// 赋值在局部构造，渲染期间不写 setValues，也不追加 IS NULL 守卫。
+func (b *DMLBuilder) renderSoftDelete(rc *gooq.RenderContext, softField *gooq.FieldMeta) (string, []any, error) {
+	spec := rc.Spec()
+	if spec == nil {
+		return "", nil, fmt.Errorf("gooq: dialect %q is not registered", rc.Dialect())
+	}
+	sets := renderSetValue(rc, columnValue{column: softField.ColumnName, value: time.Now()})
+	sqlStr, err := spec.RenderUpdate(rc, renderTableName(rc, b.table), sets, b.renderWhere(rc), b.joinRenders(rc))
+	if err != nil {
+		return "", nil, err
+	}
+	returning, err := b.renderReturning(rc)
+	if err != nil {
+		return "", nil, err
+	}
+	return sqlStr + returning, rc.Args(), nil
+}
+
 func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
 	var parts []string
 	for _, c := range b.conditions {
-		condSQL, _ := rc.Render(c)
+		condSQL := rc.Render(c)
 		if condSQL != "" {
 			parts = append(parts, condSQL)
 		}
@@ -829,7 +837,7 @@ func renderSetValue(rc *gooq.RenderContext, cv columnValue) string {
 		return rc.Quote(cv.column) + " = NULL"
 	}
 	if expr, ok := cv.value.(gooq.Expression); ok {
-		valSQL, _ := rc.Render(expr)
+		valSQL := rc.Render(expr)
 		return fmt.Sprintf("%s = %s", rc.Quote(cv.column), valSQL)
 	}
 	return fmt.Sprintf("%s = %s", rc.Quote(cv.column), rc.AddArg(cv.value))
@@ -857,7 +865,7 @@ func (b *DMLBuilder) renderJoinCond(rc *gooq.RenderContext, j *joinClause) strin
 	}
 	var ons []string
 	for _, c := range j.on {
-		onSQL, _ := rc.Render(c)
+		onSQL := rc.Render(c)
 		if onSQL != "" {
 			ons = append(ons, onSQL)
 		}
@@ -878,7 +886,7 @@ func (b *DMLBuilder) renderReturning(rc *gooq.RenderContext) (string, error) {
 	}
 	var parts []string
 	for _, f := range b.returning {
-		fieldSQL, _ := rc.Render(f)
+		fieldSQL := rc.Render(f)
 		parts = append(parts, fieldSQL)
 	}
 	return " " + keyword + " " + strings.Join(parts, ", "), nil

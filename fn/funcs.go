@@ -111,11 +111,12 @@ func Abs(e gooq.Expression) *FuncExpr {
 }
 
 func Round(e gooq.Expression, decimals any) *FuncExpr {
-	return New("ROUND", e, decimals).RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
-		if spec := rc.Spec(); spec != nil {
-			return spec.RenderRound(argsSQL[0], argsSQL[1]), nil
+	return New("ROUND", e, decimals).RenderWith(func(rc *gooq.RenderContext, argsSQL []string) string {
+		renderer, ok := dialectSupport[roundRenderer](rc, "Round")
+		if !ok {
+			return ""
 		}
-		return "", nil
+		return renderer.RenderRound(argsSQL[0], argsSQL[1])
 	})
 }
 
@@ -137,11 +138,12 @@ func Coalesce(args ...any) *FuncExpr {
 }
 
 func IfNull(a, b gooq.Expression) *FuncExpr {
-	return New("IFNULL", a, b).RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
-		if spec := rc.Spec(); spec != nil {
-			return spec.RenderIfNull(argsSQL[0], argsSQL[1]), nil
+	return New("IFNULL", a, b).RenderWith(func(rc *gooq.RenderContext, argsSQL []string) string {
+		renderer, ok := dialectSupport[ifNullRenderer](rc, "IfNull")
+		if !ok {
+			return ""
 		}
-		return "", nil
+		return renderer.RenderIfNull(argsSQL[0], argsSQL[1])
 	})
 }
 
@@ -151,11 +153,12 @@ func Now() *FuncExpr {
 }
 
 func CurDate() *FuncExpr {
-	return New("CURDATE").RenderWith(func(rc *gooq.RenderContext, _ []string) (string, []any) {
-		if spec := rc.Spec(); spec != nil {
-			return spec.RenderCurDate(), nil
+	return New("CURDATE").RenderWith(func(rc *gooq.RenderContext, _ []string) string {
+		renderer, ok := dialectSupport[curDateRenderer](rc, "CurDate")
+		if !ok {
+			return ""
 		}
-		return "", nil
+		return renderer.RenderCurDate()
 	})
 }
 
@@ -166,28 +169,34 @@ func DateAdd(date gooq.Expression, count any, unit string) *FuncExpr {
 		if err != nil {
 			return err
 		}
-		_, err = spec.RenderDateAdd("d", "1", unit)
+		renderer, ok := spec.(dateAddRenderer)
+		if !ok {
+			return unsupportedDialect(d, "DateAdd")
+		}
+		_, err = renderer.RenderDateAdd("d", "1", unit)
 		return err
 	}
-	return f.RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
-		spec := rc.Spec()
-		if spec == nil {
-			return "", nil
+	return f.RenderWith(func(rc *gooq.RenderContext, argsSQL []string) string {
+		renderer, ok := dialectSupport[dateAddRenderer](rc, "DateAdd")
+		if !ok {
+			return ""
 		}
-		sqlStr, err := spec.RenderDateAdd(argsSQL[0], argsSQL[1], unit)
+		sqlStr, err := renderer.RenderDateAdd(argsSQL[0], argsSQL[1], unit)
 		if err != nil {
-			return "", nil
+			rc.Fail(err)
+			return ""
 		}
-		return sqlStr, nil
+		return sqlStr
 	})
 }
 
 func DateDiff(a, b gooq.Expression) *FuncExpr {
-	return New("DATEDIFF", a, b).RenderWith(func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
-		if spec := rc.Spec(); spec != nil {
-			return spec.RenderDateDiff(argsSQL[0], argsSQL[1]), nil
+	return New("DATEDIFF", a, b).RenderWith(func(rc *gooq.RenderContext, argsSQL []string) string {
+		renderer, ok := dialectSupport[dateDiffRenderer](rc, "DateDiff")
+		if !ok {
+			return ""
 		}
-		return "", nil
+		return renderer.RenderDateDiff(argsSQL[0], argsSQL[1])
 	})
 }
 

@@ -389,8 +389,8 @@ func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 }
 
 // GetAll 读取全部行。没有行时返回 nil。
-func (d *DB) GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error) {
-	var result gooq.Result
+func (d *DB) GetAll(ctx context.Context, query string, args ...any) (Result, error) {
+	var result Result
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
 		conn, err := d.readDB()
 		if err != nil {
@@ -403,8 +403,8 @@ func (d *DB) GetAll(ctx context.Context, query string, args ...any) (gooq.Result
 }
 
 // GetAll 在事务内读取全部行。没有行时返回 nil。
-func (t *Tx) GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error) {
-	var result gooq.Result
+func (t *Tx) GetAll(ctx context.Context, query string, args ...any) (Result, error) {
+	var result Result
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
 		result, err = readAll(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
@@ -414,8 +414,8 @@ func (t *Tx) GetAll(ctx context.Context, query string, args ...any) (gooq.Result
 }
 
 // GetOne 读取第一行。没有行时返回 nil。
-func (d *DB) GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error) {
-	var record gooq.Record
+func (d *DB) GetOne(ctx context.Context, query string, args ...any) (Record, error) {
+	var record Record
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
 		conn, err := d.readDB()
 		if err != nil {
@@ -428,8 +428,8 @@ func (d *DB) GetOne(ctx context.Context, query string, args ...any) (gooq.Record
 }
 
 // GetOne 在事务内读取第一行。没有行时返回 nil。
-func (t *Tx) GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error) {
-	var record gooq.Record
+func (t *Tx) GetOne(ctx context.Context, query string, args ...any) (Record, error) {
+	var record Record
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
 		record, err = readOne(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
@@ -465,9 +465,9 @@ func (t *Tx) GetValue(ctx context.Context, query string, args ...any) (any, erro
 
 // Value 把第一行的第一列写入 dest。
 // dest 是指向一个单元格的非空指针，例如 *time.Time、*sql.NullString 或 *int。
-// 没有行时返回 sql.ErrNoRows。NULL 写成零值。行结构体改用 GetScan。
+// 没有行时返回 sql.ErrNoRows。NULL 写成零值。行结构体用 GetOne 再 Record.Struct。
 func (d *DB) Value(ctx context.Context, dest any, query string, args ...any) error {
-	if err := gooq.CheckValue(dest); err != nil {
+	if err := CheckValue(dest); err != nil {
 		return err
 	}
 	if d != nil && d.dryRun != nil && d.dryRun.Val() {
@@ -480,12 +480,12 @@ func (d *DB) Value(ctx context.Context, dest any, query string, args ...any) err
 	if !found {
 		return sql.ErrNoRows
 	}
-	return gooq.Assign(dest, value)
+	return Assign(dest, value)
 }
 
 // Value 在事务内把第一行的第一列写入 dest。约束与 DB.Value 相同。
 func (t *Tx) Value(ctx context.Context, dest any, query string, args ...any) error {
-	if err := gooq.CheckValue(dest); err != nil {
+	if err := CheckValue(dest); err != nil {
 		return err
 	}
 	if t != nil && t.db != nil && t.db.dryRun != nil && t.db.dryRun.Val() {
@@ -498,13 +498,13 @@ func (t *Tx) Value(ctx context.Context, dest any, query string, args ...any) err
 	if !found {
 		return sql.ErrNoRows
 	}
-	return gooq.Assign(dest, value)
+	return Assign(dest, value)
 }
 
 // Column 把每一行的第一列写入 dest。
 // dest 是单元格切片的指针。没有行时写成空切片。
 func (d *DB) Column(ctx context.Context, dest any, query string, args ...any) error {
-	if err := gooq.CheckColumn(dest); err != nil {
+	if err := CheckColumn(dest); err != nil {
 		return err
 	}
 	if d != nil && d.dryRun != nil && d.dryRun.Val() {
@@ -519,7 +519,7 @@ func (d *DB) Column(ctx context.Context, dest any, query string, args ...any) er
 
 // Column 在事务内把每一行的第一列写入 dest。没有行时写成空切片。
 func (t *Tx) Column(ctx context.Context, dest any, query string, args ...any) error {
-	if err := gooq.CheckColumn(dest); err != nil {
+	if err := CheckColumn(dest); err != nil {
 		return err
 	}
 	if t != nil && t.db != nil && t.db.dryRun != nil && t.db.dryRun.Val() {
@@ -590,31 +590,13 @@ func assignColumn(dest any, values []any) error {
 	out := reflect.MakeSlice(slice.Type(), 0, len(values))
 	for _, value := range values {
 		elem := reflect.New(elemType).Elem()
-		if err := gooq.Assign(elem.Addr().Interface(), value); err != nil {
+		if err := Assign(elem.Addr().Interface(), value); err != nil {
 			return err
 		}
 		out = reflect.Append(out, elem)
 	}
 	slice.Set(out)
 	return nil
-}
-
-// GetScan 把查询结果写入 dest。
-func (d *DB) GetScan(ctx context.Context, dest any, query string, args ...any) error {
-	return d.observe(ctx, query, args, func(ctx context.Context) error {
-		conn, err := d.readDB()
-		if err != nil {
-			return err
-		}
-		return scanDest(ctx, conn, d.driver, dest, query, d.bindArgs(args)...)
-	})
-}
-
-// GetScan 在事务内把查询结果写入 dest。
-func (t *Tx) GetScan(ctx context.Context, dest any, query string, args ...any) error {
-	return t.db.observe(ctx, query, args, func(ctx context.Context) error {
-		return scanDest(ctx, t.sql, t.db.driver, dest, query, t.db.bindArgs(args)...)
-	})
 }
 
 // Tables 返回当前 schema 里的用户表名。查询在主库上执行。

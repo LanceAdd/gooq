@@ -14,9 +14,8 @@ import (
 
 type executor interface {
 	Dialect() gooq.Dialect
-	GetAll(ctx context.Context, query string, args ...any) (gooq.Result, error)
-	GetOne(ctx context.Context, query string, args ...any) (gooq.Record, error)
-	GetScan(ctx context.Context, dest any, query string, args ...any) error
+	GetAll(ctx context.Context, query string, args ...any) (db.Result, error)
+	GetOne(ctx context.Context, query string, args ...any) (db.Record, error)
 	Exec(ctx context.Context, query string, args ...any) (sql.Result, error)
 	GetValue(ctx context.Context, query string, args ...any) (any, error)
 }
@@ -67,37 +66,6 @@ func autoDialect(exec executor) gooq.Dialect {
 		return dialect
 	}
 	return gooq.DialectMySQL
-}
-
-func scanExec(ctx context.Context, exec executor, query string, args []any, dest any) error {
-	if err := gooq.CheckScan(dest); err != nil {
-		return err
-	}
-	rv := reflect.ValueOf(dest)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return fmt.Errorf("gooq: Scan dest must be a non-nil pointer")
-	}
-	switch rv.Elem().Kind() {
-	case reflect.Slice, reflect.Array, reflect.Struct:
-		return exec.GetScan(ctx, dest, query, args...)
-	case reflect.Pointer:
-		if rv.Elem().Type().Elem().Kind() == reflect.Struct {
-			return exec.GetScan(ctx, dest, query, args...)
-		}
-	default:
-	}
-	value, err := exec.GetValue(ctx, query, args...)
-	if err != nil {
-		return err
-	}
-	return assignAny(rv.Elem(), value)
-}
-
-func assignAny(dst reflect.Value, src any) error {
-	if !dst.CanAddr() {
-		return fmt.Errorf("gooq: destination cannot be addressed")
-	}
-	return gooq.Assign(dst.Addr().Interface(), src)
 }
 
 func execValue(ctx context.Context, exec executor, query string, args []any, dest any) error {

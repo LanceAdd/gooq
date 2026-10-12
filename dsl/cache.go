@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,12 +97,21 @@ func (b *SelectBuilder) compositeCacheKey(dialect gooq.Dialect) (string, error) 
 
 // encodeQuery 用长度前缀拼出 SQL 和参数，避免两段文本粘连后发生碰撞。
 func encodeQuery(sql string, args []any) string {
-	encodedArgs := fmt.Sprintf("%v", args)
+	encodedArgs := encodeArgs(args)
 	return strconv.Itoa(len(sql)) + ":" + sql + strconv.Itoa(len(encodedArgs)) + ":" + encodedArgs
 }
 
+// encodeArgs 按「类型名 + 稳定文本」编码每个参数。int64(1) 与 "1" 得到不同的 key。
+func encodeArgs(args []any) string {
+	parts := make([]string, len(args))
+	for i, arg := range args {
+		parts[i] = fmt.Sprintf("%T:%v", arg, arg)
+	}
+	return strings.Join(parts, ",")
+}
+
 func hashQuery(sql string, args []any) string {
-	return hashString(sql + fmt.Sprintf("%v", args))
+	return hashString(sql + encodeArgs(args))
 }
 
 func hashString(s string) string {

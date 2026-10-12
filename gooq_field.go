@@ -45,11 +45,27 @@ func (f Field[T]) Asc() Expression {
 	return OrderAscExpr(toAnyField(f))
 }
 
-func (f Field[T]) Condition() (string, []any) {
-	return f.Render(NewRenderContext(DialectMySQL))
+// BoundTable 返回字段绑定的表实例。没有绑定时为 nil。
+func (f Field[T]) BoundTable() *TableBase {
+	return f.table
 }
 
-func (f Field[T]) Render(rc *RenderContext) (string, []any) {
+// NamePrefix 是渲染前缀里的别名或表名。没有表指针时用它判断列归属。
+func (f Field[T]) NamePrefix() string {
+	if f.table != nil {
+		if alias := f.table.AliasName(); alias != "" {
+			return alias
+		}
+		return f.tableName
+	}
+	parts := strings.Split(f.tableName, ".")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[len(parts)-1]
+}
+
+func (f Field[T]) Render(rc *RenderContext) string {
 	var sql string
 	if parts := f.prefixParts(); len(parts) > 0 && parts[0] != "" {
 		var quoted []string
@@ -63,7 +79,7 @@ func (f Field[T]) Render(rc *RenderContext) (string, []any) {
 	if f.alias != "" {
 		sql += " AS " + rc.Quote(f.alias)
 	}
-	return sql, nil
+	return sql
 }
 
 func (f Field[T]) prefixParts() []string {
@@ -94,16 +110,12 @@ func OrderDescExpr(e Expression) Expression {
 	return &orderDirExpr{expr: e, desc: true}
 }
 
-func (e *orderDirExpr) Condition() (string, []any) {
-	return e.Render(NewRenderContext(DialectMySQL))
-}
-
-func (e *orderDirExpr) Render(rc *RenderContext) (string, []any) {
-	sql, args := rc.Render(e.expr)
+func (e *orderDirExpr) Render(rc *RenderContext) string {
+	sql := rc.Render(e.expr)
 	if e.desc {
-		return sql + " DESC", args
+		return sql + " DESC"
 	}
-	return sql + " ASC", args
+	return sql + " ASC"
 }
 
 func (e *orderDirExpr) SubExpressions() []Expression {
@@ -138,7 +150,7 @@ type fieldCondition struct {
 }
 
 func (c *fieldCondition) SubExpressions() []Expression {
-	var subs []Expression
+	subs := []Expression{c.field}
 	if expr, ok := c.value.(Expression); ok {
 		subs = append(subs, expr)
 	}
@@ -153,31 +165,26 @@ func (c *fieldCondition) SubExpressions() []Expression {
 	return subs
 }
 
-func (c *fieldCondition) Condition() (string, []any) {
-	return c.Render(NewRenderContext(DialectMySQL))
-}
-
-func (c *fieldCondition) Render(rc *RenderContext) (string, []any) {
-	fieldSQL, _ := c.field.Render(rc)
+func (c *fieldCondition) Render(rc *RenderContext) string {
+	fieldSQL := c.field.Render(rc)
 	switch c.op {
 	case opIsNull:
-		return fieldSQL + " IS NULL", nil
+		return fieldSQL + " IS NULL"
 	case opIsNotNull:
-		return fieldSQL + " IS NOT NULL", nil
+		return fieldSQL + " IS NOT NULL"
 	case opIn, opNotIn:
 		if c.subquery != nil {
 			// 子查询渲染自带括号，此处不再包裹。
-			subSQL, subArgs := c.subquery.Render(rc)
 			keyword := "IN"
 			if c.op == opNotIn {
 				keyword = "NOT IN"
 			}
-			return fmt.Sprintf(`%s %s %s`, fieldSQL, keyword, subSQL), subArgs
+			return fmt.Sprintf(`%s %s %s`, fieldSQL, keyword, c.subquery.Render(rc))
 		}
 		if len(c.values) == 0 {
-			return "", nil
+			return ""
 		}
-		var placeholders = make([]string, len(c.values))
+		placeholders := make([]string, len(c.values))
 		for i, v := range c.values {
 			placeholders[i] = rc.AddArg(v)
 		}
@@ -185,20 +192,16 @@ func (c *fieldCondition) Render(rc *RenderContext) (string, []any) {
 		if c.op == opNotIn {
 			keyword = "NOT IN"
 		}
-		return fmt.Sprintf(`%s %s (%s)`, fieldSQL, keyword, strings.Join(placeholders, ", ")), c.values
+		return fmt.Sprintf(`%s %s (%s)`, fieldSQL, keyword, strings.Join(placeholders, ", "))
 	case opBetween:
-		p1SQL, p1Args := rc.RenderValue(c.values[0])
-		p2SQL, p2Args := rc.RenderValue(c.values[1])
-		return fmt.Sprintf(`%s BETWEEN %s AND %s`, fieldSQL, p1SQL, p2SQL), append(p1Args, p2Args...)
+		return fmt.Sprintf(`%s BETWEEN %s AND %s`, fieldSQL, rc.RenderValue(c.values[0]), rc.RenderValue(c.values[1]))
 	default:
 		operator := opStrings[c.op]
 		// 值为表达式（字段/函数/子查询）时渲染为 SQL 片段而非参数（如 u.id = o.user_id）。
 		if expr, ok := c.value.(Expression); ok {
-			valSQL, valArgs := rc.Render(expr)
-			return fmt.Sprintf(`%s %s %s`, fieldSQL, operator, valSQL), valArgs
+			return fmt.Sprintf(`%s %s %s`, fieldSQL, operator, rc.Render(expr))
 		}
-		placeholder := rc.AddArg(c.value)
-		return fmt.Sprintf(`%s %s %s`, fieldSQL, operator, placeholder), []any{c.value}
+		return fmt.Sprintf(`%s %s %s`, fieldSQL, operator, rc.AddArg(c.value))
 	}
 }
 

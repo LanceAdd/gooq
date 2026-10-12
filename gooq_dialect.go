@@ -85,10 +85,11 @@ type JoinRender struct {
 	On string
 }
 
-// DialectSpec 是一种数据库的 SQL 渲染契约。
+// DialectSpec 是一种数据库的语句形状契约。
 // 内置方言在 init 中注册。新方言实现本接口后调用 RegisterDialect。
 // 嵌入 MySQLDialect、PostgresDialect 或 SQLiteDialect 可以只覆盖有差异的方法。
 // 未注册的方言不会回退成 MySQL。
+// 日期、聚合等函数渲染留在具体方言类型上，不在本接口里。
 type DialectSpec interface {
 	// Name 返回注册名，与 Dialect 常量或自定义名字一致。
 	Name() Dialect
@@ -137,22 +138,6 @@ type DialectSpec interface {
 	// NO_BACKSLASH_ESCAPES 打开时反斜杠是普通字符，这里仍会加倍，从而多写出一个反斜杠。
 	// PostgreSQL 和 SQLite 只把单引号加倍。PostgreSQL 默认 standard_conforming_strings=on，反斜杠不再加倍。
 	QuoteLiteral(s string) string
-	// RenderDateFormat 按该方言渲染日期格式化。format 使用 MySQL 格式符。
-	RenderDateFormat(fieldSQL, format string) string
-	// RenderGroupConcat 按该方言渲染字符串聚合。
-	RenderGroupConcat(in GroupConcatInput) (string, error)
-	// RenderMedian 按该方言渲染中位数。
-	RenderMedian(fieldSQL string) string
-	// RenderIfNull 渲染空值替换。
-	RenderIfNull(a, b string) string
-	// RenderCurDate 渲染当前日期。
-	RenderCurDate() string
-	// RenderDateAdd 渲染日期加减。unit 不在白名单时返回错误。
-	RenderDateAdd(field, count, unit string) (string, error)
-	// RenderDateDiff 渲染两个日期相差的天数。
-	RenderDateDiff(a, b string) string
-	// RenderRound 渲染四舍五入。
-	RenderRound(field, decimals string) string
 }
 
 var (
@@ -257,8 +242,7 @@ func renderUpsertValue(rc *RenderContext, value any) (string, error) {
 		return "", nil
 	}
 	if expr, ok := value.(Expression); ok {
-		sql, _ := rc.Render(expr)
-		return sql, nil
+		return rc.Render(expr), nil
 	}
 	return rc.AddArg(value), nil
 }

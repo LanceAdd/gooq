@@ -1,4 +1,4 @@
-package gooq
+package db
 
 import (
 	"database/sql"

@@ -77,13 +77,13 @@ func TestPostgresLive(t *testing.T) {
 			port string
 			name string
 		)
-		if err = database.GetScan(ctx, &host, `SELECT COALESCE(host(inet_server_addr()), '127.0.0.1')`); err != nil {
+		if err = database.Value(ctx, &host, `SELECT COALESCE(host(inet_server_addr()), '127.0.0.1')`); err != nil {
 			t.Fatal(err)
 		}
-		if err = database.GetScan(ctx, &port, `SELECT inet_server_port()::text`); err != nil || port == "" {
+		if err = database.Value(ctx, &port, `SELECT inet_server_port()::text`); err != nil || port == "" {
 			t.Skip("server port is unavailable")
 		}
-		if err = database.GetScan(ctx, &name, `SELECT current_database()`); err != nil {
+		if err = database.Value(ctx, &name, `SELECT current_database()`); err != nil {
 			t.Fatal(err)
 		}
 		if _, err = database.Exec(ctx, `GRANT CONNECT ON DATABASE `+name+` TO `+role); err != nil {
@@ -202,7 +202,11 @@ func TestPostgresLive(t *testing.T) {
 			Ba [][]byte    `orm:"ba"`
 			Uu []uuid.UUID `orm:"uu"`
 		}
-		if err = view.GetScan(ctx, &row, `SELECT i2, i4, i8, tx, vc, ch, bl, f4, f8, ba, uu FROM arrays WHERE id = 1`); err != nil {
+		record, err := view.GetOne(ctx, `SELECT i2, i4, i8, tx, vc, ch, bl, f4, f8, ba, uu FROM arrays WHERE id = 1`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = record.Struct(&row); err != nil {
 			t.Fatal(err)
 		}
 		if len(row.I4) != 2 || row.I4[0] != 3 || row.I4[1] != 4 {
@@ -230,7 +234,11 @@ func TestPostgresLive(t *testing.T) {
 		var amount struct {
 			Amount string `orm:"amount"`
 		}
-		if err = view.GetScan(ctx, &amount, `SELECT amount FROM amounts WHERE id = 1`); err != nil {
+		amountRow, err := view.GetOne(ctx, `SELECT amount FROM amounts WHERE id = 1`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = amountRow.Struct(&amount); err != nil {
 			t.Fatal(err)
 		}
 		if amount.Amount != "1234567890123456.25" {
@@ -272,7 +280,7 @@ func TestPostgresLive(t *testing.T) {
 			t.Fatal(err)
 		}
 		var names []string
-		if err = view.GetScan(ctx, &names, `SELECT name FROM item ORDER BY id`); err != nil {
+		if err = view.Column(ctx, &names, `SELECT name FROM item ORDER BY id`); err != nil {
 			t.Fatal(err)
 		}
 		if len(names) != 2 || names[0] != "a" || names[1] != "b" {
@@ -299,7 +307,7 @@ func TestPostgresLive(t *testing.T) {
 			t.Fatal(err)
 		}
 		var statuses []string
-		if err = view.GetScan(ctx, &statuses, `SELECT status FROM account ORDER BY id`); err != nil {
+		if err = view.Column(ctx, &statuses, `SELECT status FROM account ORDER BY id`); err != nil {
 			t.Fatal(err)
 		}
 		if len(statuses) != 2 || statuses[0] != "vip" || statuses[1] != "vip" {
@@ -343,7 +351,7 @@ func TestPostgresLive(t *testing.T) {
 			t.Fatal(err)
 		}
 		var deleted int64
-		if err = view.GetScan(ctx, &deleted, `SELECT COUNT(*) FROM account WHERE deleted_at IS NOT NULL`); err != nil {
+		if err = view.Value(ctx, &deleted, `SELECT COUNT(*) FROM account WHERE deleted_at IS NOT NULL`); err != nil {
 			t.Fatal(err)
 		}
 		if deleted != 2 {

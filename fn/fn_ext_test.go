@@ -15,11 +15,11 @@ import (
 // MySQL/SQLite 渲染 CONCAT(a, b)，PG 渲染 (a || b)。
 func concatPipe(a, b gooq.Expression) *fn.FuncExpr {
 	return fn.New("CONCAT", a, b).RenderWith(
-		func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+		func(rc *gooq.RenderContext, argsSQL []string) string {
 			if rc.Dialect() == gooq.DialectPgsql {
-				return "(" + argsSQL[0] + " || " + argsSQL[1] + ")", nil
+				return "(" + argsSQL[0] + " || " + argsSQL[1] + ")"
 			}
-			return "CONCAT(" + argsSQL[0] + ", " + argsSQL[1] + ")", nil
+			return "CONCAT(" + argsSQL[0] + ", " + argsSQL[1] + ")"
 		},
 	)
 }

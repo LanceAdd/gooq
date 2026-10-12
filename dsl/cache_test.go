@@ -60,6 +60,12 @@ func TestDsl_CacheKey(t *testing.T) {
 		k5, err := b1.cacheKey("scan", sqlPg, argsPg)
 		t.AssertNil(err)
 		t.AssertNE(k1, k5)
+
+		kInt, err := b1.cacheKey("value", "SELECT ?", []any{int64(1)})
+		t.AssertNil(err)
+		kText, err := b1.cacheKey("value", "SELECT ?", []any{"1"})
+		t.AssertNil(err)
+		t.AssertNE(kInt, kText)
 		_ = userId
 	})
 }

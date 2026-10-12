@@ -76,7 +76,11 @@ CREATE TABLE user (
 		CreatedAt time.Time
 		Meta      string
 	}
-	if err = database.GetScan(ctx, &user, `SELECT id, name, active, created_at, meta FROM user`); err != nil {
+	row, err := database.GetOne(ctx, `SELECT id, name, active, created_at, meta FROM user`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = row.Struct(&user); err != nil {
 		t.Fatal(err)
 	}
 	if user.Id != 1 || user.Name != "john" || !user.Active || user.Meta != `{"vip":true}` {
@@ -189,13 +193,13 @@ func TestRouteViewCloseKeepsPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	var id int
-	if err = database.GetScan(ctx, &id, `SELECT id FROM item`); err != nil || id != 1 {
+	if err = database.Value(ctx, &id, `SELECT id FROM item`); err != nil || id != 1 {
 		t.Fatalf("owner after view close id=%d err=%v", id, err)
 	}
 	if err = database.Close(); err != nil {
 		t.Fatal(err)
 	}
-	err = database.GetScan(ctx, &id, `SELECT id FROM item`)
+	err = database.Value(ctx, &id, `SELECT id FROM item`)
 	if err == nil || !strings.Contains(err.Error(), "database is closed") {
 		t.Fatalf("owner close err=%v", err)
 	}

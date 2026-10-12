@@ -4,11 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/gogf/gf/v2/os/gtime"
 )
 
 func TestValueAndColumn(t *testing.T) {
@@ -45,14 +42,6 @@ CREATE TABLE item (
 		t.Fatalf("created_at %s", when)
 	}
 
-	var gt gtime.Time
-	if err = database.Value(ctx, &gt, `SELECT created_at FROM item WHERE id = 1`); err != nil {
-		t.Fatal(err)
-	}
-	if gt.Format("Y-m-d H:i:s") != "2026-10-10 08:30:00" {
-		t.Fatalf("gtime %s", gt.String())
-	}
-
 	var ns sql.NullString
 	if err = database.Value(ctx, &ns, `SELECT name FROM item WHERE id = 2`); err != nil || ns.Valid {
 		t.Fatalf("null name %+v err=%v", ns, err)
@@ -87,13 +76,8 @@ CREATE TABLE item (
 		t.Fatalf("times %v", times)
 	}
 
-	err = database.GetScan(ctx, &when, `SELECT created_at FROM item WHERE id = 1`)
-	if err == nil || !strings.Contains(err.Error(), "use Value") {
-		t.Fatalf("GetScan time err=%v", err)
-	}
-
 	var id int
-	if err = database.GetScan(ctx, &id, `SELECT id FROM item WHERE id = 1`); err != nil || id != 1 {
+	if err = database.Value(ctx, &id, `SELECT id FROM item WHERE id = 1`); err != nil || id != 1 {
 		t.Fatalf("scan int %d err=%v", id, err)
 	}
 

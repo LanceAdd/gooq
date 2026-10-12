@@ -73,17 +73,12 @@ func (f *testFunc) As(alias string) *testFunc {
 	return f
 }
 
-func (f *testFunc) Condition() (string, []any) {
-	return f.Render(NewRenderContext(DialectMySQL))
-}
-
-func (f *testFunc) Render(rc *RenderContext) (string, []any) {
-	fieldSQL, args := rc.Render(f.field)
-	sql := f.name + "(" + fieldSQL + ")"
+func (f *testFunc) Render(rc *RenderContext) string {
+	sql := f.name + "(" + rc.Render(f.field) + ")"
 	if f.alias != "" {
 		sql += " AS " + rc.Quote(f.alias)
 	}
-	return sql, args
+	return sql
 }
 
 func (f *testFunc) SubExpressions() []Expression {

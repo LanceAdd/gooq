@@ -97,3 +97,8 @@ func (t *TableBase) AllFields() []Field[any] {
 func (t *TableBase) Field(column string) Field[any] {
 	return Field[any]{table: t, tableName: t.meta.TableName, columnName: column}
 }
+
+// BoundBase 返回这个表实例。嵌入 *TableBase 的生成表会提升该方法。
+func (t *TableBase) BoundBase() *TableBase {
+	return t
+}

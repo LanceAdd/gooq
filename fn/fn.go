@@ -7,8 +7,9 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-// RenderFn 是函数的方言渲染策略：接收已渲染的参数 SQL 片段，返回函数 SQL 与附加参数。
-type RenderFn func(rc *gooq.RenderContext, argsSQL []string) (sql string, args []any)
+// RenderFn 是函数的方言渲染策略：接收已渲染的参数 SQL 片段，返回函数 SQL。
+// 参数只经 RenderContext.AddArg 累积。不支持该函数时调用 rc.Fail。
+type RenderFn func(rc *gooq.RenderContext, argsSQL []string) string
 
 // FuncExpr 是所有函数表达式的统一节点：NAME(args...)。
 // 方言差异通过 RenderWith 挂实例级渲染策略；结构选项（分隔符/去重等）由构造器捕获。
@@ -59,37 +60,23 @@ func (f *FuncExpr) Filter(cond gooq.Expression) *FuncExpr {
 	return f
 }
 
-func (f *FuncExpr) Condition() (string, []any) {
-	return f.Render(gooq.NewRenderContext(gooq.DialectMySQL))
-}
-
-func (f *FuncExpr) Render(rc *gooq.RenderContext) (string, []any) {
-	var (
-		argsSQL []string
-		argsAll []any
-	)
+func (f *FuncExpr) Render(rc *gooq.RenderContext) string {
+	var argsSQL []string
 	for _, arg := range f.args {
 		if expr, ok := arg.(gooq.Expression); ok {
-			sql, args := rc.Render(expr)
-			argsSQL = append(argsSQL, sql)
-			argsAll = append(argsAll, args...)
+			argsSQL = append(argsSQL, rc.Render(expr))
 			continue
 		}
 		argsSQL = append(argsSQL, rc.AddArg(arg))
-		argsAll = append(argsAll, arg)
 	}
 	var sql string
 	if f.render != nil {
-		var renderArgs []any
-		sql, renderArgs = f.render(rc, argsSQL)
-		argsAll = append(argsAll, renderArgs...)
+		sql = f.render(rc, argsSQL)
 	} else {
 		sql = f.name + "(" + strings.Join(argsSQL, ", ") + ")"
 	}
 	if f.filter != nil {
-		filterSQL, filterArgs := rc.Render(f.filter)
-		sql += " FILTER (WHERE " + filterSQL + ")"
-		argsAll = append(argsAll, filterArgs...)
+		sql += " FILTER (WHERE " + rc.Render(f.filter) + ")"
 	}
 	if f.over != nil {
 		sql += " OVER (" + renderOver(rc, f.over) + ")"
@@ -97,7 +84,7 @@ func (f *FuncExpr) Render(rc *gooq.RenderContext) (string, []any) {
 	if f.alias != "" {
 		sql += " AS " + rc.Quote(f.alias)
 	}
-	return sql, argsAll
+	return sql
 }
 
 func (f *FuncExpr) ValidateDialect(d gooq.Dialect) error {
@@ -150,16 +137,14 @@ func renderOver(rc *gooq.RenderContext, over *overClause) string {
 	if len(over.partitionBy) > 0 {
 		var parts []string
 		for _, p := range over.partitionBy {
-			sqlPart, _ := rc.Render(p)
-			parts = append(parts, sqlPart)
+			parts = append(parts, rc.Render(p))
 		}
 		overParts = append(overParts, "PARTITION BY "+strings.Join(parts, ", "))
 	}
 	if len(over.orderBy) > 0 {
 		var parts []string
 		for _, o := range over.orderBy {
-			sqlPart, _ := rc.Render(o)
-			parts = append(parts, sqlPart)
+			parts = append(parts, rc.Render(o))
 		}
 		overParts = append(overParts, "ORDER BY "+strings.Join(parts, ", "))
 	}

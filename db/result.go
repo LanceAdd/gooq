@@ -1,4 +1,4 @@
-package gooq
+package db
 
 import (
 	"database/sql"
@@ -6,6 +6,8 @@ import (
 	"reflect"
 
 	"github.com/gogf/gf/v2/util/gconv"
+
+	"github.com/lanceadd/gooq"
 )
 
 // Record is one result row keyed by column name.
@@ -17,7 +19,7 @@ type Result []Record
 // Get reads one typed column from a row.
 // A missing column, NULL, and a conversion failure all return the zero value.
 // Value returns the conversion error instead.
-func Get[T any](record Record, field Field[T]) T {
+func Get[T any](record Record, field gooq.Field[T]) T {
 	value, err := Value[T](record, field)
 	if err != nil {
 		var zero T

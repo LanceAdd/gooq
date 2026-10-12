@@ -52,32 +52,21 @@ func (e *caseExpr) As(alias string) Expression {
 	return e
 }
 
-func (e *caseExpr) Condition() (string, []any) {
-	return e.Render(NewRenderContext(DialectMySQL))
-}
-
-func (e *caseExpr) Render(rc *RenderContext) (string, []any) {
-	var (
-		parts  []string
-		allArg []any
-	)
+func (e *caseExpr) Render(rc *RenderContext) string {
+	var parts []string
 	for _, w := range e.builder.whens {
-		whenSQL, whenArgs := rc.Render(w.when)
-		thenSQL, thenArgs := rc.RenderValue(w.then)
+		whenSQL := rc.Render(w.when)
+		thenSQL := rc.RenderValue(w.then)
 		parts = append(parts, "WHEN "+whenSQL+" THEN "+thenSQL)
-		allArg = append(allArg, whenArgs...)
-		allArg = append(allArg, thenArgs...)
 	}
 	if e.builder.elseVal != nil {
-		elseSQL, elseArgs := rc.RenderValue(e.builder.elseVal)
-		parts = append(parts, "ELSE "+elseSQL)
-		allArg = append(allArg, elseArgs...)
+		parts = append(parts, "ELSE "+rc.RenderValue(e.builder.elseVal))
 	}
 	sql := "CASE " + strings.Join(parts, " ") + " END"
 	if e.alias != "" {
 		sql += " AS " + rc.Quote(e.alias)
 	}
-	return sql, allArg
+	return sql
 }
 
 func (e *caseExpr) SubExpressions() []Expression {
@@ -115,17 +104,11 @@ type arithExpr struct {
 	left, right any
 }
 
-func (a *arithExpr) Condition() (string, []any) {
-	return a.Render(NewRenderContext(DialectMySQL))
-}
-
-func (a *arithExpr) Render(rc *RenderContext) (string, []any) {
-	leftSQL, leftArgs := rc.RenderValue(a.left)
-	rightSQL, rightArgs := rc.RenderValue(a.right)
+func (a *arithExpr) Render(rc *RenderContext) string {
 	return fmt.Sprintf(
 		"(%s %s %s)",
-		leftSQL, arithOperator[a.op], rightSQL,
-	), append(leftArgs, rightArgs...)
+		rc.RenderValue(a.left), arithOperator[a.op], rc.RenderValue(a.right),
+	)
 }
 
 func (a *arithExpr) SubExpressions() []Expression {
@@ -147,13 +130,8 @@ type negateExpr struct {
 	expr Expression
 }
 
-func (n *negateExpr) Condition() (string, []any) {
-	return n.Render(NewRenderContext(DialectMySQL))
-}
-
-func (n *negateExpr) Render(rc *RenderContext) (string, []any) {
-	sql, args := rc.Render(n.expr)
-	return "(-" + sql + ")", args
+func (n *negateExpr) Render(rc *RenderContext) string {
+	return "(-" + rc.Render(n.expr) + ")"
 }
 
 func (n *negateExpr) SubExpressions() []Expression {
@@ -191,29 +169,20 @@ func Excluded(col interface{ ColumnName() string }) Expression {
 	return &excludedExpr{column: col.ColumnName()}
 }
 
-func (e *excludedExpr) Condition() (string, []any) {
-	return e.Render(NewRenderContext(DialectMySQL))
-}
-
-func (e *excludedExpr) Render(rc *RenderContext) (string, []any) {
+func (e *excludedExpr) Render(rc *RenderContext) string {
 	spec := rc.Spec()
 	if spec == nil {
-		return "", nil
+		return ""
 	}
-	return spec.RenderExcluded(rc, e.column), nil
+	return spec.RenderExcluded(rc, e.column)
 }
 
 type distinctExpr struct {
 	expr Expression
 }
 
-func (d *distinctExpr) Condition() (string, []any) {
-	return d.Render(NewRenderContext(DialectMySQL))
-}
-
-func (d *distinctExpr) Render(rc *RenderContext) (string, []any) {
-	sql, args := rc.Render(d.expr)
-	return "DISTINCT " + sql, args
+func (d *distinctExpr) Render(rc *RenderContext) string {
+	return "DISTINCT " + rc.Render(d.expr)
 }
 
 func (d *distinctExpr) SubExpressions() []Expression {
@@ -230,17 +199,13 @@ type castExpr struct {
 	localType LocalType
 }
 
-func (c *castExpr) Condition() (string, []any) {
-	return c.Render(NewRenderContext(DialectMySQL))
-}
-
-func (c *castExpr) Render(rc *RenderContext) (string, []any) {
-	sql, args := rc.Render(c.expr)
+func (c *castExpr) Render(rc *RenderContext) string {
+	sql := rc.Render(c.expr)
 	castName := strings.ToUpper(string(c.localType))
 	if spec := rc.Spec(); spec != nil {
 		castName = spec.CastType(c.localType)
 	}
-	return fmt.Sprintf("CAST(%s AS %s)", sql, castName), args
+	return fmt.Sprintf("CAST(%s AS %s)", sql, castName)
 }
 
 func (c *castExpr) SubExpressions() []Expression {

@@ -4,32 +4,31 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/lanceadd/gooq"
 	"github.com/lanceadd/gooq/db"
 	_ "github.com/lanceadd/gooq/drivers/sqlite"
 )
 
 func TestValueColumnAndScanBoundary(t *testing.T) {
 	ctx := context.Background()
-	fe := &fakeExecutor{}
 	var when time.Time
-	err := scanExec(ctx, fe, "select created_at", nil, &when)
-	if err == nil || !strings.Contains(err.Error(), "use Value") || len(fe.calls) != 0 {
-		t.Fatalf("scan time err=%v calls=%v", err, fe.calls)
+	var user struct{ Name string }
+	if err := db.CheckValue(&user); err == nil {
+		t.Fatal("Value accepted a row struct")
+	}
+	if err := db.CheckValue(&when); err != nil {
+		t.Fatal(err)
 	}
 	var times []time.Time
-	err = scanExec(ctx, fe, "select created_at", nil, &times)
-	if err == nil || !strings.Contains(err.Error(), "use Value") {
-		t.Fatalf("scan []time.Time err=%v", err)
+	if err := db.CheckColumn(&times); err != nil {
+		t.Fatal(err)
 	}
 
 	group := "cell"
 	path := filepath.Join(t.TempDir(), "cell.db")
-	err = db.SetConfig(group, db.Config{Link: "sqlite::@file(" + filepath.ToSlash(path) + ")"})
+	err := db.SetConfig(group, db.Config{Link: "sqlite::@file(" + filepath.ToSlash(path) + ")"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,10 +58,6 @@ CREATE TABLE user (
 		t.Fatal(err)
 	}
 
-	err = Select(testUser.CreatedAt).From(testUser).Unscoped().DB(group).Scan(ctx, &when)
-	if err == nil || !strings.Contains(err.Error(), "use Value") {
-		t.Fatalf("dsl scan time err=%v", err)
-	}
 	if err = Select(testUser.CreatedAt).From(testUser).Where(testUser.Id.Eq(1)).Unscoped().DB(group).Value(ctx, &when); err != nil {
 		t.Fatal(err)
 	}
@@ -82,11 +77,11 @@ CREATE TABLE user (
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := gooq.Value(row, testUser.CreatedAt)
+	got, err := db.Value(row, testUser.CreatedAt)
 	if err != nil || got.Format("2006-01-02 15:04:05") != "2026-10-10 08:30:00" {
 		t.Fatalf("record value %s err=%v", got, err)
 	}
-	if gooq.Cell(row, "name").String() != "john" {
+	if db.Cell(row, "name").String() != "john" {
 		t.Fatal("cell name")
 	}
 

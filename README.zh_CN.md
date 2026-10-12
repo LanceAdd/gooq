@@ -348,7 +348,7 @@ dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).Values("b", 2)
 dsl.Insert(User).ValuesOf(
     model.NewUserRecord().SetName("a"),
     model.NewUserRecord().SetName("b"),
-).Batch(100).DB().Exec(ctx)
+).Batch(100).Exec(ctx)
 
 // 各行设置的列不同时，Exec 按列集合拆成多条 INSERT。
 // 没写的列留给表默认值。这种形状 ToSql 会报错，改走 Exec。
@@ -379,7 +379,7 @@ dsl.Update(User).ValuesOf(model.NewUserRecord().SetName("x").SetAge(0)).Where(Us
 dsl.Update(User).ValuesOf(
     model.NewUserRecord().SetId(1).SetName("a"),
     model.NewUserRecord().SetId(2).SetName("b"),
-).DB().Exec(ctx)
+).Exec(ctx)
 // UPDATE `user` SET `name` = ? WHERE `id` = ?  ×2
 
 // 多表更新（MySQL JOIN / PG+SQLite FROM）。
@@ -411,7 +411,7 @@ dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 dsl.Delete(User).ValuesOf(
     model.NewUserRecord().SetId(1),
     model.NewUserRecord().SetId(2),
-).DB().Exec(ctx)
+).Exec(ctx)
 ```
 
 ### Upsert 与 Returning
@@ -448,25 +448,26 @@ dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).
 ## 执行
 
 ```go
-// 查询 + 扫描到 struct 切片 / 标量。
-users := []model.UserModel{}
-err := dsl.Select(User.AllFields()).From(User).
-    DB().Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
-    Scan(ctx, &users)
+// 查询填进结构体切片。不写 DB 时走默认组。
+var users []model.UserModel
+rows, err := dsl.Select(User.AllFields()).From(User).
+    Where(User.Age.Gt(18)).Order(User.Id.Desc()).Limit(10).
+    Rows(ctx)
+err = rows.Structs(&users)
 
-count := int64(0)
-err = dsl.Select(fn.Count(User.Id)).From(User).DB().Scan(ctx, &count)
+var count int64
+err = dsl.Select(fn.Count(User.Id)).From(User).Value(ctx, &count)
 
-// 单列。time.Time、gtime.Time、sql.Null* 是单元格，用 Value 或 Column。
-// Scan 映射一行结构体，或 int64、string 这类基本值。
+// 单列。time.Time 和 sql.Null* 是单元格，用 Value 或 Column。
+// 一行结构体用 Row 再 db.Record.Struct。
 var created time.Time
-err = dsl.Select(User.CreatedAt).From(User).Where(User.Id.Eq(1)).DB().Value(ctx, &created)
+err = dsl.Select(User.CreatedAt).From(User).Where(User.Id.Eq(1)).Value(ctx, &created)
 var names []string
-err = dsl.Select(User.Name).From(User).DB().Column(ctx, &names)
+err = dsl.Select(User.Name).From(User).Column(ctx, &names)
 
 // 写操作。
-_, err = dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john")).DB().Exec(ctx)
-_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).DB().Exec(ctx)
+_, err = dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john")).Exec(ctx)
+_, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
 
 // Transaction 把事务放进 ctx，回调里的查询会自动加入。
 database, err := db.Instance()
@@ -476,20 +477,20 @@ err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
 })
 
 // 便捷方法：Count 自动补全 COUNT(*)，Exists 包装 SELECT EXISTS(...)。
-total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).DB().Count(ctx)
-exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).DB().Exists(ctx)
+total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).Count(ctx)
+exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).Exists(ctx)
 
 // 行级类型化读取：类型 T 在编译期被消费。
 row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
-    Where(User.Name.Eq("john")).DB().Row(ctx)
-id := gooq.Get(row, User.Id)      // int64
-name := gooq.Get(row, User.Name)  // string
+    Where(User.Name.Eq("john")).Row(ctx)
+id := db.Get(row, User.Id)      // int64
+name := db.Get(row, User.Name)  // string
 
 // RowOne 强制至多一行：无匹配返回 nil，匹配 2+ 行报错（取首行语义仍在 Row；显式 Limit/Page/Cache 直接拒绝）。
 row, err = dsl.Select(User.Id, User.Name).From(User).
-    Where(User.Account.Eq("x")).DB().RowOne(ctx)
+    Where(User.Account.Eq("x")).RowOne(ctx)
 
-// DB() 使用默认组，DB("orders") 使用该配置组。
+// DB("orders") 使用该配置组。不写 DB 时走默认组。
 // LoadConfig 通过 gcfg 读取 gooq.database 和 gooq.logger。
 // SetDebug 打印 SQL，SetDryRun 跳过执行，Prepare 预处理语句，
 // Schema 切换 MySQL 库名或 PostgreSQL search_path。
@@ -504,33 +505,35 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
 dsl.SetCacheAdapter(redisAdapter)
 dsl.SetHashCacheAdapter(redisHashAdapter)
 
-// 单查询缓存：所有查询方法（Scan/Row/Rows/Count/Exists）均走缓存。
+// 单查询缓存：Value、Column、Row、Rows、Count、Exists 走缓存。
 // Cache() 无参或零值 option 不开启；自定义 Name 固定 key（便于手动失效）。
-err := dsl.Select(User.AllFields()).From(User).
+// 参数 key 带类型名，int64(1) 与 "1" 不会共用一把 key。
+rows, err := dsl.Select(User.AllFields()).From(User).
     Cache(dsl.CacheOption{Duration: time.Minute}).
-    DB().Scan(ctx, &users)
+    Rows(ctx)
 
 // 复合查询：count 先行、rows 后查，count=0 短路不查 rows。
 rows, total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
-    Page(1, 10).DB().RowsAndCount(ctx)
+    Page(1, 10).RowsAndCount(ctx)
 
-// PageCache 缓存复合查询为一条 hash 记录（field 为 "count" 与 "rows"）。
+// PageCache 把带总数的分页缓存成一条 hash 记录（field 为 "count" 与 "rows"）。
+// 用于 RowsAndCount、StructsAndCount、ColumnAndCount。
 // 需要 SetHashCacheAdapter。key 由总数 SQL 和当前页 SQL 连同参数一起哈希，
 // 选择列、条件、排序或页码不同都会得到不同的 key。
 // RowsField/CountField 可覆盖 field 名；Force 开启后 count=0 也会缓存（默认跳过空结果）。
 rows, total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
-    Page(1, 10).DB().RowsAndCount(ctx)
+    Page(1, 10).RowsAndCount(ctx)
 
-// ScanAndCount 是类型化变体：数据扫入 dest 并返回总数。
-// 与 RowsAndCount 共享同一份数据缓存（统一存 Result JSON，数据 field 默认 "rows"）。
+// StructsAndCount 把当前页填进结构体切片并返回总数。
+// 内部是 RowsAndCount 再 Result.Structs，并共用这份分页缓存。
 var vips []User
 total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
     Order(User.Id.Desc()).
     PageCache(dsl.CacheOption{Duration: time.Minute}).
-    Page(1, 10).DB().ScanAndCount(ctx, &vips)
+    Page(1, 10).StructsAndCount(ctx, &vips)
 ```
 
 ## 方言
@@ -548,7 +551,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - GaussDB 指 openGauss。引号、占位符、行锁、`RETURNING`、删除和更新跟随 PostgreSQL。冲突更新是 `ON DUPLICATE KEY UPDATE`，本次插入值写成 `VALUES(col)`。GaussDB 没有 `ON CONFLICT DO NOTHING`，`DoNothing` 返回错误。`database/sql` 的驱动名是 `opengauss`。
 - 达梦（`dm`）把标识符渲染成大写双引号，对上未加引号建表时折成大写的名字。冲突插入写成 `MERGE`，必须给出 `OnConflictKey`，冲突列还要出现在插入列里。`DoNothing` 只在未匹配时插入。没有 `RETURNING`。`GROUP_CONCAT` 写成 `LISTAGG`，`DATE_FORMAT` 写成 `TO_CHAR`，`IFNULL` 写成 `NVL`，`DATE_ADD` 写成 `DATEADD`。`time.Time` 绑成时间字符串，零值写成 `NULL`。配置里的 IANA 时区换成分钟偏移，超出 ±12 小时会失败。带连接的 `DELETE` 和带外连接的 `UPDATE` 返回错误。自增列不会标成 `AutoIncrement`。`database/sql` 的驱动名是 `dm`。链接示例：`dm:SYSDBA:SYSDBA001@tcp(127.0.0.1:5236)/SYSDBA`。
 - 带 schema 的表渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；gooq-gen 仅对 PG 填充 schema（`current_schema()`）。
-- 方言敏感 SQL 都在 `DialectSpec` 上：分页、行锁、`JOIN` 改写、upsert、删除、多表 `UPDATE`（`RenderUpdate`）、`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL` / `CURDATE` / `DATE_ADD` / `DATEDIFF` / `ROUND`。SQLite 的 upsert 使用 `ON CONFLICT`。
+- `DialectSpec` 只约束语句形状：分页、行锁、`JOIN` 改写、upsert、删除、多表 `UPDATE`（`RenderUpdate`）。`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL`、`CURDATE`、`DATE_ADD`、`DATEDIFF`、`ROUND`、`MEDIAN` 留在具体方言类型上。没有实现的方言在 `ToSql` 返回 `dialect %q does not support ...`。SQLite 的 upsert 使用 `ON CONFLICT`。
 - 表别名、列别名和函数别名都走 `Quote`。`numeric` / `decimal` 生成 `string`。PostgreSQL 数组按元素类型生成切片。
 - PostgreSQL 16 起可用 `STRING_AGG(DISTINCT ...)`、`JSON_ARRAYAGG` 和 `ANY_VALUE`。
 

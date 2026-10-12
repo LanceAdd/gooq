@@ -59,13 +59,13 @@ func TestMasterSlaveRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 	var src string
-	if err = database.GetScan(ctx, &src, `SELECT src FROM marker`); err != nil {
+	if err = database.Value(ctx, &src, `SELECT src FROM marker`); err != nil {
 		t.Fatal(err)
 	}
 	if src != "slave" {
 		t.Fatalf("read src %q, want slave", src)
 	}
-	if err = database.Master().GetScan(ctx, &src, `SELECT src FROM marker`); err != nil {
+	if err = database.Master().Value(ctx, &src, `SELECT src FROM marker`); err != nil {
 		t.Fatal(err)
 	}
 	if src != "master" {
@@ -75,13 +75,13 @@ func TestMasterSlaveRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int64
-	if err = database.Master().GetScan(ctx, &count, `SELECT COUNT(*) FROM marker WHERE src = 'written'`); err != nil {
+	if err = database.Master().Value(ctx, &count, `SELECT COUNT(*) FROM marker WHERE src = 'written'`); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
 		t.Fatalf("master written rows %d", count)
 	}
-	if err = database.GetScan(ctx, &count, `SELECT COUNT(*) FROM marker WHERE src = 'written'`); err != nil {
+	if err = database.Value(ctx, &count, `SELECT COUNT(*) FROM marker WHERE src = 'written'`); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {
@@ -136,7 +136,7 @@ func TestTransactionPropagation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int64
-	if err = database.GetScan(ctx, &count, `SELECT COUNT(*) FROM item`); err != nil {
+	if err = database.Value(ctx, &count, `SELECT COUNT(*) FROM item`); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {

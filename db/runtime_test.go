@@ -54,7 +54,7 @@ func TestLoadConfigAndDryRun(t *testing.T) {
 	}
 	database.SetDryRun(false)
 	var count int64
-	if err = database.GetScan(ctx, &count, `SELECT COUNT(*) FROM item`); err == nil {
+	if err = database.Value(ctx, &count, `SELECT COUNT(*) FROM item`); err == nil {
 		t.Fatal("dry run should not create the table")
 	}
 }

@@ -198,7 +198,7 @@ func TestFn_DialectFunctions(t *testing.T) {
 
 func TestFn_DirectRenderWithoutShape(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		sql, _ := DateAdd(testUser.CreatedAt, 1, "WEEK").Render(gooq.NewRenderContext(gooq.DialectMySQL))
+		sql := DateAdd(testUser.CreatedAt, 1, "WEEK").Render(gooq.NewRenderContext(gooq.DialectMySQL))
 		t.Assert(sql, "")
 
 		_, _, err := dsl.Select(DateAdd(testUser.CreatedAt, 1, "WEEK")).From(testUser).ToSql(gooq.DialectMySQL)
@@ -215,7 +215,7 @@ func TestFn_DirectRenderWithoutShape(t *testing.T) {
 			DateFormat(testUser.CreatedAt, "%Y-%m-%d"),
 			Median(testUser.Age),
 		} {
-			sql, _ = expr.Render(missing)
+			sql = expr.Render(missing)
 			t.Assert(sql, "")
 		}
 	})
@@ -453,11 +453,11 @@ func TestFn_RenderWith(t *testing.T) {
 		// concatPipe：MySQL/SQLite 用 CONCAT，PG 用 ||。
 		concatPipe := func(a, b gooq.Expression) *FuncExpr {
 			return New("CONCAT", a, b).RenderWith(
-				func(rc *gooq.RenderContext, argsSQL []string) (string, []any) {
+				func(rc *gooq.RenderContext, argsSQL []string) string {
 					if rc.Dialect() == gooq.DialectPgsql {
-						return "(" + argsSQL[0] + " || " + argsSQL[1] + ")", nil
+						return "(" + argsSQL[0] + " || " + argsSQL[1] + ")"
 					}
-					return "CONCAT(" + argsSQL[0] + ", " + argsSQL[1] + ")", nil
+					return "CONCAT(" + argsSQL[0] + ", " + argsSQL[1] + ")"
 				},
 			)
 		}

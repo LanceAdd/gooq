@@ -1,4 +1,4 @@
-package gooq
+package db
 
 import (
 	"database/sql"
@@ -7,19 +7,19 @@ import (
 	"time"
 
 	"github.com/gogf/gf/v2/container/gvar"
-	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
+
+	"github.com/lanceadd/gooq"
 )
 
 var (
 	timeType    = reflect.TypeOf(time.Time{})
-	gtimeType   = reflect.TypeOf(gtime.Time{})
 	scannerType = reflect.TypeOf((*sql.Scanner)(nil)).Elem()
 )
 
 // Assign copies one driver value into a non-nil pointer.
 // NULL sets the zero value, and a pointer destination becomes nil.
-// time.Time and gtime.Time are parsed as datetimes. sql.Scanner values,
+// time.Time is parsed as a datetime. sql.Scanner values,
 // including sql.Null*, receive the driver value directly.
 // A row struct is not a cell; use Record.Struct for that.
 func Assign(pointer any, src any) error {
@@ -35,7 +35,7 @@ func Assign(pointer any, src any) error {
 
 // Value reads one typed column from a row.
 // A missing column and NULL return the zero value. Conversion failure returns an error.
-func Value[T any](record Record, field Field[T]) (T, error) {
+func Value[T any](record Record, field gooq.Field[T]) (T, error) {
 	var zero T
 	if record == nil {
 		return zero, nil
@@ -51,8 +51,8 @@ func Value[T any](record Record, field Field[T]) (T, error) {
 	return out, nil
 }
 
-// Column reads one typed column from every row, in result order.
-func Column[T any](result Result, field Field[T]) ([]T, error) {
+// ColumnOf reads one typed column from every row, in result order.
+func ColumnOf[T any](result Result, field gooq.Field[T]) ([]T, error) {
 	out := make([]T, 0, len(result))
 	for _, row := range result {
 		value, err := Value[T](row, field)
@@ -78,26 +78,6 @@ func Cell(record Record, column string) *gvar.Var {
 	return gvar.New(value)
 }
 
-// CheckScan reports when dest is a cell type. Scan maps row structs and basic values.
-// time.Time, gtime.Time, and sql.Scanner types such as sql.Null* use Value or Column.
-func CheckScan(dest any) error {
-	base, ok := storedType(dest)
-	if !ok {
-		return nil
-	}
-	elem := base
-	if elem.Kind() == reflect.Slice || elem.Kind() == reflect.Array {
-		elem = elem.Elem()
-		for elem.Kind() == reflect.Pointer {
-			elem = elem.Elem()
-		}
-	}
-	if isCellStruct(elem) {
-		return fmt.Errorf("gooq: Scan does not map %s; use Value for one column or Column for a column", elem)
-	}
-	return nil
-}
-
 // CheckValue reports when dest cannot receive one cell.
 func CheckValue(dest any) error {
 	base, ok := storedType(dest)
@@ -112,7 +92,7 @@ func CheckValue(dest any) error {
 		elem = elem.Elem()
 	}
 	if elem.Kind() == reflect.Struct && !isCellStruct(elem) {
-		return fmt.Errorf("gooq: Value reads one column; use Scan for a row struct")
+		return fmt.Errorf("gooq: Value reads one column; use Record.Struct for a row struct")
 	}
 	return nil
 }
@@ -128,7 +108,7 @@ func CheckColumn(dest any) error {
 		elem = elem.Elem()
 	}
 	if elem.Kind() == reflect.Struct && !isCellStruct(elem) {
-		return fmt.Errorf("gooq: Column reads one column; use Scan for a row slice")
+		return fmt.Errorf("gooq: Column reads one column; use Result.Structs for a row slice")
 	}
 	return nil
 }
@@ -142,7 +122,7 @@ func storedType(dest any) (reflect.Type, bool) {
 }
 
 func isCellStruct(t reflect.Type) bool {
-	if t == timeType || t == gtimeType {
+	if t == timeType {
 		return true
 	}
 	if t.Kind() != reflect.Struct {
@@ -169,24 +149,12 @@ func assignValue(dst reflect.Value, src any) error {
 		dst.SetZero()
 		return nil
 	}
-	switch dst.Type() {
-	case timeType:
+	if dst.Type() == timeType {
 		converted, err := toTime(src)
 		if err != nil {
 			return err
 		}
 		dst.Set(reflect.ValueOf(converted))
-		return nil
-	case gtimeType:
-		converted, err := toGTime(src)
-		if err != nil {
-			return err
-		}
-		if converted == nil {
-			dst.SetZero()
-			return nil
-		}
-		dst.Set(reflect.ValueOf(*converted))
 		return nil
 	}
 	if scanner, ok := scannerOf(dst); ok {
@@ -256,50 +224,15 @@ func toTime(src any) (time.Time, error) {
 			return time.Time{}, nil
 		}
 		return *value, nil
-	case gtime.Time:
-		return value.Time, nil
-	case *gtime.Time:
-		if value == nil {
-			return time.Time{}, nil
-		}
-		return value.Time, nil
 	case string:
 		return timeFromString(value)
 	case []byte:
 		return timeFromString(string(value))
 	default:
 		if unix, ok := unixSeconds(src); ok {
-			return gtime.NewFromTimeStamp(unix).Time, nil
+			return time.Unix(unix, 0), nil
 		}
 		return time.Time{}, fmt.Errorf("gooq: cannot convert %T to time.Time", src)
-	}
-}
-
-func toGTime(src any) (*gtime.Time, error) {
-	switch value := src.(type) {
-	case nil:
-		return nil, nil
-	case *gtime.Time:
-		return value, nil
-	case gtime.Time:
-		copied := value
-		return &copied, nil
-	case time.Time:
-		return gtime.NewFromTime(value), nil
-	case *time.Time:
-		if value == nil {
-			return nil, nil
-		}
-		return gtime.NewFromTime(*value), nil
-	case string:
-		return gtime.StrToTime(value)
-	case []byte:
-		return gtime.StrToTime(string(value))
-	default:
-		if unix, ok := unixSeconds(src); ok {
-			return gtime.NewFromTimeStamp(unix), nil
-		}
-		return nil, fmt.Errorf("gooq: cannot convert %T to gtime.Time", src)
 	}
 }
 
@@ -307,14 +240,32 @@ func timeFromString(value string) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
 	}
-	parsed, err := gtime.StrToTime(value)
-	if err != nil {
-		return time.Time{}, err
+	for _, layout := range timeLayouts {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed, nil
+		}
 	}
-	if parsed == nil {
-		return time.Time{}, fmt.Errorf("gooq: cannot parse time %q", value)
+	for _, layout := range localTimeLayouts {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, nil
+		}
 	}
-	return parsed.Time, nil
+	return time.Time{}, fmt.Errorf("gooq: cannot parse time %q", value)
+}
+
+var timeLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02 15:04:05.999999999Z07:00",
+	"2006-01-02 15:04:05Z07:00",
+}
+
+var localTimeLayouts = []string{
+	"2006-01-02 15:04:05.999999999",
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04:05",
+	"2006-01-02",
+	"15:04:05",
 }
 
 func unixSeconds(src any) (int64, bool) {

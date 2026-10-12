@@ -487,90 +487,51 @@ func (c *cteTable) Field(column string) gooq.Field[any] {
 	return gooq.NewField[any](c.name, column)
 }
 
-func (b *SelectBuilder) Condition() (string, []any) {
-	return b.Render(gooq.NewRenderContext(gooq.DialectMySQL))
-}
-
 // Render 渲染带括号的子查询。
 // spec == nil 时，标识符用双引号，占位符用 ?，共享锁用 FOR SHARE。
 // LIMIT 与 FOR UPDATE 保持现在的通用写法。调用方要得到方言错误，使用 ToSql。
-func (b *SelectBuilder) Render(rc *gooq.RenderContext) (string, []any) {
-	sql, args := b.renderSelect(rc)
+func (b *SelectBuilder) Render(rc *gooq.RenderContext) string {
+	sql := b.renderSelect(rc)
 	sql = "(" + sql + ")"
 	if b.alias != "" {
 		sql += " AS " + rc.Quote(b.alias)
 	}
-	return sql, args
+	return sql
 }
 
 // DB selects the configuration group used at execution.
-// With no name, it uses the default group, the same as omitting DB.
-func (b *SelectBuilder) DB(name ...string) *SelectBuilder {
-	b.group = ""
-	b.groupSet = false
-	if len(name) > 0 && name[0] != "" {
-		b.group = name[0]
-		b.groupSet = true
-	}
+// An empty name uses the default group, the same as omitting DB.
+func (b *SelectBuilder) DB(name string) *SelectBuilder {
+	b.group = name
+	b.groupSet = name != ""
 	return b
 }
 
-// queryWithCache 统一缓存执行入口：cacheOption 走普通缓存；pageCacheOpt 仅 RowsAndCount 消费。
+// queryWithCache 执行单元格查询。Count 和 Exists 走这里。PageCache 不服务单值查询。
 func (b *SelectBuilder) queryWithCache(ctx context.Context, dialect gooq.Dialect, sql string, args []any, dest any, kind string) error {
 	if b.pageCacheOpt != nil {
-		return fmt.Errorf("gooq: PageCache only works with RowsAndCount")
+		return errPageCache()
 	}
-	if b.cacheOption == nil {
-		return scanExec(ctx, b.executor, sql, args, dest)
-	}
-	if adapter := GetCacheAdapter(); adapter != nil {
-		return b.scanWithCache(ctx, adapter, dialect, sql, args, dest, kind)
-	}
-	return scanExec(ctx, b.executor, sql, args, dest)
-}
-
-func (b *SelectBuilder) scanWithCache(
-	ctx context.Context, adapter CacheAdapter, dialect gooq.Dialect, sql string, args []any, dest any, kind string,
-) error {
-	key, err := b.cacheKey(kind, sql, args)
-	if err != nil {
+	if err := db.CheckValue(dest); err != nil {
 		return err
 	}
-	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
-		return json.Unmarshal(bytes, dest)
+	run := func() error {
+		return execValue(ctx, b.executor, sql, args, dest)
 	}
-	if err := scanExec(ctx, b.executor, sql, args, dest); err != nil {
-		return err
+	if b.cacheOption != nil {
+		if adapter := GetCacheAdapter(); adapter != nil {
+			return b.cellWithCache(ctx, adapter, sql, args, dest, kind, run)
+		}
 	}
-	if isEmptyResult(dest) && !b.cacheOption.Force {
-		return nil
-	}
-	if bytes, err := json.Marshal(dest); err == nil {
-		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
-	}
-	return nil
-}
-
-func (b *SelectBuilder) Scan(ctx context.Context, dest any) error {
-	restore, err := b.bind(ctx)
-	if err != nil {
-		return err
-	}
-	defer restore()
-	dialect := b.dialect()
-	sql, args, err := b.ToSql(dialect)
-	if err != nil {
-		return err
-	}
-	return b.queryWithCache(ctx, dialect, sql, args, dest, "scan")
+	return run()
 }
 
 // Value writes the first column of the first row into dest.
-// dest is one cell, such as *time.Time, *gtime.Time, *sql.NullString, or *int.
+// dest is one cell, such as *time.Time, *sql.NullTime, *sql.NullString, or *int.
 // No row returns sql.ErrNoRows. NULL writes the zero value.
-// A row struct uses Scan. A slice uses Column.
+// A row struct uses Row and Record.Struct. A slice uses Column.
 func (b *SelectBuilder) Value(ctx context.Context, dest any) error {
-	if err := gooq.CheckValue(dest); err != nil {
+	if err := db.CheckValue(dest); err != nil {
 		return err
 	}
 	return b.readCell(ctx, dest, "value", execValue)
@@ -578,9 +539,9 @@ func (b *SelectBuilder) Value(ctx context.Context, dest any) error {
 
 // Column writes the first column of every row into dest.
 // dest is a pointer to a slice of cells. No rows sets an empty slice.
-// A slice of row structs uses Scan.
+// A slice of row structs uses Rows and Result.Structs.
 func (b *SelectBuilder) Column(ctx context.Context, dest any) error {
-	if err := gooq.CheckColumn(dest); err != nil {
+	if err := db.CheckColumn(dest); err != nil {
 		return err
 	}
 	return b.readCell(ctx, dest, "column", execColumn)
@@ -595,7 +556,7 @@ func (b *SelectBuilder) readCell(
 	}
 	defer restore()
 	if b.pageCacheOpt != nil {
-		return fmt.Errorf("gooq: PageCache only works with RowsAndCount")
+		return errPageCache()
 	}
 	dialect := b.dialect()
 	sql, args, err := b.ToSql(dialect)
@@ -634,16 +595,16 @@ func (b *SelectBuilder) cellWithCache(
 	return nil
 }
 
-// rowWithCache 单行缓存：gooq.Record 空结果不缓存（与 count=0 空结果策略一致）。
+// rowWithCache 单行缓存：db.Record 空结果不缓存（与 count=0 空结果策略一致）。
 func (b *SelectBuilder) rowWithCache(
 	ctx context.Context, adapter CacheAdapter, dialect gooq.Dialect, sql string, args []any,
-) (gooq.Record, error) {
+) (db.Record, error) {
 	key, err := b.cacheKey("row", sql, args)
 	if err != nil {
 		return nil, err
 	}
 	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
-		var record gooq.Record
+		var record db.Record
 		if err := json.Unmarshal(bytes, &record); err != nil {
 			return nil, err
 		}
@@ -662,7 +623,7 @@ func (b *SelectBuilder) rowWithCache(
 	return record, nil
 }
 
-func (b *SelectBuilder) Row(ctx context.Context) (gooq.Record, error) {
+func (b *SelectBuilder) Row(ctx context.Context) (db.Record, error) {
 	restore, err := b.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -674,7 +635,7 @@ func (b *SelectBuilder) Row(ctx context.Context) (gooq.Record, error) {
 		return nil, err
 	}
 	if b.pageCacheOpt != nil {
-		return nil, fmt.Errorf("gooq: PageCache only works with RowsAndCount")
+		return nil, errPageCache()
 	}
 	if b.cacheOption != nil {
 		if adapter := GetCacheAdapter(); adapter != nil {
@@ -691,12 +652,12 @@ func (b *SelectBuilder) Row(ctx context.Context) (gooq.Record, error) {
 	return record, nil
 }
 
-func (b *SelectBuilder) RowOne(ctx context.Context) (gooq.Record, error) {
+func (b *SelectBuilder) RowOne(ctx context.Context) (db.Record, error) {
 	if b.limit > 0 {
 		return nil, fmt.Errorf("gooq: RowOne requires an unbounded query, remove Limit/Page")
 	}
 	if b.pageCacheOpt != nil {
-		return nil, fmt.Errorf("gooq: PageCache only works with RowsAndCount")
+		return nil, errPageCache()
 	}
 	if b.cacheOption != nil {
 		return nil, fmt.Errorf("gooq: Cache is not supported by RowOne")
@@ -729,13 +690,13 @@ func (b *SelectBuilder) RowOne(ctx context.Context) (gooq.Record, error) {
 // rowsWithCache 多行缓存：空结果不缓存。
 func (b *SelectBuilder) rowsWithCache(
 	ctx context.Context, adapter CacheAdapter, dialect gooq.Dialect, sql string, args []any,
-) (gooq.Result, error) {
+) (db.Result, error) {
 	key, err := b.cacheKey("rows", sql, args)
 	if err != nil {
 		return nil, err
 	}
 	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
-		var rows gooq.Result
+		var rows db.Result
 		if err := json.Unmarshal(bytes, &rows); err != nil {
 			return nil, err
 		}
@@ -754,7 +715,7 @@ func (b *SelectBuilder) rowsWithCache(
 	return rows, nil
 }
 
-func (b *SelectBuilder) Rows(ctx context.Context) (gooq.Result, error) {
+func (b *SelectBuilder) Rows(ctx context.Context) (db.Result, error) {
 	restore, err := b.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -766,7 +727,7 @@ func (b *SelectBuilder) Rows(ctx context.Context) (gooq.Result, error) {
 		return nil, err
 	}
 	if b.pageCacheOpt != nil {
-		return nil, fmt.Errorf("gooq: PageCache only works with RowsAndCount")
+		return nil, errPageCache()
 	}
 	if b.cacheOption != nil {
 		if adapter := GetCacheAdapter(); adapter != nil {
@@ -777,7 +738,7 @@ func (b *SelectBuilder) Rows(ctx context.Context) (gooq.Result, error) {
 }
 
 // rowsValue 执行当前查询并返回全部行（Rows/RowsAndCount 共用）。
-func (b *SelectBuilder) rowsValue(ctx context.Context, dialect gooq.Dialect) (gooq.Result, error) {
+func (b *SelectBuilder) rowsValue(ctx context.Context, dialect gooq.Dialect) (db.Result, error) {
 	sql, args, err := b.ToSql(dialect)
 	if err != nil {
 		return nil, err
@@ -852,9 +813,13 @@ func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 	}
 	defer restore()
 	dialect := b.dialect()
-	subSQL, subArgs := b.renderSelect(gooq.NewRenderContext(dialect))
+	rc := gooq.NewRenderContext(dialect)
+	subSQL := b.renderSelect(rc)
+	if err := rc.Err(); err != nil {
+		return false, err
+	}
 	var ok bool
-	if err := b.queryWithCache(ctx, dialect, fmt.Sprintf("SELECT EXISTS (%s)", subSQL), subArgs, &ok, "exists"); err != nil {
+	if err := b.queryWithCache(ctx, dialect, fmt.Sprintf("SELECT EXISTS (%s)", subSQL), rc.Args(), &ok, "exists"); err != nil {
 		return false, err
 	}
 	return ok, nil
@@ -862,7 +827,7 @@ func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 
 // RowsAndCount 复合查询：count 先行，count=0 短路不查 rows；
 // PageCache 开启时走 hash 缓存（count/rows 独立 field，部分命中独立处理）。
-func (b *SelectBuilder) RowsAndCount(ctx context.Context) (gooq.Result, int64, error) {
+func (b *SelectBuilder) RowsAndCount(ctx context.Context) (db.Result, int64, error) {
 	restore, err := b.bind(ctx)
 	if err != nil {
 		return nil, 0, err
@@ -886,8 +851,7 @@ func (b *SelectBuilder) RowsAndCount(ctx context.Context) (gooq.Result, int64, e
 	return rows, count, nil
 }
 
-// cacheFieldNames 解析复合缓存 field 名：数据 field 默认 "rows"（RowsAndCount/ScanAndCount 共享），
-// count 默认 "count"。
+// cacheFieldNames 解析复合缓存 field 名：数据 field 默认 "rows"，count 默认 "count"。
 func (b *SelectBuilder) cacheFieldNames() (dataField, countField string) {
 	dataField = b.pageCacheOpt.RowsField
 	if dataField == "" {
@@ -941,7 +905,7 @@ func (b *SelectBuilder) resolveCompositeCount(
 	return count, count == 0, nil
 }
 
-func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.Dialect) (gooq.Result, int64, error) {
+func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.Dialect) (db.Result, int64, error) {
 	dataField, countField := b.cacheFieldNames()
 	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect)
 	if err != nil {
@@ -956,7 +920,7 @@ func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.
 	}
 	// rows：命中直接可用；未命中查询回填。
 	if bytes, ok := fields[dataField]; ok {
-		var rows gooq.Result
+		var rows db.Result
 		if err := json.Unmarshal(bytes, &rows); err != nil {
 			return nil, 0, err
 		}
@@ -967,7 +931,7 @@ func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.
 		return nil, 0, err
 	}
 	if rows == nil {
-		rows = gooq.Result{}
+		rows = db.Result{}
 	}
 	if bytes, err := json.Marshal(rows); err == nil {
 		_ = adapter.HSet(ctx, key, dataField, bytes, b.pageCacheOpt.Duration)
@@ -975,28 +939,11 @@ func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.
 	return rows, count, nil
 }
 
-// ScanAndCount 复合查询：count 先行，count=0 短路；数据扫入 dest 并返回总数。
-// 与 RowsAndCount 共享同一份数据缓存（统一存 gooq.Result JSON），命中后 Structs 转换到 dest。
-func (b *SelectBuilder) ScanAndCount(ctx context.Context, dest any) (int64, error) {
-	restore, err := b.bind(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer restore()
-	dialect := b.dialect()
-	if b.pageCacheOpt != nil {
-		return b.scanAndCountWithCache(ctx, dialect, dest)
-	}
-	count, err := b.countValue(ctx, dialect)
-	if err != nil {
-		return 0, err
-	}
-	if count == 0 {
-		return 0, nil
-	}
-	rows, err := b.rowsValue(ctx, dialect)
-	if err != nil {
-		return 0, err
+// StructsAndCount 先取总数和当前页，再把行填进结构体切片。总数为 0 时不再查页。
+func (b *SelectBuilder) StructsAndCount(ctx context.Context, dest any) (int64, error) {
+	rows, count, err := b.RowsAndCount(ctx)
+	if err != nil || count == 0 {
+		return count, err
 	}
 	if err := rows.Structs(dest); err != nil {
 		return 0, err
@@ -1004,39 +951,59 @@ func (b *SelectBuilder) ScanAndCount(ctx context.Context, dest any) (int64, erro
 	return count, nil
 }
 
-func (b *SelectBuilder) scanAndCountWithCache(ctx context.Context, dialect gooq.Dialect, dest any) (int64, error) {
+// ColumnAndCount 先取总数，再把当前页第一列填进单元格切片。总数为 0 时不再查页。
+func (b *SelectBuilder) ColumnAndCount(ctx context.Context, dest any) (int64, error) {
+	if err := db.CheckColumn(dest); err != nil {
+		return 0, err
+	}
+	restore, err := b.bind(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer restore()
+	dialect := b.dialect()
+	if b.pageCacheOpt != nil {
+		return b.columnAndCountWithCache(ctx, dialect, dest)
+	}
+	count, err := b.countValue(ctx, dialect)
+	if err != nil || count == 0 {
+		return count, err
+	}
+	sql, args, err := b.ToSql(dialect)
+	if err != nil {
+		return 0, err
+	}
+	if err = execColumn(ctx, b.executor, sql, args, dest); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (b *SelectBuilder) columnAndCountWithCache(ctx context.Context, dialect gooq.Dialect, dest any) (int64, error) {
 	dataField, countField := b.cacheFieldNames()
 	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect)
 	if err != nil {
 		return 0, err
 	}
 	count, short, err := b.resolveCompositeCount(ctx, dialect, adapter, key, countField, fields)
+	if err != nil || short {
+		return count, err
+	}
+	if bytes, ok := fields[dataField]; ok {
+		if err = json.Unmarshal(bytes, dest); err != nil {
+			return 0, err
+		}
+		return count, nil
+	}
+	sql, args, err := b.ToSql(dialect)
 	if err != nil {
 		return 0, err
 	}
-	if short {
-		return 0, nil
-	}
-	// 数据 field：命中直接反序列化为 gooq.Result；未命中查询回填（统一存 gooq.Result JSON）。
-	var rows gooq.Result
-	if bytes, ok := fields[dataField]; ok {
-		if err := json.Unmarshal(bytes, &rows); err != nil {
-			return 0, err
-		}
-	} else {
-		rows, err = b.rowsValue(ctx, dialect)
-		if err != nil {
-			return 0, err
-		}
-		if rows == nil {
-			rows = gooq.Result{}
-		}
-		if bytes, err := json.Marshal(rows); err == nil {
-			_ = adapter.HSet(ctx, key, dataField, bytes, b.pageCacheOpt.Duration)
-		}
-	}
-	if err := rows.Structs(dest); err != nil {
+	if err = execColumn(ctx, b.executor, sql, args, dest); err != nil {
 		return 0, err
+	}
+	if bytes, err := json.Marshal(dest); err == nil {
+		_ = adapter.HSet(ctx, key, dataField, bytes, b.pageCacheOpt.Duration)
 	}
 	return count, nil
 }
@@ -1062,8 +1029,11 @@ func (b *SelectBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 		return "", nil, err
 	}
 	rc := gooq.NewRenderContext(dialect)
-	sql, args := b.renderSelect(rc)
-	return sql, args, nil
+	sql := b.renderSelect(rc)
+	if err := rc.Err(); err != nil {
+		return "", nil, err
+	}
+	return sql, rc.Args(), nil
 }
 
 // ValidateDialect 遍历各位置表达式触发节点方言校验（含嵌套子查询）。
@@ -1113,7 +1083,7 @@ func (b *SelectBuilder) renderGroupExt(rc *gooq.RenderContext) string {
 		var flat []string
 		for _, set := range b.groupExtSets {
 			for _, f := range set {
-				groupSQL, _ := rc.Render(f)
+				groupSQL := rc.Render(f)
 				flat = append(flat, groupSQL)
 			}
 		}
@@ -1123,7 +1093,7 @@ func (b *SelectBuilder) renderGroupExt(rc *gooq.RenderContext) string {
 		for _, set := range b.groupExtSets {
 			var fields []string
 			for _, f := range set {
-				groupSQL, _ := rc.Render(f)
+				groupSQL := rc.Render(f)
 				fields = append(fields, groupSQL)
 			}
 			setParts = append(setParts, "("+strings.Join(fields, ", ")+")")
@@ -1134,7 +1104,7 @@ func (b *SelectBuilder) renderGroupExt(rc *gooq.RenderContext) string {
 	}
 }
 
-func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
+func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
 	var (
 		sql     strings.Builder
 		selects []string
@@ -1142,7 +1112,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 	if len(b.ctes) > 0 {
 		var cteParts []string
 		for _, cte := range b.ctes {
-			cteSQL, _ := cte.query.renderSelect(rc)
+			cteSQL := cte.query.renderSelect(rc)
 			cteParts = append(cteParts, rc.Quote(cte.name)+" AS ("+cteSQL+")")
 		}
 		sql.WriteString("WITH ")
@@ -1160,7 +1130,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 		sql.WriteString("*")
 	} else {
 		for _, f := range b.fields {
-			selectSQL, _ := rc.Render(f)
+			selectSQL := rc.Render(f)
 			if selectSQL != "" {
 				selects = append(selects, selectSQL)
 			}
@@ -1178,18 +1148,21 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 		sql.WriteString(keyword)
 		sql.WriteString(" ")
 		sql.WriteString(b.renderTable(rc, j.table))
-		if len(j.on) > 0 {
-			var ons []string
-			for _, c := range j.on {
-				onSQL, _ := rc.Render(c)
-				if onSQL != "" {
-					ons = append(ons, onSQL)
-				}
+		var ons []string
+		for _, c := range j.on {
+			onSQL := rc.Render(c)
+			if onSQL != "" {
+				ons = append(ons, onSQL)
 			}
-			if len(ons) > 0 {
-				sql.WriteString(" ON ")
-				sql.WriteString(strings.Join(ons, " AND "))
+		}
+		if !joinSoftDeleteInWhere(j.joinType) {
+			if soft := b.softDeleteSQL(rc, j.table); soft != "" {
+				ons = append(ons, soft)
 			}
+		}
+		if len(ons) > 0 {
+			sql.WriteString(" ON ")
+			sql.WriteString(strings.Join(ons, " AND "))
 		}
 	}
 	if where := b.renderWhere(rc); where != "" {
@@ -1199,13 +1172,13 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 	if len(b.groupBy) > 0 || b.groupExt != groupExtNone {
 		var groups []string
 		for _, g := range b.groupBy {
-			groupSQL, _ := rc.Render(g)
+			groupSQL := rc.Render(g)
 			groups = append(groups, groupSQL)
 		}
 		if b.groupExt == groupExtRollup && rc.Spec() != nil && rc.Spec().RollupWith() {
 			for _, set := range b.groupExtSets {
 				for _, f := range set {
-					groupSQL, _ := rc.Render(f)
+					groupSQL := rc.Render(f)
 					groups = append(groups, groupSQL)
 				}
 			}
@@ -1224,7 +1197,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 	if len(b.having) > 0 {
 		var haves []string
 		for _, h := range b.having {
-			havingSQL, _ := rc.Render(h)
+			havingSQL := rc.Render(h)
 			if havingSQL != "" {
 				haves = append(haves, havingSQL)
 			}
@@ -1236,7 +1209,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 	}
 	// 集合操作：整体 ORDER BY / LIMIT 作用于组合结果。
 	for _, so := range b.setOps {
-		subSQL, _ := so.query.renderSelect(rc)
+		subSQL := so.query.renderSelect(rc)
 		sql.WriteString(" ")
 		sql.WriteString(setOpKeyword[so.op])
 		sql.WriteString(" ")
@@ -1245,7 +1218,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 	if len(b.orderBy) > 0 {
 		var orders []string
 		for _, o := range b.orderBy {
-			orderSQL, _ := rc.Render(o)
+			orderSQL := rc.Render(o)
 			orders = append(orders, orderSQL)
 		}
 		sql.WriteString(" ORDER BY ")
@@ -1272,7 +1245,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) (string, []any) {
 		default:
 		}
 	}
-	return sql.String(), rc.Args()
+	return sql.String()
 }
 
 // renderTable 渲染表或派生表。
@@ -1283,7 +1256,7 @@ func (b *SelectBuilder) renderTable(rc *gooq.RenderContext, t gooq.Table) string
 // renderTableName 渲染表或派生表（表名 + 别名）；SelectBuilder 与 DMLBuilder 共用。
 func renderTableName(rc *gooq.RenderContext, t gooq.Table) string {
 	if sub, ok := t.(*SelectBuilder); ok {
-		subSQL, _ := sub.renderSelect(rc)
+		subSQL := sub.renderSelect(rc)
 		sql := "(" + subSQL + ")"
 		if sub.alias != "" {
 			sql += " AS " + rc.Quote(sub.alias)
@@ -1306,19 +1279,24 @@ func tableNameSQL(rc *gooq.RenderContext, t gooq.Table) string {
 	return name
 }
 
-// renderWhere 渲染 WHERE 条件（含软删除自动条件）。
+// renderWhere 渲染 WHERE 条件（含 FROM 与内连接的软删除自动条件）。
 func (b *SelectBuilder) renderWhere(rc *gooq.RenderContext) string {
-	conditions := b.conditions
-	if !b.unscoped && b.from != nil && b.from.Meta() != nil {
-		if softField := b.from.Meta().SoftDeleteField(); softField != nil && !gooq.ReferencesColumn(b.conditions, softField.ColumnName) {
-			conditions = append(conditions, b.from.Field(softField.ColumnName).IsNull())
-		}
-	}
 	var parts []string
-	for _, c := range conditions {
-		condSQL, _ := rc.Render(c)
+	for _, c := range b.conditions {
+		condSQL := rc.Render(c)
 		if condSQL != "" {
 			parts = append(parts, condSQL)
+		}
+	}
+	if soft := b.softDeleteSQL(rc, b.from); soft != "" {
+		parts = append(parts, soft)
+	}
+	for _, j := range b.joins {
+		if !joinSoftDeleteInWhere(j.joinType) {
+			continue
+		}
+		if soft := b.softDeleteSQL(rc, j.table); soft != "" {
+			parts = append(parts, soft)
 		}
 	}
 	return strings.Join(parts, " AND ")

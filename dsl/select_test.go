@@ -114,6 +114,50 @@ func TestDsl_Select_SoftDelete(t *testing.T) {
 		sql, _, err = Select(testUserRole.Id).From(testUserRole).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT `user_role`.`id` FROM `user_role`")
+
+		// Eq(列, 值) 也算显式接管，不再补 IS NULL。
+		sql, args, err := Select(testUser.Id).From(testUser).
+			Where(gooq.Eq(testUser.DeletedAt, "2026-10-10")).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` = ?")
+		t.AssertEQ(args, []any{"2026-10-10"})
+	})
+}
+
+func TestDsl_Select_JoinSoftDelete(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		u := testUser.As("u")
+		r := testRole.As("r")
+
+		sql, _, err := Select(u.Id).From(u).
+			LeftJoin(r).On(r.Id.EqExpr(u.Id)).
+			Where(u.DeletedAt.IsNotNull()).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `u`.`id` FROM `user` AS `u` LEFT JOIN `role` AS `r` ON `r`.`id` = `u`.`id` AND `r`.`deleted_at` IS NULL WHERE `u`.`deleted_at` IS NOT NULL")
+
+		flag := gooq.NewTableBase(&gooq.TableMeta{
+			TableName: "flag",
+			Fields: []gooq.FieldMeta{
+				{ColumnName: "id", LocalType: gooq.LocalTypeInt64, Primary: true},
+				{ColumnName: "deleted", LocalType: gooq.LocalTypeInt, SoftDelete: true},
+			},
+		})
+		sql, args, err := Select(flag.Field("id")).From(flag).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `flag`.`id` FROM `flag` WHERE `flag`.`deleted` = 0")
+		t.Assert(len(args), 0)
+
+		bad := gooq.NewTableBase(&gooq.TableMeta{
+			TableName: "note",
+			Fields: []gooq.FieldMeta{
+				{ColumnName: "id", LocalType: gooq.LocalTypeInt64},
+				{ColumnName: "deleted_at", LocalType: gooq.LocalTypeString, SoftDelete: true},
+			},
+		})
+		_, _, err = Select(bad.Field("id")).From(bad).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
 	})
 }
 
@@ -130,21 +174,21 @@ func TestDsl_Select_Join(t *testing.T) {
 			Where(r.Name.Eq("admin")).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL AND `r`.`deleted_at` IS NULL")
 		t.AssertEQ(args, []any{"admin"})
 
 		sql, _, err = Select(u.Id).From(u).
 			LeftJoin(r).On(r.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `u`.`id` FROM `user` AS `u` LEFT JOIN `role` AS `r` ON `r`.`id` = `u`.`id` WHERE `u`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT `u`.`id` FROM `user` AS `u` LEFT JOIN `role` AS `r` ON `r`.`id` = `u`.`id` AND `r`.`deleted_at` IS NULL WHERE `u`.`deleted_at` IS NULL")
 
 		// 无别名 JOIN：字段自动带表名前缀（避免同名列冲突）。
 		sql, _, err = Select(testUser.Id).From(testUser).
 			InnerJoin(testRole).On(testRole.Id.EqExpr(testUser.Id)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `user`.`id` FROM `user` INNER JOIN `role` ON `role`.`id` = `user`.`id` WHERE `user`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` INNER JOIN `role` ON `role`.`id` = `user`.`id` WHERE `user`.`deleted_at` IS NULL AND `role`.`deleted_at` IS NULL")
 	})
 }
 
@@ -191,7 +235,7 @@ func TestDsl_Select_SelfJoin(t *testing.T) {
 			InnerJoin(u2).On(u1.Id.EqExpr(u2.Id)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL")
+		t.Assert(sql, "SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL AND `u2`.`deleted_at` IS NULL")
 	})
 }
 

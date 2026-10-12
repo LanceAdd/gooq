@@ -19,38 +19,30 @@ type groupCondition struct {
 	conditions []Expression
 }
 
-func (g *groupCondition) Condition() (string, []any) {
-	return g.Render(NewRenderContext(DialectMySQL))
-}
-
-func (g *groupCondition) Render(rc *RenderContext) (string, []any) {
-	var (
-		parts   = make([]string, 0, len(g.conditions))
-		allArgs = make([]any, 0)
-	)
+func (g *groupCondition) Render(rc *RenderContext) string {
+	parts := make([]string, 0, len(g.conditions))
 	for _, condition := range g.conditions {
 		if condition == nil {
 			continue
 		}
-		sql, args := rc.Render(condition)
+		sql := rc.Render(condition)
 		if sql == "" {
 			continue
 		}
 		parts = append(parts, sql)
-		allArgs = append(allArgs, args...)
 	}
 	if len(parts) == 0 {
-		return "", nil
+		return ""
 	}
 	switch g.op {
 	case groupAnd:
-		return "(" + strings.Join(parts, " AND ") + ")", allArgs
+		return "(" + strings.Join(parts, " AND ") + ")"
 	case groupOr:
-		return "(" + strings.Join(parts, " OR ") + ")", allArgs
+		return "(" + strings.Join(parts, " OR ") + ")"
 	case groupNot:
-		return "(NOT " + parts[0] + ")", allArgs
+		return "(NOT " + parts[0] + ")"
 	default:
-		return "", nil
+		return ""
 	}
 }
 
@@ -75,14 +67,10 @@ type rawExpr struct {
 	args []any
 }
 
-func (r *rawExpr) Condition() (string, []any) {
-	return r.sql, r.args
-}
-
-func (r *rawExpr) Render(rc *RenderContext) (string, []any) {
+func (r *rawExpr) Render(rc *RenderContext) string {
 	rc.args = append(rc.args, r.args...)
 	rc.argIndex += len(r.args)
-	return r.sql, r.args
+	return r.sql
 }
 
 // Raw 原样拼出 SQL 并追加参数，不改写占位符。
@@ -96,16 +84,12 @@ type existsCondition struct {
 	negate   bool
 }
 
-func (e *existsCondition) Condition() (string, []any) {
-	return e.Render(NewRenderContext(DialectMySQL))
-}
-
-func (e *existsCondition) Render(rc *RenderContext) (string, []any) {
-	subSQL, subArgs := e.subquery.Render(rc)
+func (e *existsCondition) Render(rc *RenderContext) string {
+	subSQL := e.subquery.Render(rc)
 	if e.negate {
-		return "NOT EXISTS " + subSQL, subArgs
+		return "NOT EXISTS " + subSQL
 	}
-	return "EXISTS " + subSQL, subArgs
+	return "EXISTS " + subSQL
 }
 
 func (e *existsCondition) SubExpressions() []Expression {
@@ -126,25 +110,19 @@ type exprCondition struct {
 	value any
 }
 
-func (c *exprCondition) Condition() (string, []any) {
-	return c.Render(NewRenderContext(DialectMySQL))
-}
-
-func (c *exprCondition) Render(rc *RenderContext) (string, []any) {
-	leftSQL, leftArgs := rc.Render(c.left)
+func (c *exprCondition) Render(rc *RenderContext) string {
+	leftSQL := rc.Render(c.left)
 	switch c.op {
 	case opIsNull:
-		return leftSQL + " IS NULL", leftArgs
+		return leftSQL + " IS NULL"
 	case opIsNotNull:
-		return leftSQL + " IS NOT NULL", leftArgs
+		return leftSQL + " IS NOT NULL"
 	default:
 		operator := opStrings[c.op]
 		if expr, ok := c.value.(Expression); ok {
-			valSQL, valArgs := rc.Render(expr)
-			return fmt.Sprintf(`%s %s %s`, leftSQL, operator, valSQL), append(leftArgs, valArgs...)
+			return fmt.Sprintf(`%s %s %s`, leftSQL, operator, rc.Render(expr))
 		}
-		placeholder := rc.AddArg(c.value)
-		return fmt.Sprintf(`%s %s %s`, leftSQL, operator, placeholder), append(leftArgs, c.value)
+		return fmt.Sprintf(`%s %s %s`, leftSQL, operator, rc.AddArg(c.value))
 	}
 }
 
