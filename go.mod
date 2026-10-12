@@ -3,6 +3,7 @@ module github.com/lanceadd/gooq
 go 1.24
 
 require (
+	gitee.com/chunanyong/dm v1.8.12
 	gitee.com/opengauss/openGauss-connector-go-pq v1.0.7
 	github.com/go-sql-driver/mysql v1.7.1
 	github.com/gogf/gf/v2 v2.10.2
@@ -22,6 +23,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/golang/snappy v0.0.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect

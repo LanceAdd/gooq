@@ -23,6 +23,10 @@ const (
 	DialectTiDB Dialect = "tidb"
 	// DialectGaussDB 是 GaussDB（openGauss）渲染方言。
 	DialectGaussDB Dialect = "gaussdb"
+	// DialectOceanBase 是 OceanBase MySQL 模式的渲染方言。语句形状与 MySQL 相同。
+	DialectOceanBase Dialect = "oceanbase"
+	// DialectDM 是达梦渲染方言。
+	DialectDM Dialect = "dm"
 )
 
 const (
@@ -34,14 +38,29 @@ const (
 	GroupGroupingSets = "GROUPING SETS"
 )
 
-// UpsertClause 是 INSERT 冲突动作。方言决定把它渲染成 INSERT IGNORE、ON DUPLICATE KEY 或 ON CONFLICT。
+// UpsertClause 是 INSERT 冲突动作。方言决定把它渲染成 INSERT IGNORE、ON DUPLICATE KEY、ON CONFLICT 或 MERGE。
 type UpsertClause struct {
 	// DoNothing 为 true 时冲突不更新。
 	DoNothing bool
-	// ConflictCols 是冲突目标列。PostgreSQL 和 SQLite 会写进 ON CONFLICT。
+	// ConflictCols 是冲突目标列。PostgreSQL 和 SQLite 会写进 ON CONFLICT。达梦 MERGE 的 ON 也使用它。
 	ConflictCols []string
 	// Updates 是冲突后要写入的列。MySQL 只使用列名。
 	Updates map[string]any
+}
+
+// InsertStatement 是已经渲染好占位符的 INSERT。
+// Table 含限定名和引号。Columns 是原始列名。Rows 的每一格是值的 SQL。
+type InsertStatement struct {
+	Table   string
+	Columns []string
+	Rows    [][]string
+	Upsert  *UpsertClause
+}
+
+// InsertRenderer 在冲突动作无法接在 INSERT 后面时，由方言渲染整句。
+// 达梦把 INSERT IGNORE 和冲突更新写成 MERGE。
+type InsertRenderer interface {
+	RenderInsert(rc *RenderContext, stmt InsertStatement) (string, error)
 }
 
 // GroupConcatInput 是字符串聚合在各方言上的渲染输入。
@@ -174,6 +193,8 @@ func init() {
 	RegisterDialect(MariaDBDialect{})
 	RegisterDialect(TiDBDialect{})
 	RegisterDialect(GaussDBDialect{})
+	RegisterDialect(OceanBaseDialect{})
+	RegisterDialect(DMDialect{})
 }
 
 func castType(table map[LocalType]string, localType LocalType) string {

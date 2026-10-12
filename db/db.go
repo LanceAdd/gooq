@@ -168,7 +168,10 @@ func openNode(cfg Config) (node, Driver, error) {
 	if err != nil {
 		return node{}, nil, err
 	}
-	dsn = drv.ApplySession(dsn, cfg)
+	dsn, err = configureSession(drv, dsn, cfg)
+	if err != nil {
+		return node{}, nil, err
+	}
 	sqlDB, err := openSQL(drv.SQLDriver(), dsn, "", cfg)
 	if err != nil {
 		return node{}, nil, err
@@ -187,6 +190,13 @@ func openNode(cfg Config) (node, Driver, error) {
 		maxLife:    cfg.ConnMaxLifetime,
 		maxIdleFor: cfg.MaxIdleTime,
 	}, drv, nil
+}
+
+func configureSession(drv Driver, dsn string, cfg Config) (string, error) {
+	if configurer, ok := drv.(SessionConfigurer); ok {
+		return configurer.ConfigureSession(dsn, cfg)
+	}
+	return drv.ApplySession(dsn, cfg), nil
 }
 
 func openSQL(driverName, dsn, initSQL string, cfg Config) (*sql.DB, error) {

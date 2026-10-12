@@ -186,7 +186,7 @@ type excludedExpr struct {
 }
 
 // Excluded 表示冲突更新时写回本次插入的列值。
-// MySQL 渲染为 VALUES(col)，PostgreSQL 和 SQLite 渲染为 EXCLUDED.col。
+// MySQL 渲染为 VALUES(col)，PostgreSQL 和 SQLite 渲染为 EXCLUDED.col，达梦渲染为 T2.col。
 func Excluded(col interface{ ColumnName() string }) Expression {
 	return &excludedExpr{column: col.ColumnName()}
 }

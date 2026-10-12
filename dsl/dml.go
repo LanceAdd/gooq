@@ -512,15 +512,42 @@ func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error)
 	if len(columns) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert columns is empty")
 	}
-	rows := make([]string, len(b.insertRows))
+	rows := make([][]string, len(b.insertRows))
 	for i, row := range b.insertRows {
 		placeholders := make([]string, len(columns))
 		for j, col := range columns {
 			placeholders[j] = placeValue(rc, row, col)
 		}
-		rows[i] = "(" + strings.Join(placeholders, ", ") + ")"
+		rows[i] = placeholders
 	}
 	spec := rc.Spec()
+	if b.upsert != nil && spec != nil {
+		if renderer, ok := spec.(gooq.InsertRenderer); ok {
+			sqlStr, err := renderer.RenderInsert(rc, gooq.InsertStatement{
+				Table:   tableNameSQL(rc, b.table),
+				Columns: columns,
+				Rows:    rows,
+				Upsert: &gooq.UpsertClause{
+					DoNothing:    b.upsert.doNothing,
+					ConflictCols: b.upsert.conflictCols,
+					Updates:      b.upsert.updateMap,
+				},
+			})
+			if err != nil {
+				return "", nil, err
+			}
+			if returning, retErr := b.renderReturning(rc); retErr != nil {
+				return "", nil, retErr
+			} else if returning != "" {
+				sqlStr += returning
+			}
+			return sqlStr, rc.Args(), nil
+		}
+	}
+	joined := make([]string, len(rows))
+	for i, row := range rows {
+		joined[i] = "(" + strings.Join(row, ", ") + ")"
+	}
 	doNothing := b.upsert != nil && b.upsert.doNothing
 	insertKeyword := "INSERT"
 	if spec != nil {
@@ -531,7 +558,7 @@ func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error)
 		insertKeyword,
 		tableNameSQL(rc, b.table),
 		strings.Join(quoteColumns(rc, columns), ", "),
-		strings.Join(rows, ", "),
+		strings.Join(joined, ", "),
 	)
 	if b.upsert != nil && spec != nil {
 		upsertSQL, err := spec.RenderUpsert(rc, gooq.UpsertClause{

@@ -34,6 +34,12 @@ type Driver interface {
 	SchemaSQL(name string) (string, error)
 }
 
+// SessionConfigurer 在会话参数写进 DSN 可能失败时由驱动实现。
+// 打开连接时优先调用它。没有实现时使用 ApplySession。
+type SessionConfigurer interface {
+	ConfigureSession(dsn string, cfg Config) (string, error)
+}
+
 var (
 	driverMu sync.RWMutex
 	drivers  = map[string]Driver{}

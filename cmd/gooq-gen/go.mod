@@ -12,6 +12,7 @@ require (
 replace github.com/lanceadd/gooq => ../..
 
 require (
+	gitee.com/chunanyong/dm v1.8.12 // indirect
 	gitee.com/opengauss/openGauss-connector-go-pq v1.0.7 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
@@ -22,6 +23,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sql-driver/mysql v1.7.1 // indirect
+	github.com/golang/snappy v0.0.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grokify/html-strip-tags-go v0.1.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect

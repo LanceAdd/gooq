@@ -53,6 +53,7 @@ func TestRenderExcluded(t *testing.T) {
 			{DialectMySQL, "VALUES(`name`)"},
 			{DialectPgsql, `EXCLUDED."name"`},
 			{DialectSQLite, `EXCLUDED."name"`},
+			{DialectDM, `T2."NAME"`},
 		}
 		for _, c := range cases {
 			sql, args := Excluded(testUser.Name).(Renderer).Render(NewRenderContext(c.dialect))
