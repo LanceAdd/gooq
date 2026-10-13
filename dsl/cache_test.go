@@ -9,10 +9,11 @@
 package dsl
 
 import (
-	"github.com/lanceadd/gooq"
+	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/test/gtest"
+	"github.com/lanceadd/gooq"
 )
 
 // cacheTestUser 是缓存 key 测试用最小表对象。
@@ -66,6 +67,20 @@ func TestDsl_CacheKey(t *testing.T) {
 		kText, err := b1.cacheKey("value", "SELECT ?", []any{"1"})
 		t.AssertNil(err)
 		t.AssertNE(kInt, kText)
+		t.Assert(kInt, "gooq:query:value:"+hashString(encodeQuery("SELECT ?", []any{int64(1)})))
+		t.Assert(len(kInt), len("gooq:query:value:")+64)
+
+		glued, err := b1.cacheKey("value", "SELECT ?", []any{"a,int:1"})
+		t.AssertNil(err)
+		split, err := b1.cacheKey("value", "SELECT ?", []any{"a", 1})
+		t.AssertNil(err)
+		t.AssertNE(glued, split)
+
+		sqlOnly, err := b1.cacheKey("value", "SELECT ?int:1", nil)
+		t.AssertNil(err)
+		withArg, err := b1.cacheKey("value", "SELECT ?", []any{1})
+		t.AssertNil(err)
+		t.AssertNE(sqlOnly, withArg)
 		_ = userId
 	})
 }
@@ -80,41 +95,48 @@ func TestDsl_CompositeCacheKey(t *testing.T) {
 		// 同一条件同一排序：不同页（LIMIT/OFFSET 差异）key 不同。
 		b1 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userId.Desc()).Page(1, 10)
 		b2 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userId.Desc()).Page(2, 10)
-		k1, err := b1.compositeCacheKey(gooq.DialectMySQL)
+		k1, err := b1.compositeCacheKey(gooq.DialectMySQL, "rows")
 		t.AssertNil(err)
-		k2, err := b2.compositeCacheKey(gooq.DialectMySQL)
+		k2, err := b2.compositeCacheKey(gooq.DialectMySQL, "rows")
 		t.AssertNil(err)
 		t.AssertNE(k1, k2)
 
 		// 不同参数：key 不同。
 		b3 := SelectFrom(cacheTestUser).Where(userLevel.Eq(2)).Order(userId.Desc()).Page(1, 10)
-		k3, err := b3.compositeCacheKey(gooq.DialectMySQL)
+		k3, err := b3.compositeCacheKey(gooq.DialectMySQL, "rows")
 		t.AssertNil(err)
 		t.AssertNE(k1, k3)
 
 		// 不同排序：key 不同。
 		b4 := SelectFrom(cacheTestUser).Where(userLevel.Eq(1)).Order(userName.Asc()).Page(1, 10)
-		k4, err := b4.compositeCacheKey(gooq.DialectMySQL)
+		k4, err := b4.compositeCacheKey(gooq.DialectMySQL, "rows")
 		t.AssertNil(err)
 		t.AssertNE(k1, k4)
 
 		// 不同选择列：key 不同。同一条查询重复计算则 key 相同。
 		b5 := Select(userId, userName).From(cacheTestUser).Where(userLevel.Eq(1)).Order(userId.Desc()).Page(1, 10)
-		k5, err := b5.compositeCacheKey(gooq.DialectMySQL)
+		k5, err := b5.compositeCacheKey(gooq.DialectMySQL, "rows")
 		t.AssertNil(err)
 		t.AssertNE(k1, k5)
 		b6 := Select(userId, userName).From(cacheTestUser).Where(userLevel.Eq(1)).Order(userId.Desc()).Page(1, 10)
-		k6, err := b6.compositeCacheKey(gooq.DialectMySQL)
+		k6, err := b6.compositeCacheKey(gooq.DialectMySQL, "rows")
 		t.AssertNil(err)
 		t.Assert(k5, k6)
 
 		// 方言改变 SQL 文本，key 不同。自定义 Name 优先。
-		kPg, err := b1.compositeCacheKey(gooq.DialectPgsql)
+		kPg, err := b1.compositeCacheKey(gooq.DialectPgsql, "rows")
 		t.AssertNil(err)
 		t.AssertNE(k1, kPg)
 		named := SelectFrom(cacheTestUser).PageCache(CacheOption{Name: "page:users"})
-		kNamed, err := named.compositeCacheKey(gooq.DialectMySQL)
+		kNamed, err := named.compositeCacheKey(gooq.DialectMySQL, "rows")
 		t.AssertNil(err)
 		t.Assert(kNamed, "page:users")
+
+		kCol, err := b1.compositeCacheKey(gooq.DialectMySQL, "column")
+		t.AssertNil(err)
+		t.AssertNE(k1, kCol)
+		t.Assert(strings.HasPrefix(k1, "gooq:multi-query:rows:"), true)
+		t.Assert(strings.HasPrefix(kCol, "gooq:multi-query:column:"), true)
+		t.Assert(len(k1), len("gooq:multi-query:rows:")+64)
 	})
 }

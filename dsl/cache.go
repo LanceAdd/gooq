@@ -2,8 +2,9 @@ package dsl
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"hash/fnv"
 	"strconv"
 	"strings"
 	"sync"
@@ -75,12 +76,13 @@ func (b *SelectBuilder) cacheKey(kind, sql string, args []any) (string, error) {
 	if b.cacheOption != nil && b.cacheOption.Name != "" {
 		return b.cacheOption.Name, nil
 	}
-	return "gooq:sql:" + kind + ":" + hashQuery(sql, args), nil
+	return "gooq:query:" + kind + ":" + hashQuery(sql, args), nil
 }
 
-// compositeCacheKey 是 PageCache 的 key。总数 SQL 与当前页 SQL 连同参数一起哈希，
-// count 与 rows 存在这一把 key 的两个 field 里。选择列、条件、排序或页码不同则 key 不同。
-func (b *SelectBuilder) compositeCacheKey(dialect gooq.Dialect) (string, error) {
+// compositeCacheKey 是 PageCache 的 key。kind 区分数据 field 的形状：rows 是 db.Result，column 是列切片。
+// 总数 SQL 与当前页 SQL 连同参数一起哈希，count 与 rows 存在这一把 key 的两个 field 里。
+// 选择列、条件、排序或页码不同则 key 不同。
+func (b *SelectBuilder) compositeCacheKey(dialect gooq.Dialect, kind string) (string, error) {
 	if b.pageCacheOpt != nil && b.pageCacheOpt.Name != "" {
 		return b.pageCacheOpt.Name, nil
 	}
@@ -92,7 +94,8 @@ func (b *SelectBuilder) compositeCacheKey(dialect gooq.Dialect) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	return "gooq:composite:" + hashString(encodeQuery(countSQL, countArgs)+encodeQuery(rowsSQL, rowsArgs)), nil
+	payload := encodeQuery(countSQL, countArgs) + encodeQuery(rowsSQL, rowsArgs)
+	return "gooq:multi-query:" + kind + ":" + hashString(payload), nil
 }
 
 // encodeQuery 用长度前缀拼出 SQL 和参数，避免两段文本粘连后发生碰撞。
@@ -101,21 +104,29 @@ func encodeQuery(sql string, args []any) string {
 	return strconv.Itoa(len(sql)) + ":" + sql + strconv.Itoa(len(encodedArgs)) + ":" + encodedArgs
 }
 
-// encodeArgs 按「类型名 + 稳定文本」编码每个参数。int64(1) 与 "1" 得到不同的 key。
+// encodeArgs 按长度前缀编码每个参数。int64(1) 与 "1" 得到不同的 key，
+// 参数文本里的逗号也不会和相邻参数粘成同一段。
 func encodeArgs(args []any) string {
-	parts := make([]string, len(args))
-	for i, arg := range args {
-		parts[i] = fmt.Sprintf("%T:%v", arg, arg)
+	var b strings.Builder
+	for _, arg := range args {
+		typeName := fmt.Sprintf("%T", arg)
+		text := fmt.Sprintf("%v", arg)
+		b.WriteString(strconv.Itoa(len(typeName)))
+		b.WriteByte(':')
+		b.WriteString(typeName)
+		b.WriteByte(':')
+		b.WriteString(strconv.Itoa(len(text)))
+		b.WriteByte(':')
+		b.WriteString(text)
 	}
-	return strings.Join(parts, ",")
+	return b.String()
 }
 
 func hashQuery(sql string, args []any) string {
-	return hashString(sql + encodeArgs(args))
+	return hashString(encodeQuery(sql, args))
 }
 
 func hashString(s string) string {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(s))
-	return strconv.FormatUint(uint64(h.Sum32()), 16)
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }

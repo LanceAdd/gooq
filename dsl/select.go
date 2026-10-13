@@ -857,12 +857,12 @@ func (b *SelectBuilder) cacheFieldNames() (dataField, countField string) {
 }
 
 // compositeCacheBegin 复合缓存入口：校验 HashCacheAdapter、计算 key、一次取出整个 hash 记录。
-func (b *SelectBuilder) compositeCacheBegin(ctx context.Context, dialect gooq.Dialect) (HashCacheAdapter, string, map[string][]byte, error) {
+func (b *SelectBuilder) compositeCacheBegin(ctx context.Context, dialect gooq.Dialect, kind string) (HashCacheAdapter, string, map[string][]byte, error) {
 	adapter := GetHashCacheAdapter()
 	if adapter == nil {
 		return nil, "", nil, fmt.Errorf("gooq: PageCache requires HashCacheAdapter, use SetHashCacheAdapter")
 	}
-	key, err := b.compositeCacheKey(dialect)
+	key, err := b.compositeCacheKey(dialect, kind)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -899,7 +899,7 @@ func (b *SelectBuilder) resolveCompositeCount(
 
 func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.Dialect) (db.Result, int64, error) {
 	dataField, countField := b.cacheFieldNames()
-	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect)
+	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect, "rows")
 	if err != nil {
 		return nil, 0, err
 	}
@@ -973,7 +973,7 @@ func (b *SelectBuilder) ColumnAndCount(ctx context.Context, dest any) (int64, er
 
 func (b *SelectBuilder) columnAndCountWithCache(ctx context.Context, dialect gooq.Dialect, dest any) (int64, error) {
 	dataField, countField := b.cacheFieldNames()
-	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect)
+	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect, "column")
 	if err != nil {
 		return 0, err
 	}
