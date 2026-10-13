@@ -501,7 +501,7 @@ func (b *SelectBuilder) DB(name string) *SelectBuilder {
 }
 
 // queryWithCache 执行单元格查询。Count 和 Exists 走这里。PageCache 不服务单值查询。
-func (b *SelectBuilder) queryWithCache(ctx context.Context, dialect gooq.Dialect, sql string, args []any, dest any, kind string) error {
+func (b *SelectBuilder) queryWithCache(ctx context.Context, sql string, args []any, dest any, kind string) error {
 	if b.pageCacheOpt != nil {
 		return errPageCache()
 	}
@@ -573,8 +573,8 @@ func (b *SelectBuilder) cellWithCache(
 	if err != nil {
 		return err
 	}
-	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
-		return json.Unmarshal(bytes, dest)
+	if payload, ok, err := adapter.Get(ctx, key); err == nil && ok {
+		return json.Unmarshal(payload, dest)
 	}
 	if err = run(); err != nil {
 		return err
@@ -582,8 +582,8 @@ func (b *SelectBuilder) cellWithCache(
 	if isEmptyResult(dest) && !b.cacheOption.Force {
 		return nil
 	}
-	if bytes, err := json.Marshal(dest); err == nil {
-		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
+	if payload, err := json.Marshal(dest); err == nil {
+		_ = adapter.Set(ctx, key, payload, b.cacheOption.Duration)
 	}
 	return nil
 }
@@ -617,8 +617,8 @@ func (b *SelectBuilder) rowWithCache(
 	if record == nil && !b.cacheOption.Force {
 		return nil, nil
 	}
-	if bytes, err := json.Marshal(record); err == nil {
-		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
+	if payload, err := json.Marshal(record); err == nil {
+		_ = adapter.Set(ctx, key, payload, b.cacheOption.Duration)
 	}
 	return record, nil
 }
@@ -709,8 +709,8 @@ func (b *SelectBuilder) rowsWithCache(
 	if rows == nil && !b.cacheOption.Force {
 		return nil, nil
 	}
-	if bytes, err := json.Marshal(rows); err == nil {
-		_ = adapter.Set(ctx, key, bytes, b.cacheOption.Duration)
+	if payload, err := json.Marshal(rows); err == nil {
+		_ = adapter.Set(ctx, key, payload, b.cacheOption.Duration)
 	}
 	return rows, nil
 }
@@ -801,7 +801,7 @@ func (b *SelectBuilder) Count(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	var count int64
-	if err := b.queryWithCache(ctx, dialect, sql, args, &count, "count"); err != nil {
+	if err := b.queryWithCache(ctx, sql, args, &count, "count"); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -823,7 +823,7 @@ func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	var ok bool
-	if err := b.queryWithCache(ctx, dialect, spec.RenderExists(gooq.NewRenderContext(dialect), sql), args, &ok, "exists"); err != nil {
+	if err := b.queryWithCache(ctx, spec.RenderExists(gooq.NewRenderContext(dialect), sql), args, &ok, "exists"); err != nil {
 		return false, err
 	}
 	return ok, nil
@@ -890,8 +890,8 @@ func (b *SelectBuilder) compositeCacheBegin(ctx context.Context, dialect gooq.Di
 func (b *SelectBuilder) resolveCompositeCount(
 	ctx context.Context, dialect gooq.Dialect, adapter HashCacheAdapter, key, countField string, fields map[string][]byte,
 ) (count int64, short bool, err error) {
-	if bytes, ok := fields[countField]; ok {
-		if err := json.Unmarshal(bytes, &count); err != nil {
+	if payload, ok := fields[countField]; ok {
+		if err := json.Unmarshal(payload, &count); err != nil {
 			return 0, false, err
 		}
 		return count, count == 0, nil
@@ -903,8 +903,8 @@ func (b *SelectBuilder) resolveCompositeCount(
 	if count == 0 && !b.pageCacheOpt.Force {
 		return 0, true, nil
 	}
-	if bytes, err := json.Marshal(count); err == nil {
-		_ = adapter.HSet(ctx, key, countField, bytes, b.pageCacheOpt.Duration)
+	if payload, err := json.Marshal(count); err == nil {
+		_ = adapter.HSet(ctx, key, countField, payload, b.pageCacheOpt.Duration)
 	}
 	return count, count == 0, nil
 }
@@ -937,8 +937,8 @@ func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.
 	if rows == nil {
 		rows = db.Result{}
 	}
-	if bytes, err := json.Marshal(rows); err == nil {
-		_ = adapter.HSet(ctx, key, dataField, bytes, b.pageCacheOpt.Duration)
+	if payload, err := json.Marshal(rows); err == nil {
+		_ = adapter.HSet(ctx, key, dataField, payload, b.pageCacheOpt.Duration)
 	}
 	return rows, count, nil
 }
@@ -993,8 +993,8 @@ func (b *SelectBuilder) columnAndCountWithCache(ctx context.Context, dialect goo
 	if err != nil || short {
 		return count, err
 	}
-	if bytes, ok := fields[dataField]; ok {
-		if err = json.Unmarshal(bytes, dest); err != nil {
+	if payload, ok := fields[dataField]; ok {
+		if err = json.Unmarshal(payload, dest); err != nil {
 			return 0, err
 		}
 		return count, nil
@@ -1006,8 +1006,8 @@ func (b *SelectBuilder) columnAndCountWithCache(ctx context.Context, dialect goo
 	if err = execColumn(ctx, b.executor, sql, args, dest); err != nil {
 		return 0, err
 	}
-	if bytes, err := json.Marshal(dest); err == nil {
-		_ = adapter.HSet(ctx, key, dataField, bytes, b.pageCacheOpt.Duration)
+	if payload, err := json.Marshal(dest); err == nil {
+		_ = adapter.HSet(ctx, key, dataField, payload, b.pageCacheOpt.Duration)
 	}
 	return count, nil
 }
