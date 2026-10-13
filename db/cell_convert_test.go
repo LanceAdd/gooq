@@ -2,6 +2,8 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +70,25 @@ func TestAssignCell(t *testing.T) {
 	var textPtr *string
 	if err = Assign(&textPtr, nil); err != nil || textPtr != nil {
 		t.Fatalf("nil string pointer %v err=%v", textPtr, err)
+	}
+
+	var raw any
+	if err = Assign(&raw, int64(1)); err != nil || raw != int64(1) {
+		t.Fatalf("any int64 %#v err=%v", raw, err)
+	}
+	if err = Assign(&raw, true); err != nil || raw != true {
+		t.Fatalf("any bool %#v err=%v", raw, err)
+	}
+	if err = Assign(&raw, []byte("1")); err != nil || string(raw.([]byte)) != "1" {
+		t.Fatalf("any bytes %#v err=%v", raw, err)
+	}
+	raw = int64(1)
+	if err = Assign(&raw, nil); err != nil || raw != nil {
+		t.Fatalf("any nil %#v err=%v", raw, err)
+	}
+	var stringer fmt.Stringer
+	if err = Assign(&stringer, int64(1)); err == nil || !strings.Contains(err.Error(), "cannot assign int64") {
+		t.Fatalf("narrow interface err=%v", err)
 	}
 
 	column, err := ColumnOf(Result{row, {"created_at": nil}}, created)

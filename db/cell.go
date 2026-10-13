@@ -160,6 +160,14 @@ func assignValue(dst reflect.Value, src any) error {
 	if scanner, ok := scannerOf(dst); ok {
 		return scanDriver(scanner, src)
 	}
+	if dst.Kind() == reflect.Interface {
+		value := reflect.ValueOf(src)
+		if !value.Type().AssignableTo(dst.Type()) {
+			return fmt.Errorf("gooq: cannot assign %T to %s", src, dst.Type())
+		}
+		dst.Set(value)
+		return nil
+	}
 	if !dst.CanAddr() {
 		return fmt.Errorf("gooq: destination cannot be addressed")
 	}
