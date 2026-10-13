@@ -29,7 +29,7 @@ func (d *DB) SetDebug(enabled bool) {
 	d.debug.Set(enabled)
 }
 
-// SetDryRun 打开后跳过 Query、Exec、预编译和读取。Begin、Commit、Rollback 仍会执行。
+// SetDryRun 打开后跳过 Exec、预编译和读取。Query 返回错误。Begin、Commit、Rollback 仍会执行。
 func (d *DB) SetDryRun(enabled bool) {
 	if d.dryRun == nil {
 		return
@@ -37,16 +37,11 @@ func (d *DB) SetDryRun(enabled bool) {
 	d.dryRun.Set(enabled)
 }
 
-// SetLogger 替换写出 SQL 调试行的日志器。传入 nil 时不替换。
-func (d *DB) SetLogger(logger *glog.Logger) {
-	if logger == nil {
-		return
-	}
-	d.logger = logger
-}
-
-// Logger 返回 SQL 日志器。
+// Logger 返回打开时确定的 SQL 日志器。日志器在运行期间不替换。
 func (d *DB) Logger() *glog.Logger {
+	if d == nil {
+		return nil
+	}
 	return d.logger
 }
 
@@ -67,15 +62,16 @@ func (d *DB) observe(ctx context.Context, query string, args []any, fn func(cont
 }
 
 func (d *DB) logSQL(ctx context.Context, query string, args []any, cost time.Duration, err error) {
-	if d == nil || d.logger == nil || d.debug == nil || !d.debug.Val() {
+	logger := d.Logger()
+	if d == nil || logger == nil || d.debug == nil || !d.debug.Val() {
 		return
 	}
 	line := fmt.Sprintf("[%d ms] [%s] %s", cost.Milliseconds(), d.group, formatSQL(query, args))
 	if err != nil {
-		d.logger.Error(ctx, line+"\nError: "+err.Error())
+		logger.Error(ctx, line+"\nError: "+err.Error())
 		return
 	}
-	d.logger.Debug(ctx, line)
+	logger.Debug(ctx, line)
 }
 
 func formatSQL(query string, args []any) string {

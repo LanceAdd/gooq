@@ -8,6 +8,7 @@
 package dsl
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/lanceadd/gooq"
@@ -15,6 +16,25 @@ import (
 
 	"github.com/gogf/gf/v2/test/gtest"
 )
+
+func TestDsl_Select_OrAndGroupExt(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, args, err := Select(testUser.Id).From(testUser).
+			Where(testUser.Age.Gt(18)).
+			WhereOr(testUser.Status.Eq("vip")).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`age` > ? OR `user`.`status` = ?) AND `user`.`deleted_at` IS NULL")
+		t.AssertEQ(args, []any{18, "vip"})
+
+		_, _, err = Select(testUser.Status).From(testUser).
+			GroupRollup(testUser.Status).
+			GroupCube(testUser.Status).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "GROUP BY extension is already set"), true)
+	})
+}
 
 func TestDsl_Select_Basic(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
@@ -210,18 +230,17 @@ func TestDsl_Select_Lateral(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT `u`.`id`, `lt`.`cnt` FROM `user` AS `u` INNER JOIN LATERAL (SELECT COUNT(`user_role`.`user_id`) AS `cnt` FROM `user_role` WHERE `user_role`.`user_id` = `u`.`id`) AS `lt` ON 1 = 1 WHERE `u`.`deleted_at` IS NULL")
 
-		// SQLite：INNER JOIN LATERAL 语法不支持，映射为 CROSS JOIN LATERAL。
-		sql, _, err = Select(u.Id, lt.Field("cnt")).From(u).
+		_, _, err = Select(u.Id, lt.Field("cnt")).From(u).
 			InnerJoinLateral(lt).On(gooq.Raw("1 = 1")).
 			ToSql(gooq.DialectSQLite)
-		t.AssertNil(err)
-		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS "u" CROSS JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS "cnt" FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS "lt" ON 1 = 1 WHERE "u"."deleted_at" IS NULL`)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "LATERAL join is not supported"), true)
 
-		sql, _, err = Select(u.Id, lt.Field("cnt")).From(u).
+		_, _, err = Select(u.Id, lt.Field("cnt")).From(u).
 			CrossJoinLateral(lt).
 			ToSql(gooq.DialectSQLite)
-		t.AssertNil(err)
-		t.Assert(sql, `SELECT "u"."id", "lt"."cnt" FROM "user" AS "u" CROSS JOIN LATERAL (SELECT COUNT("user_role"."user_id") AS "cnt" FROM "user_role" WHERE "user_role"."user_id" = "u"."id") AS "lt" WHERE "u"."deleted_at" IS NULL`)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "LATERAL join is not supported"), true)
 	})
 }
 
@@ -311,6 +330,12 @@ func TestDsl_Select_Group(t *testing.T) {
 			GroupCube(testUser.Status).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNE(err, nil)
+
+		_, _, err = Select(testUser.Status).From(testUser).
+			GroupRollup(testUser.Status).
+			ToSql(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "ROLLUP is not supported"), true)
 	})
 }
 
@@ -377,7 +402,7 @@ func TestDsl_Select_Conditions(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, args, err := Select(testUser.Id).From(testUser).
 			Where(gooq.OR(testUser.Age.Lt(18), testUser.Status.Eq("vip"))).
-			And(testUser.Name.Like("j%")).
+			Where(testUser.Name.Like("j%")).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`age` < ? OR `user`.`status` = ?) AND `user`.`name` LIKE ? AND `user`.`deleted_at` IS NULL")
@@ -464,5 +489,13 @@ func TestDsl_Select_CountGroup(t *testing.T) {
 		sql, _, err = SelectFrom(testUser).Group(testUser.Status).countSQL(gooq.DialectPgsql)
 		t.AssertNil(err)
 		t.Assert(sql, `SELECT COUNT(*) FROM (SELECT * FROM "user" WHERE "user"."deleted_at" IS NULL GROUP BY "user"."status") AS "t"`)
+
+		sql, _, err = Select(testUser.Status).From(testUser).Distinct().countSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT COUNT(*) FROM (SELECT DISTINCT `user`.`status` FROM `user` WHERE `user`.`deleted_at` IS NULL) AS `t`")
+
+		sql, _, err = Select(testUser.Status).From(testUser).Distinct().Limit(10).countSQL(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT COUNT(*) FROM (SELECT DISTINCT "user"."status" FROM "user" WHERE "user"."deleted_at" IS NULL) AS "t"`)
 	})
 }

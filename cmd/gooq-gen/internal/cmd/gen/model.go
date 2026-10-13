@@ -49,7 +49,9 @@ func writeGenerated(path, content string) {
 	if err := gfile.PutContents(path, content); err != nil {
 		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
 	}
-	GoFmt(path)
+	if err := GoFmt(path); err != nil {
+		mlog.Fatalf(`formatting "%s" failed: %v`, path, err)
+	}
 	mlog.Print("generated:", gfile.RealPath(path))
 }
 
@@ -69,8 +71,12 @@ func generateModelContent(ctx context.Context, tableName, dirPath string, column
 		toModel      []string
 		fromModel    []string
 	)
+	usedNames := map[string]string{}
 	for _, field := range columns {
-		camel := modelFieldName(field.Name)
+		camel, nameErr := modelFieldName(field.Name, usedNames)
+		if nameErr != nil {
+			return "", "", nameErr
+		}
 		nullable := field.Nullable && !field.Primary
 		fieldType, setType := modelFieldTypes(field, nullable, &hasStdTime, &hasUUID)
 		fields = append(fields, fmt.Sprintf("\t%s %s `json:%q orm:%q`", camel, fieldType, modelJSONName(field.Name), field.Name))
@@ -129,12 +135,8 @@ func renderTemplate(ctx context.Context, name string, params gview.Params) (stri
 	return tplView.ParseContent(ctx, getTemplate(name))
 }
 
-func modelFieldName(column string) string {
-	name := formatFieldName(column, FieldNameCaseCamel)
-	if reservedModelNames[name] {
-		return name + "Field"
-	}
-	return name
+func modelFieldName(column string, used map[string]string) (string, error) {
+	return goFieldName(column, reservedModelNames, used)
 }
 
 func modelJSONName(column string) string {

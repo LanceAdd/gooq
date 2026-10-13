@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 )
 
 // Stmt 是绑定到一个连接池或事务的预编译语句。
@@ -68,7 +69,7 @@ func (s *Stmt) Exec(ctx context.Context, args ...any) (sql.Result, error) {
 	if s.stmt == nil {
 		return dryResult{}, nil
 	}
-	var result sql.Result
+	var result sql.Result = dryResult{}
 	err := s.db.observe(ctx, s.query, args, func(ctx context.Context) error {
 		var err error
 		result, err = s.stmt.ExecContext(ctx, s.db.bindArgs(args)...)
@@ -79,8 +80,11 @@ func (s *Stmt) Exec(ctx context.Context, args ...any) (sql.Result, error) {
 
 // Query 执行预编译查询。调用方负责关闭 rows。语句为空时返回 nil, nil。
 func (s *Stmt) Query(ctx context.Context, args ...any) (*sql.Rows, error) {
-	if s.stmt == nil {
-		return nil, nil
+	if s.stmt == nil || (s.db != nil && s.db.dryRun != nil && s.db.dryRun.Val()) {
+		if s.db != nil {
+			_ = s.db.observe(ctx, s.query, args, func(context.Context) error { return nil })
+		}
+		return nil, fmt.Errorf("gooq: Query is not available in dry run")
 	}
 	var rows *sql.Rows
 	err := s.db.observe(ctx, s.query, args, func(ctx context.Context) error {

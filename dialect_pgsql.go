@@ -40,7 +40,9 @@ var pgFormatReplacer = strings.NewReplacer(
 func (PostgresDialect) Name() Dialect { return DialectPgsql }
 
 // Quote 使用双引号。
-func (PostgresDialect) Quote(ident string) string { return `"` + ident + `"` }
+func (PostgresDialect) Quote(ident string) string {
+	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
+}
 
 // Placeholder 返回 $n 占位符。
 func (PostgresDialect) Placeholder(n int) string { return fmt.Sprintf("$%d", n) }
@@ -132,10 +134,14 @@ func (PostgresDialect) RenderRound(field, decimals string) string {
 }
 
 // RenderUpdate 渲染 UPDATE。全部内连接时使用 FROM，并把 ON 并入 WHERE。
-// 出现外连接时使用锚点子查询，ON 留在连接上。
+// 出现外连接时返回错误。GaussDB 嵌入本方法，错误里的方言名取渲染上下文。
 func (PostgresDialect) RenderUpdate(rc *RenderContext, target, sets, where string, joins []JoinRender) (string, error) {
 	if joinsHaveOuter(joins) {
-		return renderUpdateAnchor(target, sets, where, joins, rc.Quote("_gooq")), nil
+		name := DialectPgsql
+		if rc != nil && rc.Dialect() != "" {
+			name = rc.Dialect()
+		}
+		return "", fmt.Errorf("gooq: UPDATE with an outer join is not supported by dialect %s", name)
 	}
 	return renderUpdateFrom(target, sets, where, joins), nil
 }
@@ -153,8 +159,8 @@ func (PostgresDialect) RollupWith() bool { return false }
 func (PostgresDialect) OmitLock() bool { return false }
 
 // RenderDateFormat 把 MySQL 格式符转换成 TO_CHAR。
-func (PostgresDialect) RenderDateFormat(fieldSQL, format string) string {
-	return fmt.Sprintf("TO_CHAR(%s, %s)", fieldSQL, quoteLiteralStandard(pgFormatReplacer.Replace(format)))
+func (PostgresDialect) RenderDateFormat(fieldSQL, format string) (string, error) {
+	return fmt.Sprintf("TO_CHAR(%s, %s)", fieldSQL, quoteLiteralStandard(pgFormatReplacer.Replace(format))), nil
 }
 
 // RenderGroupConcat 渲染 STRING_AGG。DISTINCT 自 PostgreSQL 16 起可用。
@@ -167,11 +173,24 @@ func (PostgresDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
 	if in.Distinct {
 		distinct = "DISTINCT "
 	}
+	if in.Distinct && in.OrderSQL != "" && !sameAggregateOrder(in.FieldSQL, in.OrderSQL) {
+		return "", fmt.Errorf("gooq: GROUP_CONCAT DISTINCT with a different ORDER BY is not supported by dialect %s", DialectPgsql)
+	}
 	sqlStr := fmt.Sprintf("STRING_AGG(%s%s, %s", distinct, in.FieldSQL, quoteLiteralStandard(separator))
 	if in.OrderSQL != "" {
 		sqlStr += " ORDER BY " + in.OrderSQL
 	}
 	return sqlStr + ")", nil
+}
+
+func sameAggregateOrder(field, order string) bool {
+	for _, part := range strings.Split(order, ",") {
+		part = strings.TrimSpace(part)
+		if part != field && part != field+" ASC" && part != field+" DESC" {
+			return false
+		}
+	}
+	return order != ""
 }
 
 // RenderMedian 渲染为 PERCENTILE_CONT。

@@ -10,6 +10,10 @@
 
 All rendered output shown below comes from test assertions — copy-paste friendly.
 
+## Behavior change
+
+`Where(a).WhereOr(b)` ORs with the previous predicate and renders `(a OR b)`. Call `Where` again to add another AND predicate. Use `gooq.OR(...)` to group the predicates yourself.
+
 ## Quick Start
 
 ### 1. Generate table objects
@@ -149,18 +153,21 @@ User.DeletedAt.IsNull()               // `user`.`deleted_at` IS NULL
 OrderItem.UserId.EqExpr(User.Id)      // `order_item`.`user_id` = `user`.`id`
 User.Id.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
 
-// Combining: AND / OR / NOT.
+// Call Where again to add another AND predicate. WhereOr ORs with the previous predicate.
 dsl.Select(User.Id).From(User).
     Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
-    And(User.Name.Like("j%")).
+    Where(User.Name.Like("j%")).
     ToSql(gooq.DialectMySQL)
 // ... WHERE (`user`.`age` < ? OR `user`.`status` = ?) AND `user`.`name` LIKE ? AND `user`.`deleted_at` IS NULL
 // args: []any{18, "vip", "j%"}
 
-// Dynamic assembly: Clone a base builder for reuse.
+// Dynamic assembly: Clone a base builder for reuse. One builder cannot be used concurrently;
+// execution writes the resolved executor back onto it.
 base := dsl.Select(User.Id).From(User)
 q1 := base.Clone().Where(User.Age.Gt(18))
 q2 := base.Clone().Where(User.Status.Eq("vip")) // independent
+
+// A string passed to Fields is spliced as Raw SQL and is not quoted as an identifier.
 ```
 
 ### JOINs
@@ -183,7 +190,7 @@ u2 := User.As("u2")
 dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
 // SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL AND `u2`.`deleted_at` IS NULL
 
-// LATERAL derived tables (InnerLateral maps to CROSS JOIN LATERAL on SQLite).
+// LATERAL derived tables. SQLite 3.46 does not support LATERAL and returns an error at render time.
 lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
     From(UserRole).Where(UserRole.UserId.EqExpr(u.Id)).As("lt")
 dsl.Select(u.Id, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).ToSql(gooq.DialectPgsql)
@@ -301,7 +308,7 @@ gooq.Case().When(User.Age.Gt(60)).Then(gooq.Str("old")).
 User.Age.Mul(2)                                 // (`user`.`age` * ?)
 gooq.Add(User.Age, gooq.Mul(2, User.Age))       // (`user`.`age` + (? * `user`.`age`))
 gooq.Negate(User.Age)                           // (-`user`.`age`)
-User.Age.Cast(gooq.LocalTypeString)             // CAST(`user`.`age` AS CHAR)（PG: BIGINT / SQLite: TEXT）
+User.Age.Cast(gooq.LocalTypeString)             // CAST(`user`.`age` AS CHAR)（PG: TEXT / SQLite: TEXT）
 
 // Raw: structured SQL with parameter binding. Placeholders are not rewritten.
 // Use ? for MySQL and SQLite. PostgreSQL keeps the text as written, so write $n yourself.
@@ -345,7 +352,7 @@ dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john").SetAge(0))
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).Values("b", 2)
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?), (?, ?)
 
-// Several record rows. Batch chunks execution and aggregates RowsAffected.
+// Several record rows. Batch chunks execution and aggregates RowsAffected. Each chunk commits on its own; wrap the call in db.Transaction when the chunks must be atomic.
 dsl.Insert(User).ValuesOf(
     model.NewUserRecord().SetName("a"),
     model.NewUserRecord().SetName("b"),
@@ -389,8 +396,8 @@ dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq
 // UPDATE `user` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?
 dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectPgsql)
 // UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE "r"."id" = "u"."id"
-// Any LEFT / RIGHT / FULL join makes PostgreSQL use an anchor: (SELECT 1) AS "_gooq", then the original joins.
-// SQLite UPDATE FROM cannot express an outer join and returns an error at render time.
+// Any LEFT / RIGHT / FULL join makes PostgreSQL, GaussDB, SQLite, and Dameng return an error at render time.
+// MySQL keeps the outer join and writes it before SET.
 ```
 
 ### Delete
@@ -494,10 +501,28 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
 
 // DB("orders") uses that configuration group. Omitting DB uses the default group.
 // LoadConfig reads gooq.database and gooq.logger through gcfg.
+// Runtime reads only a file named gooq, such as gooq.yaml, and does not read config.yaml.
+// database is a list of groups: name is the group, endpoints are its master and slave nodes.
 // SetDebug logs SQL, SetDryRun skips execution, Prepare prepares a statement,
 // and Schema switches the MySQL database or PostgreSQL search_path.
 // Reads use a slave when the group has one; writes and BEGIN use a master.
 // Master() and Slave() force the pool. A transaction is taken from ctx.
+```
+
+```yaml
+gooq:
+  database:
+    - name: default
+      endpoints:
+        - link: "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/test"
+          role: master
+          debug: true
+    - name: orders
+      endpoints:
+        - link: "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/orders"
+          role: master
+        - link: "pgsql:postgres:postgres@tcp(127.0.0.1:5433)/orders"
+          role: slave
 ```
 
 ### Caching

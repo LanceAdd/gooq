@@ -10,6 +10,10 @@
 
 下文所有示例的渲染输出均来自测试断言，可直接运行验证。
 
+## 行为变化
+
+`Where(a).WhereOr(b)` 与前一个条件组成 OR，得到 `(a OR b)`。再加一个 AND 条件就再调用一次 `Where`。要自己分组时用 `gooq.OR(...)`。
+
 ## 快速开始
 
 ### 1. 生成表对象
@@ -148,18 +152,20 @@ User.DeletedAt.IsNull()               // `user`.`deleted_at` IS NULL
 OrderItem.UserId.EqExpr(User.Id)      // `order_item`.`user_id` = `user`.`id`
 User.Id.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
 
-// 组合：AND / OR / NOT。
+// 再加 AND 条件就再调用一次 Where。WhereOr 与前一个条件组成 OR。
 dsl.Select(User.Id).From(User).
     Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
-    And(User.Name.Like("j%")).
+    Where(User.Name.Like("j%")).
     ToSql(gooq.DialectMySQL)
 // ... WHERE (`user`.`age` < ? OR `user`.`status` = ?) AND `user`.`name` LIKE ? AND `user`.`deleted_at` IS NULL
 // args: []any{18, "vip", "j%"}
 
-// 动态组装：Clone 复用基准构建器。
+// 动态组装：Clone 复用基准构建器。同一个 builder 不能并发使用，执行前会把执行器写回它。
 base := dsl.Select(User.Id).From(User)
 q1 := base.Clone().Where(User.Age.Gt(18))
 q2 := base.Clone().Where(User.Status.Eq("vip")) // 互不干扰
+
+// Fields 的字符串参数按 Raw 拼进 SQL，不做标识符转义。列对象走字段渲染。
 ```
 
 ### JOIN
@@ -182,7 +188,7 @@ u2 := User.As("u2")
 dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
 // SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL AND `u2`.`deleted_at` IS NULL
 
-// LATERAL 派生表（InnerLateral 在 SQLite 下映射为 CROSS JOIN LATERAL）。
+// LATERAL 派生表。SQLite 3.46 不支持 LATERAL，渲染期返回错误。
 lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
     From(UserRole).Where(UserRole.UserId.EqExpr(u.Id)).As("lt")
 dsl.Select(u.Id, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1")).ToSql(gooq.DialectPgsql)
@@ -300,7 +306,7 @@ gooq.Case().When(User.Age.Gt(60)).Then(gooq.Str("old")).
 User.Age.Mul(2)                                 // (`user`.`age` * ?)
 gooq.Add(User.Age, gooq.Mul(2, User.Age))       // (`user`.`age` + (? * `user`.`age`))
 gooq.Negate(User.Age)                           // (-`user`.`age`)
-User.Age.Cast(gooq.LocalTypeString)             // CAST(`user`.`age` AS CHAR)（PG: BIGINT / SQLite: TEXT）
+User.Age.Cast(gooq.LocalTypeString)             // CAST(`user`.`age` AS CHAR)（PG: TEXT / SQLite: TEXT）
 
 // Raw：结构化 SQL，参数绑定。占位符不会被改写。
 // MySQL / SQLite 写 ?。PostgreSQL 保持原文，需要自己写 $n。
@@ -344,7 +350,7 @@ dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john").SetAge(0))
 dsl.Insert(User).Columns(User.Name, User.Age).Values("a", 1).Values("b", 2)
 // INSERT INTO `user` (`name`, `age`) VALUES (?, ?), (?, ?)
 
-// 多行写入记录。Batch 分批执行并聚合 RowsAffected。
+// 多行写入记录。Batch 分批执行并聚合 RowsAffected。各片独立提交，需要原子性时由调用方包在 db.Transaction 里。
 dsl.Insert(User).ValuesOf(
     model.NewUserRecord().SetName("a"),
     model.NewUserRecord().SetName("b"),
@@ -388,8 +394,8 @@ dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq
 // UPDATE `user` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?
 dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectPgsql)
 // UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE "r"."id" = "u"."id"
-// 连接里只要有 LEFT / RIGHT / FULL，PostgreSQL 改用锚点：(SELECT 1) AS "_gooq" 后面保持原来的连接。
-// SQLite 的 UPDATE FROM 不能表达外连接，渲染期返回错误。
+// 连接里只要有 LEFT / RIGHT / FULL，PostgreSQL、GaussDB、SQLite、达梦都在渲染期返回错误。
+// MySQL 保留外连接，写在 SET 前面。
 ```
 
 ### 删除
@@ -492,10 +498,28 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
 
 // DB("orders") 使用该配置组。不写 DB 时走默认组。
 // LoadConfig 通过 gcfg 读取 gooq.database 和 gooq.logger。
+// 运行时只读取名为 gooq 的配置文件，例如 gooq.yaml，不读取 config.yaml。
+// database 是配置组列表：name 是组名，endpoints 是这一组的主从节点。
 // SetDebug 打印 SQL，SetDryRun 跳过执行，Prepare 预处理语句，
 // Schema 切换 MySQL 库名或 PostgreSQL search_path。
 // 组内有从库时读走从库，写和 BEGIN 走主库。Master() / Slave() 强制指定。
 // 事务从 ctx 读取。
+```
+
+```yaml
+gooq:
+  database:
+    - name: default
+      endpoints:
+        - link: "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/test"
+          role: master
+          debug: true
+    - name: orders
+      endpoints:
+        - link: "pgsql:postgres:postgres@tcp(127.0.0.1:5432)/orders"
+          role: master
+        - link: "pgsql:postgres:postgres@tcp(127.0.0.1:5433)/orders"
+          role: slave
 ```
 
 ### 缓存

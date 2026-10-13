@@ -226,8 +226,8 @@ func (DMDialect) RollupWith() bool { return false }
 func (DMDialect) OmitLock() bool { return false }
 
 // RenderDateFormat 把 MySQL 格式符转换成 TO_CHAR。
-func (DMDialect) RenderDateFormat(fieldSQL, format string) string {
-	return fmt.Sprintf("TO_CHAR(%s, %s)", fieldSQL, quoteLiteralStandard(dmFormatReplacer.Replace(format)))
+func (DMDialect) RenderDateFormat(fieldSQL, format string) (string, error) {
+	return fmt.Sprintf("TO_CHAR(%s, %s)", fieldSQL, quoteLiteralStandard(dmFormatReplacer.Replace(format))), nil
 }
 
 // RenderGroupConcat 渲染 LISTAGG。

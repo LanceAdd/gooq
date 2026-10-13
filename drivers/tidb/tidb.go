@@ -32,10 +32,8 @@ func (tidbDriver) SQLDriver() string { return "mysql" }
 func (tidbDriver) Underlying() driver.Driver { return &mysqldriver.MySQLDriver{} }
 
 func (tidbDriver) DSN(link db.ParsedLink) (string, error) {
-	dsn := fmt.Sprintf("%s:%s@%s(%s:%s)/%s?parseTime=true", link.User, link.Pass, link.Protocol, link.Host, link.Port, link.Name)
-	if link.Port == "" {
-		dsn = fmt.Sprintf("%s:%s@%s(%s)/%s?parseTime=true", link.User, link.Pass, link.Protocol, link.Host, link.Name)
-	}
+	endpoint := tidbEndpoint(link)
+	dsn := fmt.Sprintf("%s:%s@%s/%s?parseTime=true", link.User, link.Pass, endpoint, link.Name)
 	if link.Extra == "" {
 		return dsn, nil
 	}
@@ -46,7 +44,14 @@ func (tidbDriver) DSN(link db.ParsedLink) (string, error) {
 	if extra.Get("parseTime") == "" {
 		extra.Set("parseTime", "true")
 	}
-	return fmt.Sprintf("%s:%s@%s(%s:%s)/%s?%s", link.User, link.Pass, link.Protocol, link.Host, link.Port, link.Name, extra.Encode()), nil
+	return fmt.Sprintf("%s:%s@%s/%s?%s", link.User, link.Pass, endpoint, link.Name, extra.Encode()), nil
+}
+
+func tidbEndpoint(link db.ParsedLink) string {
+	if link.Port == "" {
+		return fmt.Sprintf("%s(%s)", link.Protocol, link.Host)
+	}
+	return fmt.Sprintf("%s(%s:%s)", link.Protocol, link.Host, link.Port)
 }
 
 func (tidbDriver) ApplySession(dsn string, cfg db.Config) string {

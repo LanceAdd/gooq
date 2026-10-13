@@ -122,7 +122,7 @@ func (d *DB) runNew(ctx context.Context, opts TxOptions, fn func(ctx context.Con
 	ctx = WithTx(ctx, tx)
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			rbErr := tx.Rollback()
+			rbErr := rollbackFully(tx)
 			err = fmt.Errorf("gooq: transaction panic: %v", recovered)
 			if rbErr != nil {
 				err = fmt.Errorf("%w; rollback: %v", err, rbErr)
@@ -134,18 +134,28 @@ func (d *DB) runNew(ctx context.Context, opts TxOptions, fn func(ctx context.Con
 }
 
 // Transaction 在当前事务里开启保存点。fn 返回 nil 时释放保存点，返回错误时回滚到该保存点。
-func (t *Tx) Transaction(ctx context.Context, fn func(ctx context.Context, tx *Tx) error) error {
+// panic 时先回滚到该保存点并恢复层级，再把 panic 抛给外层。
+func (t *Tx) Transaction(ctx context.Context, fn func(ctx context.Context, tx *Tx) error) (err error) {
 	if t == nil {
 		return fmt.Errorf("gooq: transaction is nil")
 	}
 	if ctx == nil {
 		ctx = t.ctx
 	}
-	if err := t.beginNested(ctx); err != nil {
+	if err = t.beginNested(ctx); err != nil {
 		return err
 	}
 	ctx = WithTx(ctx, t)
-	err := fn(ctx, t)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			rbErr := t.Rollback()
+			if rbErr != nil {
+				panic(fmt.Errorf("gooq: transaction panic: %v; rollback: %v", recovered, rbErr))
+			}
+			panic(recovered)
+		}
+	}()
+	err = fn(ctx, t)
 	return finishTx(t, err)
 }
 
@@ -228,6 +238,23 @@ func (t *Tx) context() context.Context {
 
 func savepointName(depth int) string {
 	return fmt.Sprintf("gooq_sp_%d", depth)
+}
+
+// rollbackFully 退掉尚未释放的保存点，再回滚外层事务。
+func rollbackFully(tx *Tx) error {
+	if tx == nil {
+		return nil
+	}
+	var first error
+	for tx.depth > 0 {
+		if err := tx.Rollback(); err != nil && first == nil {
+			first = err
+		}
+	}
+	if err := tx.Rollback(); err != nil && first == nil {
+		return err
+	}
+	return first
 }
 
 func finishTx(tx *Tx, err error) error {

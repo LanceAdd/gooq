@@ -36,6 +36,7 @@ var reservedFieldNames = map[string]bool{
 	"As":         true,
 	"Clone":      true,
 	"TableBase":  true,
+	"BoundBase":  true,
 }
 
 // generateTable generates gooq typed table object files for given tables.
@@ -59,10 +60,11 @@ func generateTableSingle(ctx context.Context, database *db.DB, tableName, dirPat
 	}
 	if err = gfile.PutContents(path, tableContent); err != nil {
 		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
-	} else {
-		GoFmt(path)
-		mlog.Print("generated:", gfile.RealPath(path))
 	}
+	if err = GoFmt(path); err != nil {
+		mlog.Fatalf(`formatting "%s" failed: %v`, path, err)
+	}
+	mlog.Print("generated:", gfile.RealPath(path))
 }
 
 // generateTableContent builds and renders the gooq table object content.
@@ -82,15 +84,16 @@ func generateTableContent(
 	if filepath.Base(dirPathTable) == "gooq" {
 		gooqRef = ""
 	}
+	usedNames := map[string]string{}
 	for _, field := range columns {
 		fieldName := field.Name
-		camelName := formatFieldName(fieldName, FieldNameCaseCamel)
-		if reservedFieldNames[camelName] {
-			camelName += "Field"
+		camelName, nameErr := goFieldName(fieldName, reservedFieldNames, usedNames)
+		if nameErr != nil {
+			return "", nameErr
 		}
 
 		goType, localType := tableFieldTypes(field, &hasStdTime, &hasUUID)
-		softDelete := fieldName == "deleted_at" || fieldName == "delete_at"
+		softDelete := isSoftDeleteColumn(fieldName)
 		primary := field.Primary
 		autoIncrement := field.AutoIncrement
 		unique := field.Unique

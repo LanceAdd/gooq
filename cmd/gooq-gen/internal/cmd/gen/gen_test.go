@@ -247,6 +247,27 @@ func TestInit(t *testing.T) {
 	})
 }
 
+func TestFieldNames(t *testing.T) {
+	used := map[string]string{}
+	name, err := goFieldName("bound_base", reservedFieldNames, used)
+	if err != nil || name != "BoundBaseField" {
+		t.Fatalf("bound_base name=%s err=%v", name, err)
+	}
+	if !isSoftDeleteColumn("DELETED_AT") || !isSoftDeleteColumn("deletedAt") || !isSoftDeleteColumn("delete_at") {
+		t.Fatal("soft delete column was not recognized")
+	}
+	if _, err = goFieldName("2fa_enabled", reservedFieldNames, map[string]string{}); err == nil {
+		t.Fatal("expected an invalid Go name")
+	}
+	used = map[string]string{}
+	if _, err = goFieldName("col1", nil, used); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = goFieldName("col_1", nil, used); err == nil {
+		t.Fatal("expected a generated field name collision")
+	}
+}
+
 // TestGen_Config 验证 hack/gooq.yaml（gooq.gen.table）配置读取与 hack/template 本地模板覆盖：
 // 无参执行时 link/path 来自配置文件；本地模板优先于内置模板；无配置且无参数时报错退出。
 func TestGen_Config(t *testing.T) {

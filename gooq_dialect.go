@@ -121,9 +121,8 @@ type DialectSpec interface {
 	// RenderUpdate 渲染 UPDATE。where 只包含调用方自己的条件，不含连接条件。
 	// 没有连接时写成 UPDATE target SET sets。
 	// MySQL 有连接时把 JOIN 写在 SET 前面，并保留连接类型。
-	// PostgreSQL 和 SQLite 在全部为内连接时使用 FROM，并把各连接的 ON 并入 WHERE，调用方条件放在最后。
-	// 只要出现外连接，PostgreSQL 使用 (SELECT 1) AS "_gooq" 锚点，ON 留在连接上。
-	// SQLite 出现外连接时返回错误。
+	// PostgreSQL、SQLite 和达梦在全部为内连接时使用 FROM，并把各连接的 ON 并入 WHERE，调用方条件放在最后。
+	// PostgreSQL、GaussDB、SQLite 和达梦出现外连接时返回错误。
 	RenderUpdate(rc *RenderContext, target, sets, where string, joins []JoinRender) (string, error)
 	// JoinKeyword 改写连接关键字。大多数方言原样返回。
 	JoinKeyword(keyword string) string
@@ -222,6 +221,9 @@ func renderConflict(rc *RenderContext, clause UpsertClause) (string, error) {
 }
 
 func renderUpsertSets(rc *RenderContext, updates map[string]any) (string, error) {
+	if len(updates) == 0 {
+		return "", fmt.Errorf("gooq: conflict update has no assignments")
+	}
 	cols := sortedMapKeys(updates)
 	sets := make([]string, 0, len(cols))
 	for _, col := range cols {
@@ -331,14 +333,6 @@ func renderUpdateFrom(target, sets, where string, joins []JoinRender) string {
 	}
 	if len(ons) > 0 {
 		sqlStr += " WHERE " + strings.Join(ons, " AND ")
-	}
-	return sqlStr
-}
-
-func renderUpdateAnchor(target, sets, where string, joins []JoinRender, anchor string) string {
-	sqlStr := "UPDATE " + target + " SET " + sets + " FROM (SELECT 1) AS " + anchor + " " + renderJoined(joins)
-	if where != "" {
-		sqlStr += " WHERE " + where
 	}
 	return sqlStr
 }

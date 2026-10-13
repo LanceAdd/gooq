@@ -122,6 +122,9 @@ func openGroup(group string, configs []Config) (*DB, error) {
 			database.driver = drv
 			database.dialect = drv.Dialect()
 		} else if drv.Dialect() != database.dialect {
+			if opened.sql != nil {
+				_ = opened.sql.Close()
+			}
 			closeErr := database.Close()
 			if closeErr != nil {
 				return nil, fmt.Errorf("gooq: group %q mixes dialects %s and %s; close: %v", group, database.dialect, drv.Dialect(), closeErr)
@@ -274,12 +277,16 @@ func (d *DB) Slave() *DB {
 // 关闭视图不会关闭这些连接池，要关闭原来的 DB。
 // route 已经相同时返回 d 本身。
 func (d *DB) WithRoute(route Route) *DB {
-	if d.route == route {
+	if d == nil || d.route == route {
 		return d
 	}
 	copied := *d
 	copied.route = route
-	copied.shared = true
+	// schema 视图自己拥有 initSQL 打开的池。路由视图继续拥有这些池，
+	// Schema(name).Master() 仍能被 Close 关掉。原库的路由视图保持 shared。
+	if d.shared || d.schema == "" {
+		copied.shared = true
+	}
 	return &copied
 }
 
@@ -340,9 +347,13 @@ func (t *Tx) Dialect() gooq.Dialect {
 
 // Query 执行查询并返回原始行。调用方负责关闭 rows。有从库时走从库。
 func (d *DB) Query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if d != nil && d.dryRun != nil && d.dryRun.Val() {
+		_ = d.observe(ctx, query, args, func(context.Context) error { return nil })
+		return nil, fmt.Errorf("gooq: Query is not available in dry run")
+	}
 	var rows *sql.Rows
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
-		conn, err := d.readDB()
+		conn, err := d.executor(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -356,7 +367,7 @@ func (d *DB) Query(ctx context.Context, query string, args ...any) (*sql.Rows, e
 func (d *DB) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	var result sql.Result = dryResult{}
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
-		conn, err := d.writeDB()
+		conn, err := d.executor(ctx, true)
 		if err != nil {
 			return err
 		}
@@ -392,7 +403,7 @@ func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 func (d *DB) GetAll(ctx context.Context, query string, args ...any) (Result, error) {
 	var result Result
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
-		conn, err := d.readDB()
+		conn, err := d.executor(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -417,7 +428,7 @@ func (t *Tx) GetAll(ctx context.Context, query string, args ...any) (Result, err
 func (d *DB) GetOne(ctx context.Context, query string, args ...any) (Record, error) {
 	var record Record
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
-		conn, err := d.readDB()
+		conn, err := d.executor(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -442,7 +453,7 @@ func (t *Tx) GetOne(ctx context.Context, query string, args ...any) (Record, err
 func (d *DB) GetValue(ctx context.Context, query string, args ...any) (any, error) {
 	var value any
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
-		conn, err := d.readDB()
+		conn, err := d.executor(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -532,13 +543,23 @@ func (t *Tx) Column(ctx context.Context, dest any, query string, args ...any) er
 	return assignColumn(dest, values)
 }
 
+func (d *DB) executor(ctx context.Context, write bool) (Queryer, error) {
+	if tx := TxFromContext(ctx, d.group); tx != nil {
+		return tx.sql, nil
+	}
+	if write {
+		return d.writeDB()
+	}
+	return d.readDB()
+}
+
 func (d *DB) scalar(ctx context.Context, query string, args ...any) (any, bool, error) {
 	var (
 		value any
 		found bool
 	)
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
-		conn, err := d.readDB()
+		conn, err := d.executor(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -564,7 +585,7 @@ func (t *Tx) scalar(ctx context.Context, query string, args ...any) (any, bool, 
 func (d *DB) column(ctx context.Context, query string, args ...any) ([]any, error) {
 	var values []any
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
-		conn, err := d.readDB()
+		conn, err := d.executor(ctx, false)
 		if err != nil {
 			return err
 		}

@@ -13,7 +13,12 @@ func DateFormat(field gooq.Expression, format string) *FuncExpr {
 			if !ok {
 				return ""
 			}
-			return renderer.RenderDateFormat(argsSQL[0], format)
+			sqlStr, err := renderer.RenderDateFormat(argsSQL[0], format)
+			if err != nil {
+				rc.Fail(err)
+				return ""
+			}
+			return sqlStr
 		},
 	)
 }

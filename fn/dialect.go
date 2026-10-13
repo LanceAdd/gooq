@@ -9,7 +9,7 @@ import (
 // 函数方言不在 DialectSpec 上。具体方言类型继续实现这些方法，fn 经类型断言调用。
 
 type dateFormatRenderer interface {
-	RenderDateFormat(fieldSQL, format string) string
+	RenderDateFormat(fieldSQL, format string) (string, error)
 }
 
 type groupConcatRenderer interface {

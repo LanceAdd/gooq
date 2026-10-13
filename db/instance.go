@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/gogf/gf/v2/container/gmap"
 	"github.com/gogf/gf/v2/container/gtype"
@@ -17,6 +18,7 @@ var (
 	defaultGroup   = gtype.NewString(DefaultGroupName)
 	groupConfigs   = gmap.NewKVMap[string, []Config](true)
 	groupInstances = gmap.NewKVMap[string, *DB](true)
+	groupMu        sync.Mutex
 )
 
 // SetDefaultGroup 选择 Instance 默认使用的配置组。名字为空时改回 default。
@@ -42,9 +44,12 @@ func SetConfig(group string, nodes ...Config) error {
 			return err
 		}
 	}
+	groupMu.Lock()
 	clearGroupLogger(group)
 	groupConfigs.Set(group, append([]Config(nil), nodes...))
-	if database := groupInstances.Remove(group); database != nil {
+	database := groupInstances.Remove(group)
+	groupMu.Unlock()
+	if database != nil {
 		return database.Close()
 	}
 	return nil
@@ -55,34 +60,46 @@ func RemoveConfig(group string) error {
 	if group == "" {
 		group = DefaultGroupName
 	}
+	groupMu.Lock()
 	clearGroupLogger(group)
 	groupConfigs.Remove(group)
-	if database := groupInstances.Remove(group); database != nil {
+	database := groupInstances.Remove(group)
+	groupMu.Unlock()
+	if database != nil {
 		return database.Close()
 	}
 	return nil
 }
 
 // Instance 返回配置组对应的共享数据库。
-// 不传名字时返回默认组，作用和 gdb.Instance 相同。
+// 不传名字时返回默认组。同一组只创建一次；SetConfig 和 RemoveConfig 会清掉已创建的实例。
 func Instance(name ...string) (*DB, error) {
 	group := defaultGroup.Val()
 	if len(name) > 0 && name[0] != "" {
 		group = name[0]
 	}
-	if database := groupInstances.Get(group); database != nil {
+	groupMu.Lock()
+	database := groupInstances.Get(group)
+	_, found := groupConfigs.Search(group)
+	groupMu.Unlock()
+	if database != nil {
+		return database, nil
+	}
+	if !found {
+		if err := loadConfigOnce(context.Background()); err != nil {
+			return nil, err
+		}
+	}
+	groupMu.Lock()
+	defer groupMu.Unlock()
+	if database = groupInstances.Get(group); database != nil {
 		return database, nil
 	}
 	configs, found := groupConfigs.Search(group)
 	if !found || len(configs) == 0 {
-		if err := loadConfigOnce(context.Background()); err != nil {
-			return nil, err
-		}
-		configs, found = groupConfigs.Search(group)
-	}
-	if !found || len(configs) == 0 {
 		return nil, fmt.Errorf("gooq: empty database configuration for group %q", group)
 	}
+	configs = append([]Config(nil), configs...)
 	database, err := openGroup(group, configs)
 	if err != nil {
 		return nil, err
@@ -93,11 +110,6 @@ func Instance(name ...string) (*DB, error) {
 		}
 		return nil, err
 	}
-	actual := groupInstances.GetOrSet(group, database)
-	if actual != database {
-		if closeErr := database.Close(); closeErr != nil {
-			return nil, closeErr
-		}
-	}
-	return actual, nil
+	groupInstances.Set(group, database)
+	return database, nil
 }

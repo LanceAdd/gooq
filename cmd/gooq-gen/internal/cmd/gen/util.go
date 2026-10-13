@@ -8,19 +8,22 @@
 package gen
 
 import (
+	"fmt"
+
 	"golang.org/x/tools/imports"
 
 	"github.com/gogf/gf/v2/os/gfile"
-
-	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/mlog"
 )
 
 // GoFmt formats the source file and adds or removes import statements as necessary.
-func GoFmt(path string) {
+func GoFmt(path string) error {
+	var formatErr error
 	replaceFunc := func(path, content string) string {
 		res, err := imports.Process(path, []byte(content), nil)
 		if err != nil {
-			mlog.Printf(`error format "%s" go files: %v`, path, err)
+			if formatErr == nil {
+				formatErr = fmt.Errorf("gooq: format %s: %w", path, err)
+			}
 			return content
 		}
 		return string(res)
@@ -28,16 +31,15 @@ func GoFmt(path string) {
 
 	var err error
 	if gfile.IsFile(path) {
-		// File format.
 		if gfile.ExtName(path) != "go" {
-			return
+			return nil
 		}
 		err = gfile.ReplaceFileFunc(replaceFunc, path)
 	} else {
-		// Folder format.
 		err = gfile.ReplaceDirFunc(replaceFunc, path, "*.go", true)
 	}
 	if err != nil {
-		mlog.Printf(`error format "%s" go files: %v`, path, err)
+		return err
 	}
+	return formatErr
 }

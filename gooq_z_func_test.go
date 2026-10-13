@@ -77,6 +77,11 @@ func TestDsl_Cast(t *testing.T) {
 		t.Assert(sql, `CAST("user"."age" AS TEXT) = '18'`)
 		t.Assert(len(args), 0)
 
+		sql, _ = renderExpr(DialectPgsql, Str("a'b"))
+		t.Assert(sql, `'a''b'`)
+		sql, _ = renderExpr(DialectMySQL, Str(`a'b\`))
+		t.Assert(sql, `'a''b\\'`)
+
 		sql, _ = renderExpr(DialectMySQL, testUser.CreatedAt.Cast(LocalTypeDatetime))
 		t.Assert(sql, "CAST(`user`.`created_at` AS DATETIME)")
 	})

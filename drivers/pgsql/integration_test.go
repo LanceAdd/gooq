@@ -295,16 +295,20 @@ func TestPostgresLive(t *testing.T) {
 		f := flag.As("f")
 		sqlText, args, err = dsl.Update(u).Set(u.Field("status"), "vip").
 			InnerJoin(f).On(gooq.Raw("1 = 1")).
-			LeftJoin(r).On(r.Field("id").EqExpr(u.Field("id"))).
 			ToSql(gooq.DialectPgsql)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(sqlText, `FROM (SELECT 1) AS "_gooq"`) || !strings.Contains(sqlText, "LEFT JOIN") {
-			t.Fatalf("mixed update sql = %s", sqlText)
+		if !strings.Contains(sqlText, `FROM "flag" AS "f"`) || strings.Contains(sqlText, "LEFT JOIN") {
+			t.Fatalf("inner update sql = %s", sqlText)
 		}
 		if _, err = view.Exec(ctx, sqlText, args...); err != nil {
 			t.Fatal(err)
+		}
+		if _, _, err = dsl.Update(u).Set(u.Field("status"), "vip").
+			LeftJoin(r).On(r.Field("id").EqExpr(u.Field("id"))).
+			ToSql(gooq.DialectPgsql); err == nil {
+			t.Fatal("outer join update rendered")
 		}
 		var statuses []string
 		if err = view.Column(ctx, &statuses, `SELECT status FROM account ORDER BY id`); err != nil {
@@ -340,12 +344,19 @@ func TestPostgresLive(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		sqlText, args, err = dsl.Delete(u).LeftJoin(r).On(r.Field("id").EqExpr(u.Field("id"))).ToSql(gooq.DialectPgsql)
+		if _, _, err = dsl.Delete(u).LeftJoin(r).On(r.Field("id").EqExpr(u.Field("id"))).ToSql(gooq.DialectPgsql); err == nil {
+			t.Fatal("outer join soft delete rendered")
+		}
+		sqlText, args, err = dsl.Delete(u).Where(u.Field("id").Eq(1)).ToSql(gooq.DialectPgsql)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(sqlText, "FROM") || !strings.Contains(sqlText, "LEFT JOIN") {
-			t.Fatalf("soft delete sql = %s", sqlText)
+		if _, err = view.Exec(ctx, sqlText, args...); err != nil {
+			t.Fatal(err)
+		}
+		sqlText, args, err = dsl.Delete(u).Where(u.Field("id").Eq(2)).ToSql(gooq.DialectPgsql)
+		if err != nil {
+			t.Fatal(err)
 		}
 		if _, err = view.Exec(ctx, sqlText, args...); err != nil {
 			t.Fatal(err)

@@ -19,7 +19,7 @@ func TestLoadConfigAndDryRun(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "cfg.db")
 	link := "sqlite::@file(" + filepath.ToSlash(path) + ")"
-	content := "gooq:\n  database:\n    cfggroup:\n      link: '" + link + "'\n      debug: true\n      dryRun: true\n"
+	content := "gooq:\n  database:\n    - name: cfggroup\n      endpoints:\n        - link: '" + link + "'\n          debug: true\n          dryRun: true\n"
 	adapter, err := gcfg.NewAdapterContent(content)
 	if err != nil {
 		t.Fatal(err)
@@ -38,11 +38,10 @@ func TestLoadConfigAndDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	logger := glog.New()
+	logger := database.Logger()
 	logger.SetWriter(&buf)
 	logger.SetStdoutPrint(false)
 	logger.SetLevel(glog.LEVEL_ALL)
-	database.SetLogger(logger)
 	if _, err = database.Exec(ctx, `CREATE TABLE item (id INTEGER)`); err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +50,9 @@ func TestLoadConfigAndDryRun(t *testing.T) {
 	}
 	if _, err = database.Exec(ctx, `INSERT INTO item(id) VALUES (?)`, 1); err != nil {
 		t.Fatal(err)
+	}
+	if _, err = database.Query(ctx, `SELECT 1`); err == nil || !strings.Contains(err.Error(), "not available in dry run") {
+		t.Fatalf("dry run query err = %v", err)
 	}
 	database.SetDryRun(false)
 	var count int64
@@ -63,7 +65,7 @@ func TestLoadConfigLoggerAndDebug(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "log.db")
 	link := "sqlite::@file(" + filepath.ToSlash(path) + ")"
-	content := "gooq:\n  logger:\n    level: all\n    stdout: false\n  database:\n    loggroup:\n      link: '" + link + "'\n      debug: true\n"
+	content := "gooq:\n  logger:\n    level: all\n    stdout: false\n  database:\n    - name: loggroup\n      endpoints:\n        - link: '" + link + "'\n          debug: true\n"
 	adapter, err := gcfg.NewAdapterContent(content)
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +82,9 @@ func TestLoadConfigLoggerAndDebug(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if database.Logger().GetConfig().StdoutPrint {
+		t.Fatal("logger stdout was not applied")
+	}
 	var buf bytes.Buffer
 	database.Logger().SetWriter(&buf)
 	if _, err = database.Exec(ctx, `CREATE TABLE item (id INTEGER)`); err != nil {
@@ -89,7 +94,7 @@ func TestLoadConfigLoggerAndDebug(t *testing.T) {
 		t.Fatalf("debug log %q", buf.String())
 	}
 
-	bad, err := gcfg.NewAdapterContent("gooq:\n  logger:\n    level: nope\n  database:\n    badgroup:\n      link: '" + link + "'\n")
+	bad, err := gcfg.NewAdapterContent("gooq:\n  logger:\n    level: nope\n  database:\n    - name: badgroup\n      endpoints:\n        - link: '" + link + "'\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,15 +103,19 @@ func TestLoadConfigLoggerAndDebug(t *testing.T) {
 	}
 }
 
-func TestInstanceWithoutConfigFile(t *testing.T) {
-	cfg := gcfg.Instance()
+func isolateRuntimeConfig(t *testing.T, dir string) {
+	t.Helper()
+	cfg := gcfg.Instance(runtimeConfigFileName)
+	if cfg == nil {
+		t.Fatal("runtime config is unavailable")
+	}
 	previous := cfg.GetAdapter()
 	loaded := configLoaded.Val()
-	adapter, err := gcfg.NewAdapterFile("gooq-missing-config-probe")
+	adapter, err := gcfg.NewAdapterFile(runtimeConfigFileName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = adapter.SetPath(t.TempDir()); err != nil {
+	if err = adapter.SetPath(dir); err != nil {
 		t.Fatal(err)
 	}
 	cfg.SetAdapter(adapter)
@@ -115,11 +124,15 @@ func TestInstanceWithoutConfigFile(t *testing.T) {
 		cfg.SetAdapter(previous)
 		configLoaded.Set(loaded)
 	})
+}
+
+func TestInstanceWithoutConfigFile(t *testing.T) {
+	isolateRuntimeConfig(t, t.TempDir())
 
 	const group = "no-such-group"
 	want := `gooq: empty database configuration for group "no-such-group"`
 	for i := 0; i < 2; i++ {
-		_, err = Instance(group)
+		_, err := Instance(group)
 		if err == nil {
 			t.Fatal("expected missing group error")
 		}
@@ -134,28 +147,16 @@ func TestInstanceWithoutConfigFile(t *testing.T) {
 
 func TestInstanceKeepsConfigParseError(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("gooq: [\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "gooq.yaml"), []byte("gooq: [\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg := gcfg.Instance()
-	previous := cfg.GetAdapter()
-	loaded := configLoaded.Val()
-	adapter, err := gcfg.NewAdapterFile()
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("gooq:\n  database: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err = adapter.SetPath(dir); err != nil {
-		t.Fatal(err)
-	}
-	cfg.SetAdapter(adapter)
-	configLoaded.Set(false)
-	t.Cleanup(func() {
-		cfg.SetAdapter(previous)
-		configLoaded.Set(loaded)
-	})
+	isolateRuntimeConfig(t, dir)
 
 	for i := 0; i < 2; i++ {
-		_, err = Instance("parse-group")
+		_, err := Instance("parse-group")
 		if err == nil {
 			t.Fatal("expected config parse error")
 		}
@@ -165,6 +166,121 @@ func TestInstanceKeepsConfigParseError(t *testing.T) {
 		if !strings.Contains(err.Error(), "load config file") && !strings.Contains(err.Error(), gfile.Basename(dir)) {
 			t.Fatalf("got %q", err.Error())
 		}
+	}
+}
+
+func TestRuntimeConfigIgnoresAppConfig(t *testing.T) {
+	dir := t.TempDir()
+	link := "sqlite::@file(" + filepath.ToSlash(filepath.Join(dir, "app.db")) + ")"
+	gooqFile := "gooq:\n  database:\n    - name: from-gooq\n      endpoints:\n        - link: '" + link + "'\n"
+	appFile := "gooq:\n  database:\n    - name: from-config\n      endpoints:\n        - link: '" + link + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, "gooq.yaml"), []byte(gooqFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(appFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	isolateRuntimeConfig(t, dir)
+	t.Cleanup(func() { _ = RemoveConfig("from-gooq") })
+
+	database, err := Instance("from-gooq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if database.Group() != "from-gooq" {
+		t.Fatalf("group = %s", database.Group())
+	}
+	if _, err = Instance("from-config"); err == nil || !strings.Contains(err.Error(), "empty database configuration") {
+		t.Fatalf("app config group err = %v", err)
+	}
+}
+
+func TestLoadConfigDatabaseShape(t *testing.T) {
+	ctx := context.Background()
+	_ = RemoveConfig("default")
+	_ = RemoveConfig("orders")
+	dir := t.TempDir()
+	master := "sqlite::@file(" + filepath.ToSlash(filepath.Join(dir, "master.db")) + ")"
+	slave := "sqlite::@file(" + filepath.ToSlash(filepath.Join(dir, "slave.db")) + ")"
+	content := "gooq:\n  database:\n    - name: default\n      endpoints:\n        - link: '" + master + "'\n          role: master\n        - link: '" + slave + "'\n          role: slave\n          weight: 2\n    - name: orders\n      endpoints:\n        - link: '" + master + "'\n"
+	adapter, err := gcfg.NewAdapterContent(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(adapter)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = RemoveConfig("default")
+		_ = RemoveConfig("orders")
+	})
+	database, err := Instance("orders")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if database.Group() != "orders" {
+		t.Fatalf("group = %s", database.Group())
+	}
+	primary, err := Instance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(primary.masters) != 1 || len(primary.slaves) != 1 || primary.slaves[0].weight != 2 {
+		t.Fatalf("masters=%d slaves=%d", len(primary.masters), len(primary.slaves))
+	}
+
+	repeated := "gooq:\n  database:\n    - name: default\n      endpoints:\n        - link: '" + master + "'\n    - name: default\n      endpoints:\n        - link: '" + slave + "'\n"
+	again, err := gcfg.NewAdapterContent(repeated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(again)); err == nil || !strings.Contains(err.Error(), "duplicated") {
+		t.Fatalf("duplicate group err = %v", err)
+	}
+
+	legacy := "gooq:\n  database:\n    default:\n      - link: '" + master + "'\n"
+	old, err := gcfg.NewAdapterContent(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(old)); err == nil || !strings.Contains(err.Error(), "list of groups") {
+		t.Fatalf("legacy database err = %v", err)
+	}
+
+	missingName := "gooq:\n  database:\n    - endpoints:\n        - link: '" + master + "'\n"
+	unnamed, err := gcfg.NewAdapterContent(missingName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(unnamed)); err == nil || !strings.Contains(err.Error(), "name") {
+		t.Fatalf("missing name err = %v", err)
+	}
+	missingLink := "gooq:\n  database:\n    - name: broken\n      endpoints:\n        - role: master\n"
+	nolink, err := gcfg.NewAdapterContent(missingLink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(nolink)); err == nil || !strings.Contains(err.Error(), "link") {
+		t.Fatalf("missing link err = %v", err)
+	}
+}
+
+func TestSchemaRouteClosesOwnedPool(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "schema.db")
+	database, err := Open(Config{Link: "sqlite::@file(" + path + ")"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.schema = "other"
+	routed := database.Master()
+	if routed.shared {
+		t.Fatal("schema route lost ownership of its pool")
+	}
+	if err = routed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = routed.masters[0].sql.Ping(); err == nil || !strings.Contains(err.Error(), "database is closed") {
+		t.Fatalf("pool ping = %v", err)
 	}
 }
 

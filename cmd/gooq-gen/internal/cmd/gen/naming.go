@@ -8,7 +8,9 @@
 package gen
 
 import (
+	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/gogf/gf/v2/text/gstr"
 )
@@ -62,6 +64,41 @@ func normalizeNameForCaseConvert(name string) string {
 }
 
 // isAllUpper checks and returns whether given `fieldName` all letters are upper case.
+func goFieldName(column string, reserved map[string]bool, used map[string]string) (string, error) {
+	name := formatFieldName(column, FieldNameCaseCamel)
+	if reserved[name] {
+		name += "Field"
+	}
+	if !validGoIdent(name) {
+		return "", fmt.Errorf("gooq: column %q produces invalid Go name %q", column, name)
+	}
+	if prev, ok := used[name]; ok {
+		return "", fmt.Errorf("gooq: columns %q and %q both generate field %s", prev, column, name)
+	}
+	used[name] = column
+	return name, nil
+}
+
+func isSoftDeleteColumn(name string) bool {
+	folded := strings.ReplaceAll(strings.ToLower(name), "_", "")
+	return folded == "deletedat" || folded == "deleteat"
+}
+
+func validGoIdent(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 && !unicode.IsLetter(r) && r != '_' {
+			return false
+		}
+		if i > 0 && !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
 func isAllUpper(fieldName string) bool {
 	for _, b := range fieldName {
 		if b >= 'a' && b <= 'z' {

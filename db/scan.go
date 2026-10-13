@@ -68,17 +68,17 @@ func readScalar(ctx context.Context, query Queryer, driver Driver, statement str
 	if err != nil {
 		return nil, false, err
 	}
-	record, err := scanRecord(rows, columns, columnTypeNames(rows), driver)
+	values, err := scanValues(rows, columns, columnTypeNames(rows), driver)
 	if err != nil {
 		return nil, false, err
 	}
 	if err = rows.Err(); err != nil {
 		return nil, false, err
 	}
-	if len(columns) == 0 {
+	if len(values) == 0 {
 		return nil, true, nil
 	}
-	return record[columns[0]], true, nil
+	return values[0], true, nil
 }
 
 func readColumn(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (values []any, err error) {
@@ -95,15 +95,15 @@ func readColumn(ctx context.Context, query Queryer, driver Driver, statement str
 	}
 	dbTypes := columnTypeNames(rows)
 	for rows.Next() {
-		record, scanErr := scanRecord(rows, columns, dbTypes, driver)
+		scanned, scanErr := scanValues(rows, columns, dbTypes, driver)
 		if scanErr != nil {
 			return nil, scanErr
 		}
-		if len(columns) == 0 {
+		if len(scanned) == 0 {
 			values = append(values, nil)
 			continue
 		}
-		values = append(values, record[columns[0]])
+		values = append(values, scanned[0])
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
@@ -134,6 +134,18 @@ func columnTypeNames(rows *sql.Rows) []string {
 }
 
 func scanRecord(rows *sql.Rows, columns, dbTypes []string, driver Driver) (Record, error) {
+	values, err := scanValues(rows, columns, dbTypes, driver)
+	if err != nil {
+		return nil, err
+	}
+	record := make(Record, len(columns))
+	for i, column := range columns {
+		record[column] = values[i]
+	}
+	return record, nil
+}
+
+func scanValues(rows *sql.Rows, columns, dbTypes []string, driver Driver) ([]any, error) {
 	values := make([]any, len(columns))
 	targets := make([]any, len(columns))
 	for i := range values {
@@ -142,15 +154,14 @@ func scanRecord(rows *sql.Rows, columns, dbTypes []string, driver Driver) (Recor
 	if err := rows.Scan(targets...); err != nil {
 		return nil, err
 	}
-	record := make(Record, len(columns))
-	for i, column := range columns {
+	for i := range values {
 		dbType := ""
 		if i < len(dbTypes) {
 			dbType = dbTypes[i]
 		}
-		record[column] = normalizeValue(driver, dbType, values[i])
+		values[i] = normalizeValue(driver, dbType, values[i])
 	}
-	return record, nil
+	return values, nil
 }
 
 func normalizeValue(driver Driver, dbType string, value any) any {

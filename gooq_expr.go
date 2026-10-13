@@ -155,7 +155,18 @@ func Div(left, right any) Expression {
 }
 
 func Str(s string) Expression {
-	return &rawExpr{sql: "'" + s + "'"}
+	return &stringLiteralExpr{value: s}
+}
+
+type stringLiteralExpr struct {
+	value string
+}
+
+func (e *stringLiteralExpr) Render(rc *RenderContext) string {
+	if spec := rc.Spec(); spec != nil {
+		return spec.QuoteLiteral(e.value)
+	}
+	return quoteLiteralStandard(e.value)
 }
 
 // excludedExpr 表示本次插入行里的一列。文本由 DialectSpec.RenderExcluded 决定。

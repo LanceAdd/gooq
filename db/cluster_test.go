@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -165,5 +166,141 @@ func TestTransactionPropagation(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	err = database.Transaction(ctx, func(ctx context.Context, tx *Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO item(id, name) VALUES (4, 'outer')`); err != nil {
+			return err
+		}
+		defer func() { _ = recover() }()
+		_ = tx.Transaction(ctx, func(ctx context.Context, tx *Tx) error {
+			if _, err := tx.Exec(ctx, `INSERT INTO item(id, name) VALUES (5, 'boom')`); err != nil {
+				return err
+			}
+			panic("boom")
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = database.Value(ctx, &count, `SELECT COUNT(*) FROM item WHERE id = 4`); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("outer row after recovered nested panic = %d", count)
+	}
+	if err = database.Value(ctx, &count, `SELECT COUNT(*) FROM item WHERE id = 5`); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("nested panic row survived = %d", count)
+	}
+
+	err = database.Transaction(ctx, func(ctx context.Context, tx *Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO item(id, name) VALUES (6, 'lost')`); err != nil {
+			return err
+		}
+		return tx.Transaction(ctx, func(context.Context, *Tx) error {
+			panic("lost")
+		})
+	})
+	if err == nil {
+		t.Fatal("expected nested panic to fail the outer transaction")
+	}
+	if err = database.Value(ctx, &count, `SELECT COUNT(*) FROM item WHERE id = 6`); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("unrecovered nested panic committed rows = %d", count)
+	}
+	if _, err = database.Exec(ctx, `INSERT INTO item(id, name) VALUES (7, 'after')`); err != nil {
+		t.Fatal(err)
+	}
+
+	err = database.Transaction(ctx, func(ctx context.Context, tx *Tx) error {
+		if _, err := database.Exec(ctx, `INSERT INTO item(id, name) VALUES (8, 'ctx')`); err != nil {
+			return err
+		}
+		var seen int64
+		if err := database.Value(ctx, &seen, `SELECT COUNT(*) FROM item WHERE id = 8`); err != nil {
+			return err
+		}
+		if seen != 1 {
+			return errors.New("ctx query did not see the transaction write")
+		}
+		return errors.New("rollback ctx write")
+	})
+	if err == nil {
+		t.Fatal("expected ctx write to roll back")
+	}
+	if err = database.Value(ctx, &count, `SELECT COUNT(*) FROM item WHERE id = 8`); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("ctx exec survived rollback, count = %d", count)
+	}
+}
+
+func TestGetValueUsesFirstDuplicateColumn(t *testing.T) {
+	ctx := context.Background()
+	database, err := Open(Config{Link: "sqlite::@file(" + filepath.Join(t.TempDir(), "cols.db") + ")"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	var value int64
+	if err = database.Value(ctx, &value, `SELECT 1 AS a, 2 AS a`); err != nil {
+		t.Fatal(err)
+	}
+	if value != 1 {
+		t.Fatalf("first column = %d", value)
+	}
+	record, err := database.GetOne(ctx, `SELECT 1 AS a, 2 AS a`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record["a"] != int64(2) {
+		t.Fatalf("record duplicate = %#v", record["a"])
+	}
+}
+
+func TestInstanceRemoveDoesNotRepublish(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "race.db")
+	const group = "race-config"
+	link := "sqlite::@file(" + path + ")"
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_, _ = Instance(group)
+				}
+			}
+		}()
+	}
+	for i := 0; i < 40; i++ {
+		if err := SetConfig(group, Config{Link: link}); err != nil {
+			close(stop)
+			wg.Wait()
+			t.Fatal(err)
+		}
+		if err := RemoveConfig(group); err != nil {
+			close(stop)
+			wg.Wait()
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+	if database := groupInstances.Get(group); database != nil {
+		_ = database.Close()
+		t.Fatal("instance remained cached after RemoveConfig")
 	}
 }

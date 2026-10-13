@@ -2,6 +2,7 @@ package gooq
 
 import (
 	"fmt"
+	"strings"
 )
 
 // MySQLDialect 是 MySQL 的 SQL 渲染实现。
@@ -32,7 +33,9 @@ var mysqlCastTypes = map[LocalType]string{
 func (MySQLDialect) Name() Dialect { return DialectMySQL }
 
 // Quote 使用反引号。
-func (MySQLDialect) Quote(ident string) string { return "`" + ident + "`" }
+func (MySQLDialect) Quote(ident string) string {
+	return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
+}
 
 // Placeholder 返回问号占位符。
 func (MySQLDialect) Placeholder(int) string { return "?" }
@@ -162,8 +165,8 @@ func (MySQLDialect) RollupWith() bool { return true }
 func (MySQLDialect) OmitLock() bool { return false }
 
 // RenderDateFormat 渲染 DATE_FORMAT。
-func (MySQLDialect) RenderDateFormat(fieldSQL, format string) string {
-	return fmt.Sprintf("DATE_FORMAT(%s, %s)", fieldSQL, quoteLiteralMySQL(format))
+func (MySQLDialect) RenderDateFormat(fieldSQL, format string) (string, error) {
+	return fmt.Sprintf("DATE_FORMAT(%s, %s)", fieldSQL, quoteLiteralMySQL(format)), nil
 }
 
 // RenderGroupConcat 渲染带 DISTINCT、ORDER BY 和 SEPARATOR 的 GROUP_CONCAT。

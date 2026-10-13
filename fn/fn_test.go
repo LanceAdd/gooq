@@ -247,6 +247,13 @@ func TestFn_DateFormat(t *testing.T) {
 		sql, _, err = dsl.Select(DateFormat(testUser.CreatedAt, "%Y-%m-%d %H:%i:%s")).From(testUser).ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
 		t.Assert(sql, `SELECT strftime('%Y-%m-%d %H:%M:%S', "user"."created_at") FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		_, _, err = dsl.Select(DateFormat(testUser.CreatedAt, "%M")).From(testUser).ToSql(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "specifier %M"), true)
+
+		_, _, err = dsl.Select(DateFormat(testUser.CreatedAt, "%b")).From(testUser).ToSql(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
 	})
 }
 
@@ -283,6 +290,18 @@ func TestFn_GroupConcat(t *testing.T) {
 			From(testUser).ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
 		t.Assert(sql, `SELECT STRING_AGG(DISTINCT "user"."name", ',') FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = dsl.Select(GroupConcat(GroupConcatOptions{
+			Field: testUser.Name, Distinct: true, OrderBy: []gooq.Expression{testUser.Name.Asc()},
+		})).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, `ORDER BY "user"."name" ASC`), true)
+
+		_, _, err = dsl.Select(GroupConcat(GroupConcatOptions{
+			Field: testUser.Name, Distinct: true, OrderBy: []gooq.Expression{testUser.Age.Asc()},
+		})).From(testUser).ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "different ORDER BY"), true)
 
 		sql, _, err = dsl.Select(GroupConcat(GroupConcatOptions{Field: testUser.Name, Separator: "a'b"})).
 			From(testUser).ToSql(gooq.DialectPgsql)

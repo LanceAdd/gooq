@@ -29,18 +29,41 @@ var sqliteCastTypes = map[LocalType]string{
 	LocalTypeUUID:     "TEXT",
 }
 
-var sqliteFormatReplacer = strings.NewReplacer(
-	"%i", "%M",
-	"%s", "%S",
-)
-
-const joinInnerLateral = "INNER JOIN LATERAL"
+func sqliteDateFormat(format string) (string, error) {
+	var b strings.Builder
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' {
+			b.WriteByte(format[i])
+			continue
+		}
+		if i+1 >= len(format) {
+			return "", fmt.Errorf("gooq: DATE_FORMAT specifier %% is not supported by dialect %s", DialectSQLite)
+		}
+		token := format[i : i+2]
+		i++
+		switch token {
+		case "%%":
+			b.WriteString("%%")
+		case "%Y", "%m", "%d", "%H", "%j", "%w":
+			b.WriteString(token)
+		case "%i":
+			b.WriteString("%M")
+		case "%s", "%S":
+			b.WriteString("%S")
+		default:
+			return "", fmt.Errorf("gooq: DATE_FORMAT specifier %s is not supported by dialect %s", token, DialectSQLite)
+		}
+	}
+	return b.String(), nil
+}
 
 // Name 返回 sqlite。
 func (SQLiteDialect) Name() Dialect { return DialectSQLite }
 
 // Quote 使用双引号。
-func (SQLiteDialect) Quote(ident string) string { return `"` + ident + `"` }
+func (SQLiteDialect) Quote(ident string) string {
+	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
+}
 
 // Placeholder 返回问号占位符。
 func (SQLiteDialect) Placeholder(int) string { return "?" }
@@ -125,16 +148,16 @@ func (SQLiteDialect) RenderUpdate(_ *RenderContext, target, sets, where string, 
 	return renderUpdateFrom(target, sets, where, joins), nil
 }
 
-// JoinKeyword 把 INNER JOIN LATERAL 改成 CROSS JOIN LATERAL。
-func (SQLiteDialect) JoinKeyword(keyword string) string {
-	if keyword == joinInnerLateral {
-		return "CROSS JOIN LATERAL"
-	}
-	return keyword
-}
+// JoinKeyword 原样返回连接关键字。LATERAL 由渲染阶段拒绝。
+func (SQLiteDialect) JoinKeyword(keyword string) string { return keyword }
 
-// SupportsGroup 接受全部 GROUP BY 扩展。
-func (SQLiteDialect) SupportsGroup(string) error { return nil }
+// SupportsGroup 拒绝 ROLLUP、CUBE 和 GROUPING SETS。
+func (SQLiteDialect) SupportsGroup(ext string) error {
+	if ext == "" {
+		return nil
+	}
+	return fmt.Errorf("gooq: %s is not supported by dialect %s", ext, DialectSQLite)
+}
 
 // RollupWith 为 false。ROLLUP 使用函数形式。
 func (SQLiteDialect) RollupWith() bool { return false }
@@ -142,9 +165,14 @@ func (SQLiteDialect) RollupWith() bool { return false }
 // OmitLock 为 true。SQLite 不渲染行锁。
 func (SQLiteDialect) OmitLock() bool { return true }
 
-// RenderDateFormat 把 MySQL 格式符转换成 strftime。
-func (SQLiteDialect) RenderDateFormat(fieldSQL, format string) string {
-	return fmt.Sprintf("strftime(%s, %s)", quoteLiteralStandard(sqliteFormatReplacer.Replace(format)), fieldSQL)
+// RenderDateFormat 把能对应的 MySQL 格式符转换成 strftime。
+// 不能安全对应的格式符在渲染期返回错误。
+func (SQLiteDialect) RenderDateFormat(fieldSQL, format string) (string, error) {
+	converted, err := sqliteDateFormat(format)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("strftime(%s, %s)", quoteLiteralStandard(converted), fieldSQL), nil
 }
 
 // RenderGroupConcat 渲染 GROUP_CONCAT。SQLite 不支持函数内 ORDER BY，调用方传入的排序被忽略。

@@ -235,12 +235,12 @@ func TestDsl_Update_Join(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE "r"."id" = "u"."id"`)
 
-		sql, _, err = Update(u).
+		_, _, err = Update(u).
 			Set(u.Status, "vip").
 			LeftJoin(r).On(r.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectPgsql)
-		t.AssertNil(err)
-		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM (SELECT 1) AS "_gooq" LEFT JOIN "role" AS "r" ON "r"."id" = "u"."id"`)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "outer join is not supported by dialect pgsql"), true)
 
 		sql, _, err = Update(u).
 			Set(u.Status, "vip").
@@ -250,13 +250,20 @@ func TestDsl_Update_Join(t *testing.T) {
 		t.Assert(sql, "UPDATE `user` AS `u` LEFT JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?")
 
 		r2 := testRole.As("r2")
-		sql, _, err = Update(u).
+		_, _, err = Update(u).
 			Set(u.Status, "vip").
 			InnerJoin(r).On(r.Id.EqExpr(u.Id)).
 			LeftJoin(r2).On(r2.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectPgsql)
-		t.AssertNil(err)
-		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM (SELECT 1) AS "_gooq" INNER JOIN "role" AS "r" ON "r"."id" = "u"."id" LEFT JOIN "role" AS "r2" ON "r2"."id" = "u"."id"`)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "outer join is not supported by dialect pgsql"), true)
+
+		_, _, err = Update(u).
+			Set(u.Status, "vip").
+			LeftJoin(r).On(r.Id.EqExpr(u.Id)).
+			ToSql(gooq.DialectGaussDB)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "outer join is not supported by dialect gaussdb"), true)
 
 		_, _, err = Update(u).
 			Set(u.Status, "vip").
@@ -280,6 +287,36 @@ func TestDsl_Update_Batch(t *testing.T) {
 		t.Assert(sqls[1], "UPDATE `user` SET `name` = ? WHERE `id` = ?")
 		t.AssertEQ(argss[1], []any{"b", int64(2)})
 
+		filtered, filterArgs, err := Update(testUser).ValuesOf(
+			assignRow{setCol("id", int64(1)), setCol("name", "a")},
+			assignRow{setCol("id", int64(2)), setCol("name", "b")},
+		).Where(testUser.Age.Gt(18)).renderBatchDML(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(len(filtered), 2)
+		t.Assert(filtered[0], "UPDATE `user` SET `name` = ? WHERE `id` = ? AND `user`.`age` > ?")
+		t.AssertEQ(filterArgs[0], []any{"a", int64(1), 18})
+
+		one, oneArgs, err := Update(testUser).ValuesOf(
+			assignRow{setCol("id", int64(1)), setCol("name", "a")},
+		).Where(testUser.Age.Gt(18)).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(one, "UPDATE `user` SET `id` = ?, `name` = ? WHERE `user`.`age` > ?")
+		t.AssertEQ(oneArgs, []any{int64(1), "a", 18})
+
+		_, _, err = Update(testUser).ValuesOf(
+			assignRow{setCol("id", int64(1)), setCol("name", "a")},
+			assignRow{setCol("id", int64(2)), setCol("name", "b")},
+		).LeftJoin(testRole).On(testRole.Id.EqExpr(testUser.Id)).renderBatchDML(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "does not support JOIN"), true)
+
+		deleted, _, err := Delete(testUser).ValuesOf(
+			assignRow{setCol("id", int64(1))},
+		).Where(testUser.Age.Gt(18)).renderBatchDML(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(len(deleted), 1)
+		t.Assert(strings.Contains(deleted[0], "WHERE `id` = ? AND `user`.`age` > ?"), true)
+
 		_, _, err = b.ToSql(gooq.DialectMySQL)
 		t.AssertNE(err, nil)
 	})
@@ -290,6 +327,14 @@ func TestDsl_Delete(t *testing.T) {
 		sql, _, err := Delete(testUser).Where(testUser.Id.Eq(1)).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "UPDATE `user` SET `deleted_at` = ? WHERE `user`.`id` = ?")
+
+		_, _, err = Delete(testUser).Columns(testUser.Name).Values("a").ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "Values is only supported on Insert"), true)
+
+		_, _, err = Update(testUser).Columns(testUser.Name).Values("a").ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "Values is only supported on Insert"), true)
 
 		sql, _, err = Delete(testUser).Unscoped().Where(testUser.Id.Eq(1)).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
@@ -332,10 +377,9 @@ func TestDsl_Delete(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, "DELETE `u` FROM `user_role` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id`")
 
-		sql, _, err = Delete(testUser.As("u")).LeftJoin(r).On(r.Id.EqExpr(testUser.As("u").Id)).ToSql(gooq.DialectPgsql)
-		t.AssertNil(err)
-		t.Assert(strings.Contains(sql, `FROM (SELECT 1) AS "_gooq"`), true)
-		t.Assert(strings.Contains(sql, `LEFT JOIN "role" AS "r"`), true)
+		_, _, err = Delete(testUser.As("u")).LeftJoin(r).On(r.Id.EqExpr(testUser.As("u").Id)).ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "outer join is not supported by dialect pgsql"), true)
 
 		_, _, err = Delete(u).InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectSQLite)
 		t.AssertNE(err, nil)
@@ -415,6 +459,22 @@ func TestDsl_Upsert(t *testing.T) {
 			ToSql(gooq.DialectPgsql)
 		t.AssertNE(err, nil)
 		t.Assert(strings.Contains(err.Error(), "ON CONFLICT DO UPDATE requires a conflict target"), true)
+
+		_, _, err = Insert(testUser).
+			Columns(testUser.Name).
+			Values("a").
+			OnConflictKey(testUser.Id).
+			ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "conflict update has no assignments"), true)
+
+		_, _, err = Insert(testUser).
+			Columns(testUser.Name).
+			Values("a").
+			OnConflictKey(testUser.Id).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "conflict update has no assignments"), true)
 
 		sql, args, err = Insert(testUser).
 			Columns(testUser.Name, testUser.Age).

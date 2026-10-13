@@ -97,8 +97,7 @@ type SelectBuilder struct {
 	alias        string              // 子查询别名（派生表或标量子查询的 AS alias）。
 	cacheOption  *CacheOption        // 单查询缓存配置（nil 不缓存）。
 	pageCacheOpt *CacheOption        // 分页缓存配置（count 与各页 data 同 key 同生命周期，共享一个配置）。
-	pageNum      int                 // 分页页码（Page 设置，供分页缓存 field 使用）。
-	pageSize     int                 // 分页条数（Page 设置，供分页缓存 field 使用）。
+	buildErr     error               // 构造期错误，ToSql 和执行时返回它。
 	lock         lockMode            // 行锁模式（默认无锁）。
 	setOps       []setOpClause       // 集合操作（UNION/INTERSECT/EXCEPT）。
 	ctes         []cteClause         // CTE（WITH name AS (query)）。
@@ -219,6 +218,7 @@ func (b *SelectBuilder) FieldsEx(fields ...any) *SelectBuilder {
 			excluded[field.ColumnName()] = true
 		}
 	}
+	b.columns = nil
 	var kept []gooq.Expression
 	if b.from != nil {
 		for _, col := range b.from.AllColumns() {
@@ -247,13 +247,17 @@ func (b *SelectBuilder) Where(conditions ...gooq.Expression) *SelectBuilder {
 	return b
 }
 
-func (b *SelectBuilder) And(condition gooq.Expression) *SelectBuilder {
-	b.conditions = append(b.conditions, condition)
-	return b
-}
-
-func (b *SelectBuilder) Or(condition gooq.Expression) *SelectBuilder {
-	b.conditions = append(b.conditions, gooq.OR(condition))
+// WhereOr 把条件与前一个 WHERE 条件组成 OR。没有前一个条件时，这一条自己成为 WHERE。
+func (b *SelectBuilder) WhereOr(condition gooq.Expression) *SelectBuilder {
+	if condition == nil {
+		return b
+	}
+	if len(b.conditions) == 0 {
+		b.conditions = append(b.conditions, condition)
+		return b
+	}
+	last := len(b.conditions) - 1
+	b.conditions[last] = gooq.OR(b.conditions[last], condition)
 	return b
 }
 
@@ -297,6 +301,10 @@ func (b *SelectBuilder) GroupingSets(sets ...[]gooq.Expression) *SelectBuilder {
 }
 
 func (b *SelectBuilder) setGroupExt(kind groupExtKind, sets [][]gooq.Expression) *SelectBuilder {
+	if b.groupExt != groupExtNone {
+		b.buildErr = fmt.Errorf("gooq: GROUP BY extension is already set")
+		return b
+	}
 	b.groupExt = kind
 	b.groupExtSets = sets
 	return b
@@ -328,8 +336,6 @@ func (b *SelectBuilder) Offset(n int) *SelectBuilder {
 }
 
 func (b *SelectBuilder) Page(page, size int) *SelectBuilder {
-	b.pageNum = page
-	b.pageSize = size
 	b.offset = (page - 1) * size
 	b.limit = size
 	return b
@@ -751,9 +757,10 @@ func (b *SelectBuilder) rowsValue(ctx context.Context, dialect gooq.Dialect) (db
 }
 
 // countBuilderOf 构造 COUNT(*) 子查询：清除分页与排序（计数是全量语义）；
-// 分组/集合操作场景外包子查询 (SELECT COUNT(*) FROM (原查询) AS t)，计数为分组/集合结果行数。
+// 分组、集合操作或 DISTINCT 外包子查询 (SELECT COUNT(*) FROM (原查询) AS t)，
+// 计数为分组、集合或去重后的结果行数。
 func (b *SelectBuilder) countBuilderOf() *SelectBuilder {
-	if len(b.groupBy) > 0 || b.groupExt != groupExtNone || len(b.setOps) > 0 {
+	if b.distinct || len(b.groupBy) > 0 || b.groupExt != groupExtNone || len(b.setOps) > 0 {
 		inner := b.Clone()
 		inner.limit = 0
 		inner.offset = 0
@@ -813,6 +820,9 @@ func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 	}
 	defer restore()
 	dialect := b.dialect()
+	if err := b.ValidateDialect(dialect); err != nil {
+		return false, err
+	}
 	rc := gooq.NewRenderContext(dialect)
 	subSQL := b.renderSelect(rc)
 	if err := rc.Err(); err != nil {
@@ -1018,6 +1028,9 @@ func (b *SelectBuilder) dialect() gooq.Dialect {
 // ToSql renders the SQL with the given dialect, or the default MySQL dialect
 // when the parameter is omitted.
 func (b *SelectBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
+	if b.buildErr != nil {
+		return "", nil, b.buildErr
+	}
 	var dialect = gooq.DialectMySQL
 	if len(dialects) > 0 && dialects[0] != "" {
 		dialect = dialects[0]
@@ -1104,6 +1117,16 @@ func (b *SelectBuilder) renderGroupExt(rc *gooq.RenderContext) string {
 	}
 }
 
+func joinKeywordSQL(rc *gooq.RenderContext, keyword string) string {
+	if spec := rc.Spec(); spec != nil {
+		keyword = spec.JoinKeyword(keyword)
+	}
+	if rc.Dialect() == gooq.DialectSQLite && strings.Contains(keyword, "LATERAL") {
+		rc.Fail(fmt.Errorf("gooq: LATERAL join is not supported by dialect %s", gooq.DialectSQLite))
+	}
+	return keyword
+}
+
 func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
 	var (
 		sql     strings.Builder
@@ -1140,10 +1163,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
 	sql.WriteString(" FROM ")
 	sql.WriteString(b.renderTable(rc, b.from))
 	for _, j := range b.joins {
-		keyword := joinKeyword[j.joinType]
-		if spec := rc.Spec(); spec != nil {
-			keyword = spec.JoinKeyword(keyword)
-		}
+		keyword := joinKeywordSQL(rc, joinKeyword[j.joinType])
 		sql.WriteString(" ")
 		sql.WriteString(keyword)
 		sql.WriteString(" ")

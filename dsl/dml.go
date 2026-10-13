@@ -80,7 +80,14 @@ func (b *DMLBuilder) Columns(fields ...any) *DMLBuilder {
 }
 
 func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
-	if b.err != nil || len(b.insertColumns) == 0 {
+	if b.err != nil {
+		return b
+	}
+	if b.kind != dmlInsert {
+		b.err = fmt.Errorf("gooq: Values is only supported on Insert")
+		return b
+	}
+	if len(b.insertColumns) == 0 {
 		return b
 	}
 	if len(values) != len(b.insertColumns) {
@@ -342,7 +349,7 @@ func (b *DMLBuilder) Exec(ctx context.Context) (sql.Result, error) {
 	if b.kind == dmlInsert && len(b.insertRows) > 0 {
 		chunks := splitInsertChunks(b.insertRows, b.batch)
 		if len(chunks) > 1 {
-			return b.execInsertChunks(ctx, dialect, chunks)
+			return b.execInsertChunkList(ctx, dialect, chunks)
 		}
 	}
 	sqlStr, args, err := b.ToSql(dialect)
@@ -619,7 +626,7 @@ func splitInsertChunks(rows [][]columnValue, batch int) [][][]columnValue {
 	return chunks
 }
 
-func (b *DMLBuilder) execInsertChunks(ctx context.Context, dialect gooq.Dialect, chunks [][][]columnValue) (sql.Result, error) {
+func (b *DMLBuilder) execInsertChunkList(ctx context.Context, dialect gooq.Dialect, chunks [][][]columnValue) (sql.Result, error) {
 	var (
 		total      int64
 		lastResult sql.Result
@@ -702,6 +709,9 @@ func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error)
 }
 
 func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, error) {
+	if len(b.joins) > 0 {
+		return nil, nil, fmt.Errorf("gooq: batch delete/update does not support JOIN")
+	}
 	keys := b.updateKeys
 	if len(keys) == 0 && b.table.Meta() != nil {
 		for _, fm := range b.table.Meta().Fields {
@@ -764,6 +774,9 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 				continue
 			}
 			whereParts[i] = fmt.Sprintf("%s = %s", rc.Quote(cv.column), rc.AddArg(cv.value))
+		}
+		if extra := b.renderWhere(rc); extra != "" {
+			whereParts = append(whereParts, extra)
 		}
 		sqls = append(sqls, sqlStr+" WHERE "+strings.Join(whereParts, " AND "))
 		argss = append(argss, rc.Args())
@@ -846,10 +859,7 @@ func renderSetValue(rc *gooq.RenderContext, cv columnValue) string {
 func (b *DMLBuilder) joinRenders(rc *gooq.RenderContext) []gooq.JoinRender {
 	out := make([]gooq.JoinRender, 0, len(b.joins))
 	for _, j := range b.joins {
-		keyword := joinKeyword[j.joinType]
-		if spec := rc.Spec(); spec != nil {
-			keyword = spec.JoinKeyword(keyword)
-		}
+		keyword := joinKeywordSQL(rc, joinKeyword[j.joinType])
 		out = append(out, gooq.JoinRender{
 			Keyword: keyword,
 			Table:   renderTableName(rc, j.table),
