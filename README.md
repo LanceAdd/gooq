@@ -158,9 +158,10 @@ User.Age.Gt(11).Or(User.Age.Lt(-1))
 // (`user`.`age` > ? OR `user`.`age` < ?)
 User.Age.Gt(11).Or(User.Age.Lt(-1).And(User.Status.Eq("vip")))
 // (`user`.`age` > ? OR (`user`.`age` < ? AND `user`.`status` = ?))
+User.Status.Eq("banned").Not()
+// (NOT `user`.`status` = ?)
 
-// Multiple Where calls are combined with AND. Chain Or / And from the first predicate.
-// A list of expressions uses gooq.AND and gooq.OR.
+// Multiple Where calls are combined with AND. Combine fields with chained Or / And.
 dsl.Select(User.Id).From(User).
     Where(User.Age.Gt(11).Or(User.Age.Lt(-1))).
     Where(User.Status.Eq("vip")).
@@ -169,7 +170,7 @@ dsl.Select(User.Id).From(User).
 // args: []any{11, -1, "vip"}
 
 dsl.Select(User.Id).From(User).
-    Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
+    Where(User.Age.Lt(18).Or(User.Status.Eq("vip"))).
     Where(User.Name.Like("j%")).
     ToSql(gooq.DialectMySQL)
 // ... WHERE (`user`.`age` < ? OR `user`.`status` = ?) AND `user`.`name` LIKE ? AND `user`.`deleted_at` IS NULL

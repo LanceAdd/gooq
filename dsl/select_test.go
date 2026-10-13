@@ -393,7 +393,7 @@ func TestDsl_Select_Lock(t *testing.T) {
 func TestDsl_Select_Conditions(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, args, err := Select(testUser.Id).From(testUser).
-			Where(gooq.OR(testUser.Age.Lt(18), testUser.Status.Eq("vip"))).
+			Where(testUser.Age.Lt(18).Or(testUser.Status.Eq("vip"))).
 			Where(testUser.Name.Like("j%")).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)

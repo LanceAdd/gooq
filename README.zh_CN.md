@@ -157,8 +157,10 @@ User.Age.Gt(11).Or(User.Age.Lt(-1))
 // (`user`.`age` > ? OR `user`.`age` < ?)
 User.Age.Gt(11).Or(User.Age.Lt(-1).And(User.Status.Eq("vip")))
 // (`user`.`age` > ? OR (`user`.`age` < ? AND `user`.`status` = ?))
+User.Status.Eq("banned").Not()
+// (NOT `user`.`status` = ?)
 
-// 多个 Where 用 AND 连接。已有第一条条件时用链式 Or / And。一组表达式用 gooq.AND、gooq.OR。
+// 多个 Where 用 AND 连接。字段之间的 OR / AND 用链式写法。
 dsl.Select(User.Id).From(User).
     Where(User.Age.Gt(11).Or(User.Age.Lt(-1))).
     Where(User.Status.Eq("vip")).
@@ -167,7 +169,7 @@ dsl.Select(User.Id).From(User).
 // args: []any{11, -1, "vip"}
 
 dsl.Select(User.Id).From(User).
-    Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
+    Where(User.Age.Lt(18).Or(User.Status.Eq("vip"))).
     Where(User.Name.Like("j%")).
     ToSql(gooq.DialectMySQL)
 // ... WHERE (`user`.`age` < ? OR `user`.`status` = ?) AND `user`.`name` LIKE ? AND `user`.`deleted_at` IS NULL
