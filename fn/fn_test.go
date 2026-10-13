@@ -1,9 +1,3 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 // 本文件为函数库单元测试：标准函数、聚合、DATE_FORMAT 跨库、字符串聚合、窗口与 SELECT 集成。
 package fn
 

@@ -1,9 +1,3 @@
-// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 // 本文件实现 gooq-gen 主流程：连接数据库 → 解析全部表 → 生成 gooq table 产物。
 package gen
 

@@ -1,11 +1,4 @@
-// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
-// Package cmd provides the management of CLI commands for `gooq-gen` tool.
-package cmd
+package main
 
 import (
 	"context"
@@ -14,18 +7,21 @@ import (
 	"github.com/gogf/gf/v2/util/gmeta"
 	"github.com/gogf/gf/v2/util/gtag"
 
-	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/cmd/gen"
+	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/gen"
 )
 
-// GF is the management object for `gooq-gen` command line tool.
-var GF = cGF{}
+const (
+	cliFolderName = `hack`
+	cliConfigName = `gooq.yaml`
+)
 
-type cGF struct {
-	gmeta.Meta `name:"gooq-gen" brief:"{cGenBrief}" usage:"gooq-gen [OPTION]" eg:"{cGenEg}" ad:"{cGFAd}"`
+// appCmd 是命令对象：Index 是根行为，Init 自动成为子命令。
+type appCmd struct {
+	gmeta.Meta `name:"gooq-gen" brief:"{cGenBrief}" usage:"gooq-gen [OPTION]" eg:"{cGenEg}" ad:"{cAd}"`
 }
 
 const (
-	cGFAd = `
+	cAd = `
 ADDITIONAL
     Use "gooq-gen -h" for details about a command.
 `
@@ -39,23 +35,23 @@ gooq-gen -l "sqlite::@file(./test.db)"
 
 func init() {
 	gtag.Sets(map[string]string{
-		`cGFAd`:      cGFAd,
+		`cAd`:        cAd,
 		`cGenBrief`:  cGenBrief,
 		`cGenEg`:     cGenEg,
 		`cInitBrief`: cInitBrief,
 	})
 }
 
-type cGFInput struct {
+type genInput struct {
 	gmeta.Meta `name:"gooq-gen"`
 	Debug      bool   `short:"d" name:"debug"   brief:"show internal detailed debugging information" orphan:"true"`
 	Link       string `name:"link" short:"l" brief:"database link, like mysql:root:pass@tcp(127.0.0.1:3306)/db"`
 	Path       string `name:"path" short:"p" brief:"directory path for generated files, default internal"`
 }
 
-type cGFOutput struct{}
+type genOutput struct{}
 
-func (c cGF) Index(ctx context.Context, in cGFInput) (out *cGFOutput, err error) {
+func (c appCmd) Index(ctx context.Context, in genInput) (out *genOutput, err error) {
 	// 配置兜底：命令行未提供的参数从 hack/gooq.yaml 的 gooq.gen.table 节点读取。
 	if g.Cfg().Available(ctx) {
 		if in.Link == "" {
@@ -76,13 +72,13 @@ func (c cGF) Index(ctx context.Context, in cGFInput) (out *cGFOutput, err error)
 	return
 }
 
-type cInitInput struct {
+type initInput struct {
 	gmeta.Meta `name:"init" brief:"{cInitBrief}"`
 }
 
-type cInitOutput struct{}
+type initOutput struct{}
 
-func (c cGF) Init(ctx context.Context, in cInitInput) (out *cInitOutput, err error) {
+func (c appCmd) Init(ctx context.Context, in initInput) (out *initOutput, err error) {
 	gen.Init()
 	return
 }

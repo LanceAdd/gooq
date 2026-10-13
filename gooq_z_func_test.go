@@ -1,9 +1,3 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 // 本文件为表达式层单元测试：算术、CASE、RAW、CAST、自定义节点与方言占位符（直接渲染，不经构建器）。
 package gooq
 

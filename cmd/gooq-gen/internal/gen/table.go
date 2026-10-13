@@ -1,9 +1,3 @@
-// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 // 本文件实现 gooq 类型化表对象的生成：连库取表结构 → 模板渲染 → 写盘。
 // 模板为外部文件（template/table.tmpl）。
 package gen

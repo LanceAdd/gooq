@@ -1,9 +1,3 @@
-// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 // 本文件提供生成工具函数：GoFmt 格式化生成的 go 源文件并整理 import。
 package gen
 

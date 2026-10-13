@@ -1,9 +1,3 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 // 本文件为缓存 key 生成逻辑单元测试（内部函数 cacheKey/pageCacheKey）。
 // 表对象用最小 gooq.TableBase 构造：key 逻辑与表来源无关，测试聚焦哈希区分度。
 package dsl

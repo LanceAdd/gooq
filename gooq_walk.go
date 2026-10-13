@@ -1,9 +1,3 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 package gooq
 
 // SubExpressioner 由携带子表达式的复合节点实现；遍历经此递归进入自定义节点类型。

@@ -1,9 +1,3 @@
-// Copyright GoFrame Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 // 本文件为 SELECT 渲染单元测试：条件/软删/JOIN/子查询/分组/集合/CTE/锁/分页/窗口。
 package dsl
 

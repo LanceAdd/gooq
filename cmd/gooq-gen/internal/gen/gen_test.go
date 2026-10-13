@@ -1,9 +1,3 @@
-// Copyright GoFrame gf Author(https://goframe.org). All Rights Reserved.
-//
-// This Source Code Form is subject to the terms of the MIT License.
-// If a copy of the MIT was not distributed with this file,
-// You can obtain one at https://github.com/gogf/gf.
-
 // 本文件为 gooq-gen 的端到端测试：sqlite 建库 → Generate/init 子命令 → 产物断言。
 package gen
 
@@ -66,7 +60,7 @@ func buildBinary(t *gtest.T) string {
 	binOnce.Do(func() {
 		// 模块根目录经文件位置推导（不受工作目录影响）。
 		_, file, _, _ := runtime.Caller(0)
-		moduleDir := filepath.Join(filepath.Dir(file), "..", "..", "..")
+		moduleDir := filepath.Join(filepath.Dir(file), "..", "..")
 		path := filepath.Join(gfile.Temp("gooq-gen-bin"), "gooq-gen.exe")
 		if err := gfile.Mkdir(gfile.Dir(path)); err != nil {
 			panic(err)

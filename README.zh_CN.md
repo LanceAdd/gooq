@@ -632,3 +632,5 @@ cd test && go test ./...                # 集成测试（真实 MySQL，使用 t
 ## License
 
 MIT
+
+gooq 的设计源于 GoFrame gdb 在发展中暴露出的不足，并结合了 [jOOQ](https://www.jooq.org/) 的理念；代码从 GoFrame 中的 gooq 原型（MIT License）演变而来，现已独立发展。
