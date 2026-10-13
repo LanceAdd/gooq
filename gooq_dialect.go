@@ -118,6 +118,9 @@ type DialectSpec interface {
 	// RenderDelete 渲染硬删除。joins 为空时只删除目标表。
 	// SQLite 在带连接时返回错误。
 	RenderDelete(rc *RenderContext, target string, joins []JoinRender, where string) (string, error)
+	// RenderExists 渲染存在性查询。subSQL 是已经渲染好的子查询。
+	// 默认是 SELECT EXISTS (subSQL)。达梦改成 SELECT COUNT(*) FROM (subSQL) WHERE ROWNUM = 1。
+	RenderExists(rc *RenderContext, subSQL string) string
 	// RenderUpdate 渲染 UPDATE。where 只包含调用方自己的条件，不含连接条件。
 	// 没有连接时写成 UPDATE target SET sets。
 	// MySQL 有连接时把 JOIN 写在 SET 前面，并保留连接类型。
@@ -256,6 +259,10 @@ func quoteLiteralStandard(s string) string {
 func quoteLiteralMySQL(s string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `'`, `''`)
 	return "'" + replacer.Replace(s) + "'"
+}
+
+func renderSelectExists(subSQL string) string {
+	return "SELECT EXISTS (" + subSQL + ")"
 }
 
 func canonicalDateUnit(unit string) (string, error) {

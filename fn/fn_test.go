@@ -169,6 +169,11 @@ func TestFn_DialectFunctions(t *testing.T) {
 		t.Assert(sql, `SELECT ("user"."created_at" + make_interval(days => $1::int)) FROM "user" WHERE "user"."deleted_at" IS NULL`)
 		t.AssertEQ(args, []any{1})
 
+		sql, args, err = dsl.Select(DateAdd(testUser.CreatedAt, 1, "DAY")).From(testUser).ToSql(gooq.DialectGaussDB)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT ("user"."created_at" + ($1::int * INTERVAL '1 DAY')) FROM "user" WHERE "user"."deleted_at" IS NULL`)
+		t.AssertEQ(args, []any{1})
+
 		sql, _, err = dsl.Select(DateDiff(testUser.CreatedAt, Now())).From(testUser).ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
 		t.Assert(sql, `SELECT ("user"."created_at")::date - (NOW())::date FROM "user" WHERE "user"."deleted_at" IS NULL`)

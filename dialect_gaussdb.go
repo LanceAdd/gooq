@@ -30,3 +30,12 @@ func (GaussDBDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (stri
 func (GaussDBDialect) RenderExcluded(rc *RenderContext, column string) string {
 	return "VALUES(" + rc.Quote(column) + ")"
 }
+
+// RenderDateAdd 渲染间隔乘法。openGauss 没有 make_interval。
+func (GaussDBDialect) RenderDateAdd(field, count, unit string) (string, error) {
+	canonical, err := canonicalDateUnit(unit)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("(%s + (%s::int * INTERVAL '1 %s'))", field, count, canonical), nil
+}

@@ -36,6 +36,11 @@ func TestDialectSpec_BuiltinAndOverride(t *testing.T) {
 		_, err = DialectSpecOf("missing")
 		t.AssertNE(err, nil)
 
+		t.Assert(mysql.RenderExists(nil, "SELECT 1"), "SELECT EXISTS (SELECT 1)")
+		dm, err := DialectSpecOf(DialectDM)
+		t.AssertNil(err)
+		t.Assert(dm.RenderExists(nil, "SELECT 1"), "SELECT COUNT(*) FROM (SELECT 1) WHERE ROWNUM = 1")
+
 		RegisterDialect(bracketDialect{})
 		spec, err := DialectSpecOf("bracket")
 		t.AssertNil(err)

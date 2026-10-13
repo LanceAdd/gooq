@@ -58,6 +58,10 @@ func (DMDialect) CastType(localType LocalType) string {
 // ShareLock 返回 FOR SHARE。达梦原生语法只有 FOR UPDATE，共享锁可能被服务器拒绝。
 func (DMDialect) ShareLock() string { return "FOR SHARE" }
 
+func (DMDialect) RenderExists(_ *RenderContext, subSQL string) string {
+	return "SELECT COUNT(*) FROM (" + subSQL + ") WHERE ROWNUM = 1"
+}
+
 // Returning 返回空字符串。达梦不支持 RETURNING。
 func (DMDialect) Returning() string { return "" }
 

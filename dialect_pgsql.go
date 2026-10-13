@@ -55,6 +55,10 @@ func (PostgresDialect) CastType(localType LocalType) string {
 // ShareLock 返回 FOR SHARE。
 func (PostgresDialect) ShareLock() string { return "FOR SHARE" }
 
+func (PostgresDialect) RenderExists(_ *RenderContext, subSQL string) string {
+	return renderSelectExists(subSQL)
+}
+
 // Returning 返回 RETURNING。
 func (PostgresDialect) Returning() string { return "RETURNING" }
 

@@ -48,6 +48,10 @@ func (MySQLDialect) CastType(localType LocalType) string {
 // ShareLock 返回 LOCK IN SHARE MODE。
 func (MySQLDialect) ShareLock() string { return "LOCK IN SHARE MODE" }
 
+func (MySQLDialect) RenderExists(_ *RenderContext, subSQL string) string {
+	return renderSelectExists(subSQL)
+}
+
 // Returning 返回空字符串。MySQL 不支持 RETURNING。
 func (MySQLDialect) Returning() string { return "" }
 

@@ -21,7 +21,10 @@ func (shapeOnlyDialect) CastType(localType gooq.LocalType) string {
 }
 func (shapeOnlyDialect) QuoteLiteral(s string) string { return "'" + s + "'" }
 func (shapeOnlyDialect) ShareLock() string            { return "FOR SHARE" }
-func (shapeOnlyDialect) Returning() string            { return "" }
+func (shapeOnlyDialect) RenderExists(_ *gooq.RenderContext, subSQL string) string {
+	return "SELECT EXISTS (" + subSQL + ")"
+}
+func (shapeOnlyDialect) Returning() string { return "" }
 func (shapeOnlyDialect) RenderLimit(_ *gooq.RenderContext, limit, offset int) string {
 	if offset > 0 {
 		return fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)

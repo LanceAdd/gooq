@@ -76,6 +76,10 @@ func (SQLiteDialect) CastType(localType LocalType) string {
 // ShareLock 返回空字符串。SQLite 渲染会丢掉行锁。
 func (SQLiteDialect) ShareLock() string { return "" }
 
+func (SQLiteDialect) RenderExists(_ *RenderContext, subSQL string) string {
+	return renderSelectExists(subSQL)
+}
+
 // Returning 返回 RETURNING。
 func (SQLiteDialect) Returning() string { return "RETURNING" }
 

@@ -810,11 +810,15 @@ func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var ok bool
-	if err := b.queryWithCache(ctx, dialect, fmt.Sprintf("SELECT EXISTS (%s)", sql), args, &ok, "exists"); err != nil {
+	spec, err := gooq.DialectSpecOf(dialect)
+	if err != nil {
 		return false, err
 	}
-	return ok, nil
+	var raw any
+	if err := b.queryWithCache(ctx, dialect, spec.RenderExists(gooq.NewRenderContext(dialect), sql), args, &raw, "exists"); err != nil {
+		return false, err
+	}
+	return existsFlag(raw)
 }
 
 // RowsAndCount 复合查询：count 先行，count=0 短路不查 rows；

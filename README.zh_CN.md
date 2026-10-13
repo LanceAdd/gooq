@@ -267,6 +267,8 @@ dsl.Select(User.Status).From(User).GroupCube(User.Status).ToSql(gooq.DialectPgsq
 dsl.Select(User.Id).From(User).Where(User.Age.Eq(1)).
     UnionAll(dsl.Select(User.Id).From(User).Where(User.Age.Eq(2)))
 // ... UNION ALL ...
+// 集合操作之后的 ORDER BY 只能写结果列名。带表名的列在 MySQL、TiDB、OceanBase 上报 1250，PostgreSQL 家族同样拒绝。
+// dsl.Select(User.Id).From(User).UnionAll(...).Order(gooq.Raw("id"))
 
 dsl.Select(User.Id).From(User).
     Intersect(dsl.Select(User.Id).From(User)).
@@ -503,7 +505,8 @@ err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
     return err
 })
 
-// 便捷方法：Count 自动补全 COUNT(*)，Exists 包装 SELECT EXISTS(...)。
+// 便捷方法：Count 自动补全 COUNT(*)。Exists 按方言包装存在性查询：
+// 达梦是 SELECT COUNT(*) FROM (...) WHERE ROWNUM = 1，其他方言是 SELECT EXISTS(...)。
 total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).Count(ctx)
 exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).Exists(ctx)
 
@@ -592,11 +595,11 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 - `ToSql` 要求方言已注册为 `DialectSpec`。未知方言直接返回错误。可嵌入 `MySQLDialect`、`PostgresDialect` 或 `SQLiteDialect`，只覆盖有差异的方法，再调用 `RegisterDialect`。
 - 打开连接需要空白导入对应驱动包（`drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`）。驱动在 `init` 里调用 `db.Register`。`gooq-gen` 会导入这些驱动。
-- MariaDB、TiDB 和 OceanBase 使用 MySQL 协议，语句形状与 MySQL 相同。MariaDB 从 `information_schema` 读列，因此 `longtext` 加上 `json_valid` 检查的 JSON 列会标成 `json`。
-- GaussDB 指 openGauss。引号、占位符、行锁、`RETURNING`、删除和更新跟随 PostgreSQL。冲突更新是 `ON DUPLICATE KEY UPDATE`，本次插入值写成 `VALUES(col)`。GaussDB 没有 `ON CONFLICT DO NOTHING`，`DoNothing` 返回错误。`database/sql` 的驱动名是 `opengauss`。
-- 达梦（`dm`）把标识符渲染成大写双引号，对上未加引号建表时折成大写的名字。冲突插入写成 `MERGE`，必须给出 `OnConflictKey`，冲突列还要出现在插入列里。`DoNothing` 只在未匹配时插入。没有 `RETURNING`。`GROUP_CONCAT` 写成 `LISTAGG`，`DATE_FORMAT` 写成 `TO_CHAR`，`IFNULL` 写成 `NVL`，`DATE_ADD` 写成 `DATEADD`。`time.Time` 绑成时间字符串，零值写成 `NULL`。配置里的 IANA 时区换成分钟偏移，超出 ±12 小时会失败。带连接的 `DELETE` 和带外连接的 `UPDATE` 返回错误。自增列不会标成 `AutoIncrement`。`database/sql` 的驱动名是 `dm`。链接示例：`dm:SYSDBA:SYSDBA001@tcp(127.0.0.1:5236)/SYSDBA`。
+- MariaDB、TiDB 和 OceanBase 使用 MySQL 协议，语句形状与 MySQL 相同。MariaDB 从 `information_schema` 读列，因此 `longtext` 加上 `json_valid` 检查的 JSON 列会标成 `json`。`LockInShareMode` 在 TiDB 上默认报错；打开 `tidb_enable_noop_functions` 后语句能执行，但不会加共享锁。`LockForUpdate` 正常。
+- GaussDB 指 openGauss。引号、占位符、行锁、`RETURNING`、删除和更新跟随 PostgreSQL。`DATE_ADD` 写成间隔乘法，不用 `make_interval`。冲突更新是 `ON DUPLICATE KEY UPDATE`，本次插入值写成 `VALUES(col)`。GaussDB 没有 `ON CONFLICT DO NOTHING`，`DoNothing` 返回错误。`database/sql` 的驱动名是 `opengauss`。
+- 达梦（`dm`）把标识符渲染成大写双引号，对上未加引号建表时折成大写的名字。冲突插入写成 `MERGE`，必须给出 `OnConflictKey`，冲突列还要出现在插入列里。`DoNothing` 只在未匹配时插入。没有 `RETURNING`。`Exists` 写成 `SELECT COUNT(*) FROM (子查询) WHERE ROWNUM = 1`。`GROUP_CONCAT` 写成 `LISTAGG`，`DATE_FORMAT` 写成 `TO_CHAR`，`IFNULL` 写成 `NVL`，`DATE_ADD` 写成 `DATEADD`。`time.Time` 绑成时间字符串，零值写成 `NULL`。配置里的 IANA 时区换成分钟偏移，超出 ±12 小时会失败。带连接的 `DELETE` 和带外连接的 `UPDATE` 返回错误。自增列不会标成 `AutoIncrement`。`database/sql` 的驱动名是 `dm`。链接示例：`dm:SYSDBA:SYSDBA001@tcp(127.0.0.1:5236)/SYSDBA`。
 - 带 schema 的表渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；gooq-gen 仅对 PG 填充 schema（`current_schema()`）。
-- `DialectSpec` 只约束语句形状：分页、行锁、`JOIN` 改写、upsert、删除、多表 `UPDATE`（`RenderUpdate`）。`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL`、`CURDATE`、`DATE_ADD`、`DATEDIFF`、`ROUND`、`MEDIAN` 留在具体方言类型上。没有实现的方言在 `ToSql` 返回 `dialect %q does not support ...`。SQLite 的 upsert 使用 `ON CONFLICT`。
+- `DialectSpec` 只约束语句形状：分页、行锁、`JOIN` 改写、upsert、删除、多表 `UPDATE`（`RenderUpdate`）、存在性查询（`RenderExists`）。`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL`、`CURDATE`、`DATE_ADD`、`DATEDIFF`、`ROUND`、`MEDIAN` 留在具体方言类型上。没有实现的方言在 `ToSql` 返回 `dialect %q does not support ...`。SQLite 的 upsert 使用 `ON CONFLICT`。
 - 表别名、列别名和函数别名都走 `Quote`。`numeric` / `decimal` 生成 `string`。PostgreSQL 数组按元素类型生成切片。
 - PostgreSQL 16 起可用 `STRING_AGG(DISTINCT ...)`、`JSON_ARRAYAGG` 和 `ANY_VALUE`。
 

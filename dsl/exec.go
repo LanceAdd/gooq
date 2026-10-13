@@ -90,6 +90,14 @@ func execColumn(ctx context.Context, exec executor, query string, args []any, de
 	}
 }
 
+func existsFlag(value any) (bool, error) {
+	var ok bool
+	if err := gconv.Scan(value, &ok); err != nil {
+		return false, err
+	}
+	return ok, nil
+}
+
 func toInt64(value any) (int64, error) {
 	var out int64
 	if err := gconv.Scan(value, &out); err != nil {
