@@ -27,8 +27,9 @@ var (
 // fileConfig 是配置文件里 gooq 节点的形状。
 // gcfg 先用 gjson 把 yaml、toml、json 等解析成同一棵树，Scan 再填进这个结构体。
 type fileConfig struct {
-	Logger   loggerConfig    `json:"logger"`
-	Database []databaseGroup `json:"database"`
+	Logger       loggerConfig    `json:"logger"`
+	DefaultGroup string          `json:"defaultGroup"`
+	Database     []databaseGroup `json:"database"`
 }
 
 // loggerConfig 只校验文件里的 level。其余 logger 字段原样交给 glog.SetConfigWithMap。
@@ -38,7 +39,7 @@ type loggerConfig struct {
 
 // databaseGroup 是一个配置组。Name 是 Instance 使用的组名。
 type databaseGroup struct {
-	Name      string           `json:"name" v:"required"`
+	Name      string           `json:"name"`
 	Endpoints []endpointConfig `json:"endpoints" v:"required"`
 }
 
@@ -90,8 +91,11 @@ func (e endpointConfig) toConfig() Config {
 	return cfg
 }
 
-// LoadConfig 通过 gcfg 读取 gooq.database 和 gooq.logger。
+// LoadConfig 通过 gcfg 读取 gooq.database、gooq.defaultGroup 和 gooq.logger。
 // database 是配置组列表。每组有 name 和 endpoints。name 是 Instance 使用的组名。
+// 只有一组且没写 name 时记成 default。多于一组时每组都要写 name。
+// defaultGroup 选择不写组名时使用的组，必须是本次文件里的组名；不写时改回 default。
+// 这次加载会盖过更早的 SetDefaultGroup。
 // 不传配置时只读取名为 gooq 的配置文件，不读取应用的 config 文件。
 // 已经注册的组保持不变，只补写 logger。
 // gooq.logger 配置本次从文件载入的每一组的 SQL 日志器。
@@ -124,6 +128,9 @@ func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 	for i := range file.Database {
 		file.Database[i].Name = strings.TrimSpace(file.Database[i].Name)
 	}
+	if err = normalizeDatabaseGroups(file.Database); err != nil {
+		return err
+	}
 	if err = gvalid.New().Ci().Data(file).Run(ctx); err != nil {
 		return fmt.Errorf("gooq: %w", err)
 	}
@@ -133,12 +140,18 @@ func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 			return err
 		}
 	}
+	chosen := strings.TrimSpace(file.DefaultGroup)
 	seen := make(map[string]bool, len(file.Database))
 	for _, group := range file.Database {
 		if seen[group.Name] {
 			return fmt.Errorf("gooq: database group %q is duplicated", group.Name)
 		}
 		seen[group.Name] = true
+	}
+	if chosen != "" && !seen[chosen] {
+		return fmt.Errorf("gooq: default group %q is not configured", chosen)
+	}
+	for _, group := range file.Database {
 		nodes := make([]Config, len(group.Endpoints))
 		for i, endpoint := range group.Endpoints {
 			nodes[i] = endpoint.toConfig()
@@ -164,6 +177,25 @@ func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 		if len(loggerCfg) > 0 {
 			groupLoggerConfigs.Set(group.Name, loggerCfg)
 		}
+	}
+	if chosen == "" {
+		chosen = DefaultGroupName
+	}
+	SetDefaultGroup(chosen)
+	return nil
+}
+
+func normalizeDatabaseGroups(groups []databaseGroup) error {
+	if len(groups) > 1 {
+		for _, group := range groups {
+			if group.Name == "" {
+				return fmt.Errorf("gooq: database group name is required when more than one group is configured")
+			}
+		}
+		return nil
+	}
+	if len(groups) == 1 && groups[0].Name == "" {
+		groups[0].Name = DefaultGroupName
 	}
 	return nil
 }

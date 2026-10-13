@@ -247,12 +247,12 @@ func TestLoadConfigDatabaseShape(t *testing.T) {
 		t.Fatalf("legacy database err = %v", err)
 	}
 
-	missingName := "gooq:\n  database:\n    - endpoints:\n        - link: '" + master + "'\n"
+	missingName := "gooq:\n  database:\n    - endpoints:\n        - link: '" + master + "'\n    - endpoints:\n        - link: '" + slave + "'\n"
 	unnamed, err := gcfg.NewAdapterContent(missingName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = LoadConfig(ctx, gcfg.NewWithAdapter(unnamed)); err == nil || !strings.Contains(err.Error(), "name") {
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(unnamed)); err == nil || !strings.Contains(err.Error(), "name is required") {
 		t.Fatalf("missing name err = %v", err)
 	}
 	missingLink := "gooq:\n  database:\n    - name: broken\n      endpoints:\n        - role: master\n"
@@ -262,6 +262,112 @@ func TestLoadConfigDatabaseShape(t *testing.T) {
 	}
 	if err = LoadConfig(ctx, gcfg.NewWithAdapter(nolink)); err == nil || !strings.Contains(err.Error(), "link") {
 		t.Fatalf("missing link err = %v", err)
+	}
+}
+
+func TestLoadConfigDefaultGroup(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	link := "sqlite::@file(" + filepath.ToSlash(filepath.Join(dir, "one.db")) + ")"
+	orders := "sqlite::@file(" + filepath.ToSlash(filepath.Join(dir, "orders.db")) + ")"
+	report := "sqlite::@file(" + filepath.ToSlash(filepath.Join(dir, "report.db")) + ")"
+	t.Cleanup(func() {
+		SetDefaultGroup("")
+		_ = RemoveConfig(DefaultGroupName)
+		_ = RemoveConfig("orders")
+		_ = RemoveConfig("report")
+	})
+
+	_ = RemoveConfig(DefaultGroupName)
+	unnamed := "gooq:\n  database:\n    - endpoints:\n        - link: '" + link + "'\n"
+	adapter, err := gcfg.NewAdapterContent(unnamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetDefaultGroup("orders")
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(adapter)); err != nil {
+		t.Fatal(err)
+	}
+	database, err := Instance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if database.Group() != DefaultGroupName {
+		t.Fatalf("group = %s", database.Group())
+	}
+	if err = RemoveConfig(DefaultGroupName); err != nil {
+		t.Fatal(err)
+	}
+
+	namedOnly := "gooq:\n  database:\n    - name: orders\n      endpoints:\n        - link: '" + orders + "'\n"
+	adapter, err = gcfg.NewAdapterContent(namedOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(adapter)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Instance(); err == nil || !strings.Contains(err.Error(), "empty database configuration") {
+		t.Fatalf("single named group err = %v", err)
+	}
+	if _, err = Instance("orders"); err != nil {
+		t.Fatal(err)
+	}
+
+	chosen := "gooq:\n  defaultGroup: orders\n  database:\n    - name: orders\n      endpoints:\n        - link: '" + orders + "'\n    - name: report\n      endpoints:\n        - link: '" + report + "'\n"
+	adapter, err = gcfg.NewAdapterContent(chosen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	SetDefaultGroup("report")
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(adapter)); err != nil {
+		t.Fatal(err)
+	}
+	database, err = Instance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if database.Group() != "orders" {
+		t.Fatalf("group = %s", database.Group())
+	}
+	SetDefaultGroup("report")
+	database, err = Instance()
+	if err != nil || database.Group() != "report" {
+		t.Fatalf("override group = %v, %v", database, err)
+	}
+
+	unknown := "gooq:\n  defaultGroup: missing\n  database:\n    - name: orders\n      endpoints:\n        - link: '" + orders + "'\n"
+	adapter, err = gcfg.NewAdapterContent(unknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(adapter)); err == nil || !strings.Contains(err.Error(), `default group "missing" is not configured`) {
+		t.Fatalf("unknown default group err = %v", err)
+	}
+}
+
+func TestEmptyGroupNameUsesCurrentDefault(t *testing.T) {
+	link := "sqlite::@file(" + filepath.ToSlash(filepath.Join(t.TempDir(), "empty-name.db")) + ")"
+	SetDefaultGroup("orders")
+	t.Cleanup(func() {
+		SetDefaultGroup("")
+		_ = RemoveConfig("orders")
+	})
+	if err := SetConfig("", Config{Link: link}); err != nil {
+		t.Fatal(err)
+	}
+	database, err := Instance()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if database.Group() != "orders" {
+		t.Fatalf("group = %s", database.Group())
+	}
+	if err = RemoveConfig(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Instance(); err == nil || !strings.Contains(err.Error(), "empty database configuration") {
+		t.Fatalf("removed default group err = %v", err)
 	}
 }
 

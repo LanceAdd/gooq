@@ -30,11 +30,11 @@ func SetDefaultGroup(name string) {
 }
 
 // SetConfig 为一组注册一个或多个节点。
-// 组名为空时使用默认组。Role 为空的节点视为主库。打开该组时至少要有一个主库。
+// 组名为空时使用当前默认组。Role 为空的节点视为主库。打开该组时至少要有一个主库。
 // 配置先保存，Instance 再打开。再次调用会关掉已经打开的实例。
 func SetConfig(group string, nodes ...Config) error {
 	if group == "" {
-		group = DefaultGroupName
+		group = defaultGroup.Val()
 	}
 	if len(nodes) == 0 {
 		return fmt.Errorf("gooq: empty database configuration for group %q", group)
@@ -58,7 +58,7 @@ func SetConfig(group string, nodes ...Config) error {
 // RemoveConfig 去掉一组配置，并关闭已经打开的实例。
 func RemoveConfig(group string) error {
 	if group == "" {
-		group = DefaultGroupName
+		group = defaultGroup.Val()
 	}
 	groupMu.Lock()
 	clearGroupLogger(group)

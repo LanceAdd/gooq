@@ -525,9 +525,11 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
     Where(User.Account.Eq("x")).RowOne(ctx)
 
 // DB("orders") uses that configuration group. Omitting DB uses the default group.
-// LoadConfig reads gooq.database and gooq.logger through gcfg.
+// LoadConfig reads gooq.database, gooq.defaultGroup, and gooq.logger through gcfg.
 // Runtime reads only a file named gooq, such as gooq.yaml, and does not read config.yaml.
 // database is a list of groups: name is the group, endpoints are its master and slave nodes.
+// A single group may omit name and is stored as default. Every group needs a name when there is more than one.
+// defaultGroup selects the group used when the name is omitted. It must be one of the groups in this file; omitted, it is default.
 // SetDebug logs SQL, SetDryRun skips execution, Prepare prepares a statement,
 // and Schema switches the MySQL database or PostgreSQL search_path.
 // Reads use a slave when the group has one; writes and BEGIN use a master.
@@ -536,6 +538,7 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
 
 ```yaml
 gooq:
+  defaultGroup: orders
   database:
     - name: default
       endpoints:

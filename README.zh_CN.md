@@ -521,9 +521,11 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
     Where(User.Account.Eq("x")).RowOne(ctx)
 
 // DB("orders") 使用该配置组。不写 DB 时走默认组。
-// LoadConfig 通过 gcfg 读取 gooq.database 和 gooq.logger。
+// LoadConfig 通过 gcfg 读取 gooq.database、gooq.defaultGroup 和 gooq.logger。
 // 运行时只读取名为 gooq 的配置文件，例如 gooq.yaml，不读取 config.yaml。
 // database 是配置组列表：name 是组名，endpoints 是这一组的主从节点。
+// 只有一组时可以不写 name，加载后记成 default。多于一组时每组都要写 name。
+// defaultGroup 选择不写组名时使用的组，必须是本次文件里的组名；不写时是 default。
 // SetDebug 打印 SQL，SetDryRun 跳过执行，Prepare 预处理语句，
 // Schema 切换 MySQL 库名或 PostgreSQL search_path。
 // 组内有从库时读走从库，写和 BEGIN 走主库。Master() / Slave() 强制指定。
@@ -532,6 +534,7 @@ row, err = dsl.Select(User.Id, User.Name).From(User).
 
 ```yaml
 gooq:
+  defaultGroup: orders
   database:
     - name: default
       endpoints:
