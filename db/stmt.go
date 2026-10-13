@@ -78,7 +78,8 @@ func (s *Stmt) Exec(ctx context.Context, args ...any) (sql.Result, error) {
 	return result, err
 }
 
-// Query 执行预编译查询。调用方负责关闭 rows。语句为空时返回 nil, nil。
+// Query 执行预编译查询。调用方负责关闭 rows。
+// DryRun 或语句未预编译时返回错误，不返回 rows。
 func (s *Stmt) Query(ctx context.Context, args ...any) (*sql.Rows, error) {
 	if s.stmt == nil || (s.db != nil && s.db.dryRun != nil && s.db.dryRun.Val()) {
 		if s.db != nil {

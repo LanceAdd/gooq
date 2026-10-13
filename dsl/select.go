@@ -806,16 +806,12 @@ func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 	}
 	defer restore()
 	dialect := b.dialect()
-	if err := b.ValidateDialect(dialect); err != nil {
-		return false, err
-	}
-	rc := gooq.NewRenderContext(dialect)
-	subSQL := b.renderSelect(rc)
-	if err := rc.Err(); err != nil {
+	sql, args, err := b.ToSql(dialect)
+	if err != nil {
 		return false, err
 	}
 	var ok bool
-	if err := b.queryWithCache(ctx, dialect, fmt.Sprintf("SELECT EXISTS (%s)", subSQL), rc.Args(), &ok, "exists"); err != nil {
+	if err := b.queryWithCache(ctx, dialect, fmt.Sprintf("SELECT EXISTS (%s)", sql), args, &ok, "exists"); err != nil {
 		return false, err
 	}
 	return ok, nil

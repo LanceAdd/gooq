@@ -381,6 +381,19 @@ func TestDsl_Delete(t *testing.T) {
 		t.AssertNE(err, nil)
 		t.Assert(strings.Contains(err.Error(), "outer join is not supported by dialect pgsql"), true)
 
+		_, _, err = Delete(u).LeftJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "DELETE with an outer join is not supported by dialect pgsql"), true)
+
+		_, _, err = Delete(u).LeftJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectGaussDB)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "DELETE with an outer join is not supported by dialect gaussdb"), true)
+
+		soft := testUser.As("u")
+		_, _, err = Delete(soft).Unscoped().LeftJoin(r).On(r.Id.EqExpr(soft.Id)).ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "DELETE with an outer join is not supported by dialect pgsql"), true)
+
 		_, _, err = Delete(u).InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectSQLite)
 		t.AssertNE(err, nil)
 	})

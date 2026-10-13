@@ -137,6 +137,20 @@ func TestRowOne(t *testing.T) {
 	})
 }
 
+func TestExistsBuildErr(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		fe := &fakeExecutor{}
+		b := Select(testUser.Status).From(testUser).
+			GroupRollup(testUser.Status).
+			GroupCube(testUser.Status)
+		b.executor = fe
+		_, err := b.Exists(context.Background())
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "GROUP BY extension is already set"), true)
+		t.AssertEQ(len(fe.calls), 0)
+	})
+}
+
 func TestScanUsesDefaultInstance(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "default.db")
 	gtest.C(t, func(t *gtest.T) {

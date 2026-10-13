@@ -76,8 +76,17 @@ func (PostgresDialect) RenderExcluded(rc *RenderContext, column string) string {
 	return "EXCLUDED." + rc.Quote(column)
 }
 
-// RenderDelete 渲染 DELETE。带连接时使用 USING，连接条件并入 WHERE。
+// RenderDelete 渲染 DELETE。没有连接时只写 FROM。
+// 全部内连接时使用 USING，连接条件并入 WHERE。
+// 出现外连接时返回错误。GaussDB 嵌入本方法，错误里的方言名取渲染上下文。
 func (PostgresDialect) RenderDelete(rc *RenderContext, target string, joins []JoinRender, where string) (string, error) {
+	if joinsHaveOuter(joins) {
+		name := DialectPgsql
+		if rc != nil && rc.Dialect() != "" {
+			name = rc.Dialect()
+		}
+		return "", fmt.Errorf("gooq: DELETE with an outer join is not supported by dialect %s", name)
+	}
 	if len(joins) == 0 {
 		return renderDeleteFrom(target, where), nil
 	}
