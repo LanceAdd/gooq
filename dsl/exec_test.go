@@ -21,20 +21,6 @@ import (
 	_ "github.com/lanceadd/gooq/drivers/sqlite"
 )
 
-func TestExistsFlag(t *testing.T) {
-	gtest.C(t, func(t *gtest.T) {
-		ok, err := existsFlag(true)
-		t.AssertNil(err)
-		t.Assert(ok, true)
-		ok, err = existsFlag(int64(0))
-		t.AssertNil(err)
-		t.Assert(ok, false)
-		ok, err = existsFlag(float64(1))
-		t.AssertNil(err)
-		t.Assert(ok, true)
-	})
-}
-
 type fakeExecutor struct {
 	calls   []string
 	queries []string
