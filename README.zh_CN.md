@@ -12,7 +12,7 @@
 
 ## 行为变化
 
-多个 `Where` 用 AND 连接。交织的 AND/OR 用 `gooq.AND`、`gooq.OR` 组好再传入 `Where`。`WhereOr` 已去掉。
+多个 `Where` 用 AND 连接。字段比较返回 `Condition`，可以继续 `.And`、`.Or`、`.Not`，链是左结合的。一组表达式用 `gooq.AND`、`gooq.OR`、`gooq.NOT`。`WhereOr` 已去掉。
 
 ## 快速开始
 
@@ -152,13 +152,32 @@ User.DeletedAt.IsNull()               // `user`.`deleted_at` IS NULL
 OrderItem.UserId.EqExpr(User.Id)      // `order_item`.`user_id` = `user`.`id`
 User.Id.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
 
-// 多个 Where 用 AND 连接。交织的 AND/OR 用 gooq.AND、gooq.OR 组好再传入。
+// 比较结果是 Condition，可继续 And / Or / Not。链左结合。
+User.Age.Gt(11).Or(User.Age.Lt(-1))
+// (`user`.`age` > ? OR `user`.`age` < ?)
+User.Age.Gt(11).Or(User.Age.Lt(-1).And(User.Status.Eq("vip")))
+// (`user`.`age` > ? OR (`user`.`age` < ? AND `user`.`status` = ?))
+
+// 多个 Where 用 AND 连接。已有第一条条件时用链式 Or / And。一组表达式用 gooq.AND、gooq.OR。
+dsl.Select(User.Id).From(User).
+    Where(User.Age.Gt(11).Or(User.Age.Lt(-1))).
+    Where(User.Status.Eq("vip")).
+    ToSql(gooq.DialectMySQL)
+// ... WHERE (`user`.`age` > ? OR `user`.`age` < ?) AND `user`.`status` = ? AND `user`.`deleted_at` IS NULL
+// args: []any{11, -1, "vip"}
+
 dsl.Select(User.Id).From(User).
     Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
     Where(User.Name.Like("j%")).
     ToSql(gooq.DialectMySQL)
 // ... WHERE (`user`.`age` < ? OR `user`.`status` = ?) AND `user`.`name` LIKE ? AND `user`.`deleted_at` IS NULL
 // args: []any{18, "vip", "j%"}
+
+// 左边不是 Field[T] 时用 gooq.Gt / Eq 等。Raw 先用 Cond 包成条件。
+gooq.Gt(User.Age.Add(1), 11).Or(gooq.Lt(User.Age, 0))
+// ((`user`.`age` + ?) > ? OR `user`.`age` < ?)
+gooq.Cond(gooq.Raw("a = 1")).Or(User.Age.Lt(-1))
+// (a = 1 OR `user`.`age` < ?)
 
 // 动态组装：Clone 复用基准构建器。同一个 builder 不能并发使用，执行前会把执行器写回它。
 base := dsl.Select(User.Id).From(User)

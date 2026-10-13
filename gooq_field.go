@@ -149,6 +149,10 @@ type fieldCondition struct {
 	columnName string
 }
 
+func (c *fieldCondition) And(parts ...Expression) Condition { return chain(groupAnd, c, parts...) }
+func (c *fieldCondition) Or(parts ...Expression) Condition  { return chain(groupOr, c, parts...) }
+func (c *fieldCondition) Not() Condition                    { return negate(c) }
+
 func (c *fieldCondition) SubExpressions() []Expression {
 	subs := []Expression{c.field}
 	if expr, ok := c.value.(Expression); ok {
@@ -220,111 +224,111 @@ func buildFieldCondition(field Field[any], op opType, value any) *fieldCondition
 	return &fieldCondition{field: field, op: op, value: value, columnName: field.columnName}
 }
 
-func (f Field[T]) Eq(v T) Expression {
+func (f Field[T]) Eq(v T) Condition {
 	return buildFieldCondition(toAnyField(f), opEq, v)
 }
 
-func (f Field[T]) EqExpr(e Expression) Expression {
+func (f Field[T]) EqExpr(e Expression) Condition {
 	return buildFieldCondition(toAnyField(f), opEq, e)
 }
 
-func (f Field[T]) Ne(v T) Expression {
+func (f Field[T]) Ne(v T) Condition {
 	return buildFieldCondition(toAnyField(f), opNe, v)
 }
 
-func (f Field[T]) NeExpr(e Expression) Expression {
+func (f Field[T]) NeExpr(e Expression) Condition {
 	return buildFieldCondition(toAnyField(f), opNe, e)
 }
 
-func (f Field[T]) Gt(v T) Expression {
+func (f Field[T]) Gt(v T) Condition {
 	return buildFieldCondition(toAnyField(f), opGt, v)
 }
 
-func (f Field[T]) GtExpr(e Expression) Expression {
+func (f Field[T]) GtExpr(e Expression) Condition {
 	return buildFieldCondition(toAnyField(f), opGt, e)
 }
 
-func (f Field[T]) Gte(v T) Expression {
+func (f Field[T]) Gte(v T) Condition {
 	return buildFieldCondition(toAnyField(f), opGte, v)
 }
 
-func (f Field[T]) GteExpr(e Expression) Expression {
+func (f Field[T]) GteExpr(e Expression) Condition {
 	return buildFieldCondition(toAnyField(f), opGte, e)
 }
 
-func (f Field[T]) Lt(v T) Expression {
+func (f Field[T]) Lt(v T) Condition {
 	return buildFieldCondition(toAnyField(f), opLt, v)
 }
 
-func (f Field[T]) LtExpr(e Expression) Expression {
+func (f Field[T]) LtExpr(e Expression) Condition {
 	return buildFieldCondition(toAnyField(f), opLt, e)
 }
 
-func (f Field[T]) Lte(v T) Expression {
+func (f Field[T]) Lte(v T) Condition {
 	return buildFieldCondition(toAnyField(f), opLte, v)
 }
 
-func (f Field[T]) LteExpr(e Expression) Expression {
+func (f Field[T]) LteExpr(e Expression) Condition {
 	return buildFieldCondition(toAnyField(f), opLte, e)
 }
 
-func (f Field[T]) Like(v T) Expression {
+func (f Field[T]) Like(v T) Condition {
 	return buildFieldCondition(toAnyField(f), opLike, v)
 }
 
-func (f Field[T]) LikeExpr(e Expression) Expression {
+func (f Field[T]) LikeExpr(e Expression) Condition {
 	return buildFieldCondition(toAnyField(f), opLike, e)
 }
 
-func (f Field[T]) NotLike(v T) Expression {
+func (f Field[T]) NotLike(v T) Condition {
 	return buildFieldCondition(toAnyField(f), opNotLike, v)
 }
 
-func (f Field[T]) NotLikeExpr(e Expression) Expression {
+func (f Field[T]) NotLikeExpr(e Expression) Condition {
 	return buildFieldCondition(toAnyField(f), opNotLike, e)
 }
 
-func (f Field[T]) In(values ...T) Expression {
+func (f Field[T]) In(values ...T) Condition {
 	c := buildFieldCondition(toAnyField(f), opIn, nil)
 	c.values = toAnySlice(values)
 	return c
 }
 
-func (f Field[T]) InExpr(subquery Subquery) Expression {
+func (f Field[T]) InExpr(subquery Subquery) Condition {
 	c := buildFieldCondition(toAnyField(f), opIn, nil)
 	c.subquery = subquery
 	return c
 }
 
-func (f Field[T]) NotIn(values ...T) Expression {
+func (f Field[T]) NotIn(values ...T) Condition {
 	c := buildFieldCondition(toAnyField(f), opNotIn, nil)
 	c.values = toAnySlice(values)
 	return c
 }
 
-func (f Field[T]) NotInExpr(subquery Subquery) Expression {
+func (f Field[T]) NotInExpr(subquery Subquery) Condition {
 	c := buildFieldCondition(toAnyField(f), opNotIn, nil)
 	c.subquery = subquery
 	return c
 }
 
-func (f Field[T]) Between(a, b T) Expression {
+func (f Field[T]) Between(a, b T) Condition {
 	c := buildFieldCondition(toAnyField(f), opBetween, nil)
 	c.values = []any{a, b}
 	return c
 }
 
-func (f Field[T]) BetweenExpr(a, b Expression) Expression {
+func (f Field[T]) BetweenExpr(a, b Expression) Condition {
 	c := buildFieldCondition(toAnyField(f), opBetween, nil)
 	c.values = []any{a, b}
 	return c
 }
 
-func (f Field[T]) IsNull() Expression {
+func (f Field[T]) IsNull() Condition {
 	return buildFieldCondition(toAnyField(f), opIsNull, nil)
 }
 
-func (f Field[T]) IsNotNull() Expression {
+func (f Field[T]) IsNotNull() Condition {
 	return buildFieldCondition(toAnyField(f), opIsNotNull, nil)
 }
 

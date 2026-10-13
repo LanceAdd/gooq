@@ -407,6 +407,14 @@ func TestDsl_Select_Conditions(t *testing.T) {
 		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (NOT `user`.`status` = ?) AND `user`.`deleted_at` IS NULL")
 
 		sql, args, err = Select(testUser.Id).From(testUser).
+			Where(testUser.Age.Gt(11).Or(testUser.Age.Lt(-1))).
+			Where(testUser.Status.Eq("vip")).
+			ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`age` > ? OR `user`.`age` < ?) AND `user`.`status` = ? AND `user`.`deleted_at` IS NULL")
+		t.AssertEQ(args, []any{11, -1, "vip"})
+
+		sql, args, err = Select(testUser.Id).From(testUser).
 			Where(testUser.Age.Between(18, 60)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)

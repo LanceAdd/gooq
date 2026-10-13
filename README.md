@@ -12,7 +12,7 @@ All rendered output shown below comes from test assertions — copy-paste friend
 
 ## Behavior change
 
-Multiple `Where` calls are combined with AND. Interleaved AND/OR is built with `gooq.AND` and `gooq.OR`, then passed to `Where`. `WhereOr` has been removed.
+Multiple `Where` calls are combined with AND. Field comparisons return a `Condition`, which chains `.And`, `.Or`, and `.Not` left-associatively. A list of expressions uses `gooq.AND`, `gooq.OR`, and `gooq.NOT`. `WhereOr` has been removed.
 
 ## Quick Start
 
@@ -153,13 +153,33 @@ User.DeletedAt.IsNull()               // `user`.`deleted_at` IS NULL
 OrderItem.UserId.EqExpr(User.Id)      // `order_item`.`user_id` = `user`.`id`
 User.Id.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
 
-// Multiple Where calls are combined with AND. Build interleaved AND/OR with gooq.AND and gooq.OR.
+// A comparison is a Condition and can chain And / Or / Not. The chain is left-associative.
+User.Age.Gt(11).Or(User.Age.Lt(-1))
+// (`user`.`age` > ? OR `user`.`age` < ?)
+User.Age.Gt(11).Or(User.Age.Lt(-1).And(User.Status.Eq("vip")))
+// (`user`.`age` > ? OR (`user`.`age` < ? AND `user`.`status` = ?))
+
+// Multiple Where calls are combined with AND. Chain Or / And from the first predicate.
+// A list of expressions uses gooq.AND and gooq.OR.
+dsl.Select(User.Id).From(User).
+    Where(User.Age.Gt(11).Or(User.Age.Lt(-1))).
+    Where(User.Status.Eq("vip")).
+    ToSql(gooq.DialectMySQL)
+// ... WHERE (`user`.`age` > ? OR `user`.`age` < ?) AND `user`.`status` = ? AND `user`.`deleted_at` IS NULL
+// args: []any{11, -1, "vip"}
+
 dsl.Select(User.Id).From(User).
     Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
     Where(User.Name.Like("j%")).
     ToSql(gooq.DialectMySQL)
 // ... WHERE (`user`.`age` < ? OR `user`.`status` = ?) AND `user`.`name` LIKE ? AND `user`.`deleted_at` IS NULL
 // args: []any{18, "vip", "j%"}
+
+// The left side is not a Field[T]: use gooq.Gt, gooq.Eq, and the rest. Wrap Raw with Cond.
+gooq.Gt(User.Age.Add(1), 11).Or(gooq.Lt(User.Age, 0))
+// ((`user`.`age` + ?) > ? OR `user`.`age` < ?)
+gooq.Cond(gooq.Raw("a = 1")).Or(User.Age.Lt(-1))
+// (a = 1 OR `user`.`age` < ?)
 
 // Dynamic assembly: Clone a base builder for reuse. One builder cannot be used concurrently;
 // execution writes the resolved executor back onto it.
