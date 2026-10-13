@@ -12,7 +12,7 @@
 
 ## 行为变化
 
-`Where(a).WhereOr(b)` 与前一个条件组成 OR，得到 `(a OR b)`。再加一个 AND 条件就再调用一次 `Where`。要自己分组时用 `gooq.OR(...)`。
+多个 `Where` 用 AND 连接。交织的 AND/OR 用 `gooq.AND`、`gooq.OR` 组好再传入 `Where`。`WhereOr` 已去掉。
 
 ## 快速开始
 
@@ -152,7 +152,7 @@ User.DeletedAt.IsNull()               // `user`.`deleted_at` IS NULL
 OrderItem.UserId.EqExpr(User.Id)      // `order_item`.`user_id` = `user`.`id`
 User.Id.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
 
-// 再加 AND 条件就再调用一次 Where。WhereOr 与前一个条件组成 OR。
+// 多个 Where 用 AND 连接。交织的 AND/OR 用 gooq.AND、gooq.OR 组好再传入。
 dsl.Select(User.Id).From(User).
     Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
     Where(User.Name.Like("j%")).

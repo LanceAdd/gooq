@@ -12,7 +12,7 @@ All rendered output shown below comes from test assertions — copy-paste friend
 
 ## Behavior change
 
-`Where(a).WhereOr(b)` ORs with the previous predicate and renders `(a OR b)`. Call `Where` again to add another AND predicate. Use `gooq.OR(...)` to group the predicates yourself.
+Multiple `Where` calls are combined with AND. Interleaved AND/OR is built with `gooq.AND` and `gooq.OR`, then passed to `Where`. `WhereOr` has been removed.
 
 ## Quick Start
 
@@ -153,7 +153,7 @@ User.DeletedAt.IsNull()               // `user`.`deleted_at` IS NULL
 OrderItem.UserId.EqExpr(User.Id)      // `order_item`.`user_id` = `user`.`id`
 User.Id.InExpr(subquery)              // `user`.`id` IN (SELECT ...)
 
-// Call Where again to add another AND predicate. WhereOr ORs with the previous predicate.
+// Multiple Where calls are combined with AND. Build interleaved AND/OR with gooq.AND and gooq.OR.
 dsl.Select(User.Id).From(User).
     Where(gooq.OR(User.Age.Lt(18), User.Status.Eq("vip"))).
     Where(User.Name.Like("j%")).

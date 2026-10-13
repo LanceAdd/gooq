@@ -17,17 +17,9 @@ import (
 	"github.com/gogf/gf/v2/test/gtest"
 )
 
-func TestDsl_Select_OrAndGroupExt(t *testing.T) {
+func TestDsl_Select_GroupExtAlreadySet(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		sql, args, err := Select(testUser.Id).From(testUser).
-			Where(testUser.Age.Gt(18)).
-			WhereOr(testUser.Status.Eq("vip")).
-			ToSql(gooq.DialectMySQL)
-		t.AssertNil(err)
-		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`age` > ? OR `user`.`status` = ?) AND `user`.`deleted_at` IS NULL")
-		t.AssertEQ(args, []any{18, "vip"})
-
-		_, _, err = Select(testUser.Status).From(testUser).
+		_, _, err := Select(testUser.Status).From(testUser).
 			GroupRollup(testUser.Status).
 			GroupCube(testUser.Status).
 			ToSql(gooq.DialectMySQL)

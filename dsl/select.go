@@ -247,20 +247,6 @@ func (b *SelectBuilder) Where(conditions ...gooq.Expression) *SelectBuilder {
 	return b
 }
 
-// WhereOr 把条件与前一个 WHERE 条件组成 OR。没有前一个条件时，这一条自己成为 WHERE。
-func (b *SelectBuilder) WhereOr(condition gooq.Expression) *SelectBuilder {
-	if condition == nil {
-		return b
-	}
-	if len(b.conditions) == 0 {
-		b.conditions = append(b.conditions, condition)
-		return b
-	}
-	last := len(b.conditions) - 1
-	b.conditions[last] = gooq.OR(b.conditions[last], condition)
-	return b
-}
-
 // Order 追加排序表达式，原样渲染（方向由表达式自带：Field.Asc()/Desc()、gooq.OrderAscExpr/DescExpr；任意片段用 gooq.Raw）。
 func (b *SelectBuilder) Order(exprs ...gooq.Expression) *SelectBuilder {
 	b.orderBy = append(b.orderBy, exprs...)
