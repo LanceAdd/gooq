@@ -3,11 +3,13 @@
 package dsl
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/lanceadd/gooq"
+	"github.com/lanceadd/gooq/db"
 )
 
 // cacheTestUser 是缓存 key 测试用最小表对象。
@@ -132,5 +134,28 @@ func TestDsl_CompositeCacheKey(t *testing.T) {
 		t.Assert(strings.HasPrefix(k1, "gooq:multi-query:rows:"), true)
 		t.Assert(strings.HasPrefix(kCol, "gooq:multi-query:column:"), true)
 		t.Assert(len(k1), len("gooq:multi-query:rows:")+64)
+	})
+}
+
+func TestCacheRecordKeepsLargeInt(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		const id int64 = 9007199254740993
+		idField := gooq.NewField[int64]("user", "id")
+		raw, err := json.Marshal(db.Record{"id": id})
+		t.AssertNil(err)
+		var row db.Record
+		t.AssertNil(unmarshalUseNumber(raw, &row))
+		got, err := db.Value(row, idField)
+		t.AssertNil(err)
+		t.Assert(got, id)
+
+		list, err := json.Marshal(db.Result{{"id": id}})
+		t.AssertNil(err)
+		var rows db.Result
+		t.AssertNil(unmarshalUseNumber(list, &rows))
+		t.Assert(len(rows), 1)
+		got, err = db.Value(rows[0], idField)
+		t.AssertNil(err)
+		t.Assert(got, id)
 	})
 }

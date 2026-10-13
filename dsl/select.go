@@ -1,6 +1,7 @@
 package dsl
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -587,6 +588,13 @@ func (b *SelectBuilder) cellWithCache(
 	return nil
 }
 
+// unmarshalUseNumber 把 JSON 数字解成 json.Number，避免 map[string]any 里的大整数变成 float64。
+func unmarshalUseNumber(data []byte, dest any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode(dest)
+}
+
 // rowWithCache 单行缓存：db.Record 空结果不缓存（与 count=0 空结果策略一致）。
 func (b *SelectBuilder) rowWithCache(
 	ctx context.Context, adapter CacheAdapter, dialect gooq.Dialect, sql string, args []any,
@@ -595,9 +603,9 @@ func (b *SelectBuilder) rowWithCache(
 	if err != nil {
 		return nil, err
 	}
-	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
+	if payload, ok, err := adapter.Get(ctx, key); err == nil && ok {
 		var record db.Record
-		if err := json.Unmarshal(bytes, &record); err != nil {
+		if err := unmarshalUseNumber(payload, &record); err != nil {
 			return nil, err
 		}
 		return record, nil
@@ -687,9 +695,9 @@ func (b *SelectBuilder) rowsWithCache(
 	if err != nil {
 		return nil, err
 	}
-	if bytes, ok, err := adapter.Get(ctx, key); err == nil && ok {
+	if payload, ok, err := adapter.Get(ctx, key); err == nil && ok {
 		var rows db.Result
-		if err := json.Unmarshal(bytes, &rows); err != nil {
+		if err := unmarshalUseNumber(payload, &rows); err != nil {
 			return nil, err
 		}
 		return rows, nil
@@ -915,9 +923,9 @@ func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.
 		return nil, 0, nil
 	}
 	// rows：命中直接可用；未命中查询回填。
-	if bytes, ok := fields[dataField]; ok {
+	if payload, ok := fields[dataField]; ok {
 		var rows db.Result
-		if err := json.Unmarshal(bytes, &rows); err != nil {
+		if err := unmarshalUseNumber(payload, &rows); err != nil {
 			return nil, 0, err
 		}
 		return rows, count, nil
