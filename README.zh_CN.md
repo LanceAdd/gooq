@@ -516,10 +516,6 @@ row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
 id := db.Get(row, User.Id)      // int64
 name := db.Get(row, User.Name)  // string
 
-// RowOne 强制至多一行：无匹配返回 nil，匹配 2+ 行报错（取首行语义仍在 Row；显式 Limit/Page/Cache 直接拒绝）。
-row, err = dsl.Select(User.Id, User.Name).From(User).
-    Where(User.Account.Eq("x")).RowOne(ctx)
-
 // DB("orders") 使用该配置组。不写 DB 时走默认组。
 // LoadConfig 通过 gcfg 读取 gooq.database、gooq.defaultGroup 和 gooq.logger。
 // 运行时只读取名为 gooq 的配置文件，例如 gooq.yaml，不读取 config.yaml。

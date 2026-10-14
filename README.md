@@ -519,11 +519,6 @@ row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
 id := db.Get(row, User.Id)      // int64
 name := db.Get(row, User.Name)  // string
 
-// RowOne enforces at most one row: nil when none matched, error when 2+ matched
-// (Take-first-row semantics stay in Row; explicit Limit/Page/Cache is rejected).
-row, err = dsl.Select(User.Id, User.Name).From(User).
-    Where(User.Account.Eq("x")).RowOne(ctx)
-
 // DB("orders") uses that configuration group. Omitting DB uses the default group.
 // LoadConfig reads gooq.database, gooq.defaultGroup, and gooq.logger through gcfg.
 // Runtime reads only a file named gooq, such as gooq.yaml, and does not read config.yaml.

@@ -652,41 +652,6 @@ func (b *SelectBuilder) Row(ctx context.Context) (db.Record, error) {
 	return record, nil
 }
 
-func (b *SelectBuilder) RowOne(ctx context.Context) (db.Record, error) {
-	if b.limit > 0 {
-		return nil, fmt.Errorf("gooq: RowOne requires an unbounded query, remove Limit/Page")
-	}
-	if b.pageCacheOpt != nil {
-		return nil, errPageCache()
-	}
-	if b.cacheOption != nil {
-		return nil, fmt.Errorf("gooq: Cache is not supported by RowOne")
-	}
-	restore, err := b.bind(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer restore()
-	probe := b.Clone()
-	probe.limit = 2
-	sql, args, err := probe.ToSql(b.dialect())
-	if err != nil {
-		return nil, err
-	}
-	result, err := b.executor.GetAll(ctx, sql, args...)
-	if err != nil {
-		return nil, err
-	}
-	switch len(result) {
-	case 0:
-		return nil, nil
-	case 1:
-		return result[0], nil
-	default:
-		return nil, fmt.Errorf("gooq: RowOne expected at most one row, got %d", len(result))
-	}
-}
-
 // rowsWithCache 多行缓存：空结果不缓存。
 func (b *SelectBuilder) rowsWithCache(
 	ctx context.Context, adapter CacheAdapter, dialect gooq.Dialect, sql string, args []any,

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gogf/gf/v2/test/gtest"
 
@@ -71,63 +70,6 @@ func TestCellDestinationChecks(t *testing.T) {
 		t.AssertNil(db.CheckColumn(&ids))
 		var rows []scanStructTarget
 		t.AssertNE(db.CheckColumn(&rows), nil)
-	})
-}
-
-func TestRowOne(t *testing.T) {
-	gtest.C(t, func(t *gtest.T) {
-		ctx := context.Background()
-
-		fe := &fakeExecutor{allRows: db.Result{
-			db.Record{"id": int64(1), "name": "john"},
-		}}
-		b := SelectFrom(testUser).Where(testUser.Name.Eq("john"))
-		b.executor = fe
-		record, err := b.RowOne(ctx)
-		t.AssertNil(err)
-		t.AssertEQ(db.Get(record, testUser.Id), int64(1))
-		t.AssertEQ(db.Get(record, testUser.Name), "john")
-		t.AssertEQ(fe.calls, []string{"GetAll"})
-		t.Assert(strings.Contains(fe.lastSql, "LIMIT 2"), true)
-		t.AssertEQ(b.limit, 0)
-
-		fe = &fakeExecutor{}
-		b = SelectFrom(testUser).Where(testUser.Id.Eq(1))
-		b.executor = fe
-		record, err = b.RowOne(ctx)
-		t.AssertNil(err)
-		t.AssertNil(record)
-
-		fe = &fakeExecutor{allRows: db.Result{
-			db.Record{"id": int64(1)},
-			db.Record{"id": int64(2)},
-		}}
-		b = SelectFrom(testUser).Where(testUser.Name.Eq("john"))
-		b.executor = fe
-		_, err = b.RowOne(ctx)
-		t.AssertNE(err, nil)
-
-		fe = &fakeExecutor{}
-		b = SelectFrom(testUser).Limit(1)
-		b.executor = fe
-		_, err = b.RowOne(ctx)
-		t.AssertNE(err, nil)
-		t.AssertEQ(len(fe.calls), 0)
-
-		fe = &fakeExecutor{}
-		b = SelectFrom(testUser).PageCache(CacheOption{Duration: time.Minute})
-		b.executor = fe
-		_, err = b.RowOne(ctx)
-		t.AssertNE(err, nil)
-
-		fe = &fakeExecutor{}
-		b = SelectFrom(testUser).Cache(CacheOption{Duration: time.Minute})
-		b.executor = fe
-		_, err = b.RowOne(ctx)
-		t.AssertNE(err, nil)
-
-		_, err = SelectFrom(testUser).RowOne(ctx)
-		t.AssertNE(err, nil)
 	})
 }
 
