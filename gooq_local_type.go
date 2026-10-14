@@ -1,7 +1,7 @@
 package gooq
 
-// LocalType is a type that defines the local storage type of a field value.
-// It is used to specify how the field value should be processed locally.
+// LocalType 是字段值的本地存储类型。
+// 它决定字段值在本地如何处理。
 type LocalType string
 
 const (

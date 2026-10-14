@@ -17,14 +17,12 @@ const (
 	FieldNameCaseCamel FieldNameCase = "CaseCamel"
 )
 
-// formatFieldName formats and returns a new field name that is used for golang codes generating.
+// formatFieldName 把字段名格式化成生成 Go 代码使用的新名字。
 func formatFieldName(fieldName string, nameCase FieldNameCase) string {
-	// For normal databases like mysql, pgsql, sqlite,
-	// field/table names of that are in normal case.
+	// mysql、pgsql、sqlite 这类普通数据库，字段/表名是正常大小写。
 	var newFieldName = fieldName
 	if isAllUpper(fieldName) {
-		// For special databases like dm, oracle,
-		// field/table names of that are in upper case.
+		// dm、oracle 这类特殊数据库，字段/表名是大写。
 		newFieldName = strings.ToLower(fieldName)
 	}
 	switch nameCase {
@@ -35,7 +33,7 @@ func formatFieldName(fieldName string, nameCase FieldNameCase) string {
 	}
 }
 
-// formatFileName formats and returns a new file name for generated source files.
+// formatFileName 把文件名格式化成生成源文件使用的新名字。
 func formatFileName(fileName, nameCase string) string {
 	if nameCase == "" {
 		nameCase = string(gstr.Snake)
@@ -43,8 +41,7 @@ func formatFileName(fileName, nameCase string) string {
 	fileName = normalizeNameForCaseConvert(fileName)
 	fileName = gstr.Trim(gstr.CaseConvert(fileName, gstr.CaseTypeMatch(nameCase)), "-_.")
 	if len(fileName) > 5 && fileName[len(fileName)-5:] == "_test" {
-		// Add suffix to avoid the table name which contains "_test",
-		// which would make the go file a testing file.
+		// 表名含 "_test" 时加后缀，否则生成文件会被当成测试文件。
 		fileName += "_table"
 	}
 	return fileName
@@ -57,7 +54,7 @@ func normalizeNameForCaseConvert(name string) string {
 	return name
 }
 
-// isAllUpper checks and returns whether given `fieldName` all letters are upper case.
+// goFieldName 生成列的 Go 字段名：保留字加 Field 后缀，非法或撞名返回错误。
 func goFieldName(column string, reserved map[string]bool, used map[string]string) (string, error) {
 	name := formatFieldName(column, FieldNameCaseCamel)
 	if reserved[name] {

@@ -1,29 +1,29 @@
 package gooq
 
-// ValueState records whether a generated model column was assigned.
+// ValueState 记录生成模型的列是否被设置。
 type ValueState uint8
 
 const (
-	// ValueUnset means the column stays out of the SQL statement.
+	// ValueUnset 表示列不进 SQL 语句。
 	ValueUnset ValueState = iota
-	// ValueSet means the column is written, including a zero value.
+	// ValueSet 表示列会写入，零值也写。
 	ValueSet
-	// ValueNull means the column is written as SQL NULL.
+	// ValueNull 表示列写成 SQL NULL。
 	ValueNull
 )
 
-// Assignment is one column produced by a model setter.
+// Assignment 是模型 setter 产生的一列。
 type Assignment struct {
-	// Column is the database column name.
+	// Column 是数据库列名。
 	Column string
-	// Value is written when Null is false.
+	// Value 在 Null 为 false 时写入。
 	Value any
-	// Null writes SQL NULL and ignores Value.
+	// Null 写 SQL NULL，忽略 Value。
 	Null bool
 }
 
-// ValueSource is a row built by model.NewXxxRecord setters.
+// ValueSource 是由 model.NewXxxRecord 的 setter 构造的一行。
 type ValueSource interface {
-	// Assignments returns only the columns that were set or set to NULL.
+	// Assignments 只返回已设置或设为 NULL 的列。
 	Assignments() []Assignment
 }

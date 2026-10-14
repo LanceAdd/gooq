@@ -9,8 +9,7 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-// ToSql renders the SQL with the given dialect, or the default MySQL dialect
-// when the parameter is omitted.
+// ToSql 用指定方言渲染 SQL，不传方言时默认 MySQL。
 func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 	if b.err != nil {
 		return "", nil, b.err

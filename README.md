@@ -1,3 +1,5 @@
+English | [简体中文](README.zh_CN.md)
+
 # gooq
 
 `gooq` is a type-safe SQL query DSL for [GoFrame](https://goframe.org), inspired by [jOOQ](https://www.jooq.org/).

@@ -9,7 +9,7 @@ import (
 	"github.com/gogf/gf/v2/os/gfile"
 )
 
-// GoFmt formats the source file and adds or removes import statements as necessary.
+// GoFmt 格式化源文件，并按需增删 import。
 func GoFmt(path string) error {
 	var formatErr error
 	replaceFunc := func(path, content string) string {

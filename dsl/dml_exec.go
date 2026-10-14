@@ -75,8 +75,8 @@ func (r *batchResult) RowsAffected() (int64, error) {
 	return r.affected, nil
 }
 
-// Value writes the single RETURNING column of the first row into dest.
-// More than one returned column is an error. Several returned rows still yield the first row.
+// Value 把第一行的那个 RETURNING 列写进 dest。
+// 返回多列时是错误；返回多行时仍取第一行。
 func (b *DMLBuilder) Value(ctx context.Context, dest any) error {
 	if err := db.CheckValue(dest); err != nil {
 		return err
@@ -86,8 +86,8 @@ func (b *DMLBuilder) Value(ctx context.Context, dest any) error {
 	})
 }
 
-// Column writes the single RETURNING column of every row into dest.
-// More than one returned column is an error.
+// Column 把每一行的那个 RETURNING 列写进 dest。
+// 返回多列时是错误。
 func (b *DMLBuilder) Column(ctx context.Context, dest any) error {
 	if err := db.CheckColumn(dest); err != nil {
 		return err

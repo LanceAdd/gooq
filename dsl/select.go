@@ -340,13 +340,13 @@ func (b *SelectBuilder) Unscoped() *SelectBuilder {
 	return b
 }
 
-// Master forces this query onto a master node.
+// Master 把这条查询强制路由到主库。
 func (b *SelectBuilder) Master() *SelectBuilder {
 	b.route = db.RouteMaster
 	return b
 }
 
-// Slave forces this query onto a slave node when the group has one.
+// Slave 把这条查询强制路由到从库；组里没有从库时回落到主库。
 func (b *SelectBuilder) Slave() *SelectBuilder {
 	b.route = db.RouteSlave
 	return b
@@ -487,8 +487,8 @@ func (c *cteTable) Field(column string) gooq.Field[any] {
 	return gooq.NewField[any](c.name, column)
 }
 
-// DB selects the configuration group used at execution.
-// An empty name uses the default group, the same as omitting DB.
+// DB 选择执行时使用的配置组。
+// 名字为空时使用默认组，等同于不调用 DB。
 func (b *SelectBuilder) DB(name string) *SelectBuilder {
 	b.group = name
 	b.groupSet = name != ""

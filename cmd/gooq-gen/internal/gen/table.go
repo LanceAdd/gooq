@@ -33,14 +33,14 @@ var reservedFieldNames = map[string]bool{
 	"BoundBase":  true,
 }
 
-// generateTable generates gooq typed table object files for given tables.
+// generateTable 为指定表生成 gooq 类型化表对象文件。
 func generateTable(ctx context.Context, database *db.DB, tableNames []string, dirPathTable string) {
 	for _, tableName := range tableNames {
 		generateTableSingle(ctx, database, tableName, dirPathTable)
 	}
 }
 
-// generateTableSingle generates the gooq table object for a single table.
+// generateTableSingle 为单张表生成 gooq 表对象。
 func generateTableSingle(ctx context.Context, database *db.DB, tableName, dirPathTable string) {
 	columns, err := database.TableFields(ctx, tableName)
 	if err != nil {
@@ -61,7 +61,7 @@ func generateTableSingle(ctx context.Context, database *db.DB, tableName, dirPat
 	mlog.Print("generated:", gfile.RealPath(path))
 }
 
-// generateTableContent builds and renders the gooq table object content.
+// generateTableContent 构造并渲染单张表的 gooq 表对象内容。
 func generateTableContent(
 	ctx context.Context, database *db.DB, tableName, dirPathTable string, columns []db.Column,
 ) (string, error) {
@@ -136,7 +136,7 @@ func generateTableContent(
 	return tplView.ParseContent(ctx, tplContent)
 }
 
-// tableFieldTypes returns the Go type name for the given field.
+// tableFieldTypes 返回字段对应的 Go 类型名。
 func tableFieldTypes(field db.Column, hasStdTime, hasUUID *bool) string {
 	goType := string(field.LocalType)
 	switch field.LocalType {
@@ -202,7 +202,7 @@ func localTypeRef(gooqRef string, localType gooq.LocalType) string {
 	return fmt.Sprintf("%sLocalType(%q)", gooqRef, string(localType))
 }
 
-// currentSchema returns the default schema for schema-qualified rendering (PG only).
+// currentSchema 返回带 schema 渲染用的默认 schema（仅 PG）。
 func currentSchema(ctx context.Context, database *db.DB) string {
 	if database.Dialect() != gooq.DialectPgsql {
 		return ""
@@ -214,7 +214,7 @@ func currentSchema(ctx context.Context, database *db.DB) string {
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-// boolSuffix renders a struct field suffix for boolean meta flags.
+// boolSuffix 渲染布尔 meta 标记对应的字段后缀。
 func boolSuffix(fieldName string, flag bool) string {
 	if flag {
 		return ", " + fieldName + ": true"

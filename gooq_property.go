@@ -1,33 +1,33 @@
 package gooq
 
-// Property is one cell in a generated write record.
-// The zero Property is unset and stays out of SQL.
+// Property 是生成写入记录里的一个单元格。
+// 零值 Property 是未设置，不会进入 SQL。
 type Property[T any] struct {
 	v     T
 	state ValueState
 }
 
-// Set marks a cell as assigned, including a zero value.
+// Set 把单元格标记为已设置，零值也会写入。
 func Set[T any](v T) Property[T] {
 	return Property[T]{v: v, state: ValueSet}
 }
 
-// Null marks a cell as SQL NULL.
+// Null 把单元格标记为 SQL NULL。
 func Null[T any]() Property[T] {
 	return Property[T]{state: ValueNull}
 }
 
-// Unset returns a cell that stays out of SQL.
+// Unset 返回不进入 SQL 的未设置单元格。
 func Unset[T any]() Property[T] {
 	return Property[T]{}
 }
 
-// Get returns the stored value. Unset and NULL cells return the zero value.
+// Get 返回存的值；未设置和 NULL 的单元格返回零值。
 func (p Property[T]) Get() T {
 	return p.v
 }
 
-// Value returns the assigned value. The boolean is false for unset and NULL cells.
+// Value 返回已设置的值；未设置和 NULL 的单元格第二个返回值为 false。
 func (p Property[T]) Value() (T, bool) {
 	if p.state != ValueSet {
 		var zero T
@@ -36,27 +36,27 @@ func (p Property[T]) Value() (T, bool) {
 	return p.v, true
 }
 
-// IsUnset reports whether the cell stays out of SQL.
+// IsUnset 判断单元格是否不进 SQL。
 func (p Property[T]) IsUnset() bool {
 	return p.state == ValueUnset
 }
 
-// IsSet reports whether the cell is assigned, including a zero value.
+// IsSet 判断单元格是否已设置，零值也算。
 func (p Property[T]) IsSet() bool {
 	return p.state == ValueSet
 }
 
-// IsNull reports whether the cell is written as SQL NULL.
+// IsNull 判断单元格是否写 SQL NULL。
 func (p Property[T]) IsNull() bool {
 	return p.state == ValueNull
 }
 
-// State reports whether the cell is unset, set, or NULL.
+// State 返回单元格是未设置、已设置还是 NULL。
 func (p Property[T]) State() ValueState {
 	return p.state
 }
 
-// Assignment returns the column to write. Unset cells return false.
+// Assignment 返回要写入的列；未设置的单元格返回 false。
 func (p Property[T]) Assignment(column string) (Assignment, bool) {
 	switch p.state {
 	case ValueNull:

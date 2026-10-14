@@ -98,9 +98,9 @@ func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
 	return b
 }
 
-// ValuesOf writes columns marked by model.NewXxxRecord setters.
-// Insert accepts one or more rows. One update row becomes SET. Several update or delete
-// rows become per-row statements keyed by the primary key, executed by Exec.
+// ValuesOf 写入由 model.NewXxxRecord 的 setter 标记的列。
+// Insert 接受一行或多行；一行 Update 渲染成 SET；多行 Update/Delete
+// 按主键拆成逐行语句，由 Exec 执行。
 func (b *DMLBuilder) ValuesOf(rows ...gooq.ValueSource) *DMLBuilder {
 	parsed := assignmentsToRows(rows)
 	if len(parsed) == 0 {
@@ -284,20 +284,20 @@ func (b *DMLBuilder) DoUpdate(field interface{ ColumnName() string }, v any) *DM
 	return b
 }
 
-// Master forces this statement onto a master node.
+// Master 把这条语句强制路由到主库。
 func (b *DMLBuilder) Master() *DMLBuilder {
 	b.route = db.RouteMaster
 	return b
 }
 
-// Slave forces this statement onto a slave node when the group has one.
+// Slave 把这条语句强制路由到从库；组里没有从库时回落到主库。
 func (b *DMLBuilder) Slave() *DMLBuilder {
 	b.route = db.RouteSlave
 	return b
 }
 
-// DB selects the configuration group used at execution.
-// An empty name uses the default group, the same as omitting DB.
+// DB 选择执行时使用的配置组。
+// 名字为空时使用默认组，等同于不调用 DB。
 func (b *DMLBuilder) DB(name string) *DMLBuilder {
 	b.group = name
 	b.groupSet = name != ""

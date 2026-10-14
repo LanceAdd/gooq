@@ -1,3 +1,5 @@
+[English](README.md) | 简体中文
+
 # gooq
 
 `gooq` 是面向 [GoFrame](https://goframe.org) 的类型安全 SQL 查询 DSL，灵感来自 [jOOQ](https://www.jooq.org/)。

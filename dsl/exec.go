@@ -109,13 +109,13 @@ func toInt64(value any) (int64, error) {
 	return out, nil
 }
 
-// Ensure *db.DB and *db.Tx satisfy the executor contract.
+// 确认 *db.DB 与 *db.Tx 满足 executor 约定。
 var (
 	_ executor = (*db.DB)(nil)
 	_ executor = (*db.Tx)(nil)
 )
 
-// isEmptyResult reports whether a scanned value has no rows or a zero scalar.
+// isEmptyResult 判断扫描结果是否无行或为零值标量。
 func isEmptyResult(value any) bool {
 	rv := reflect.ValueOf(value)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {

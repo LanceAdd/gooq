@@ -27,12 +27,12 @@ func (b *SelectBuilder) queryWithCache(ctx context.Context, sql string, args []a
 	return run()
 }
 
-// Value writes the single column of the single row into dest.
-// dest is one cell, such as *time.Time, *sql.NullTime, *sql.NullString, or *int.
-// A result with any other column count returns an error.
-// A query without Limit runs with LIMIT 1 for this call and keeps Offset. The builder is left unchanged.
-// Limit greater than 1 returns an error. No row returns sql.ErrNoRows. NULL writes the zero value.
-// A row struct uses Row and Record.Struct. A slice uses Column.
+// Value 把单行的那一列写进 dest。
+// dest 是一个单元格，例如 *time.Time、*sql.NullTime、*sql.NullString 或 *int。
+// 结果列数不是 1 时返回错误。
+// 没有 Limit 时本次执行补 LIMIT 1，保留 Offset，查询链不变。
+// Limit 大于 1 时返回错误；没有行返回 sql.ErrNoRows；NULL 写零值。
+// 行结构体用 Row 和 Record.Struct，切片用 Column。
 func (b *SelectBuilder) Value(ctx context.Context, dest any) error {
 	if err := db.CheckValue(dest); err != nil {
 		return err
@@ -43,10 +43,10 @@ func (b *SelectBuilder) Value(ctx context.Context, dest any) error {
 	return b.readCell(ctx, dest, "value", b.oneRowSQL, execValueExact)
 }
 
-// Column writes every value of the single column into dest.
-// dest is a pointer to a slice of cells. Pagination on the builder is kept.
-// A result with any other column count returns an error.
-// No rows sets an empty slice. A slice of row structs uses Rows and Result.Structs.
+// Column 把那一列的每个值写进 dest。
+// dest 是单元格切片的指针；构建器上的分页保留。
+// 结果列数不是 1 时返回错误。
+// 没有行时写成空切片；行结构体切片用 Rows 和 Result.Structs。
 func (b *SelectBuilder) Column(ctx context.Context, dest any) error {
 	if err := db.CheckColumn(dest); err != nil {
 		return err
@@ -155,9 +155,9 @@ func (b *SelectBuilder) rowWithCache(
 	return record, nil
 }
 
-// Row returns one row. No row returns nil, nil.
-// A query without Limit runs with LIMIT 1 for this call and keeps Offset. The builder is left unchanged.
-// Limit greater than 1 returns an error. The cache key uses that executed statement.
+// Row 返回一行；没有行返回 nil, nil。
+// 没有 Limit 时本次执行补 LIMIT 1，保留 Offset，查询链不变。
+// Limit 大于 1 时返回错误；缓存 key 按这次实际执行的语句计算。
 func (b *SelectBuilder) Row(ctx context.Context) (db.Record, error) {
 	if b.limit > 1 {
 		return nil, errManyRows(b.limit)

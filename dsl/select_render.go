@@ -26,8 +26,7 @@ func (b *SelectBuilder) dialect() gooq.Dialect {
 	return gooq.DialectMySQL
 }
 
-// ToSql renders the SQL with the given dialect, or the default MySQL dialect
-// when the parameter is omitted.
+// ToSql 用指定方言渲染 SQL，不传方言时默认 MySQL。
 func (b *SelectBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 	if b.buildErr != nil {
 		return "", nil, b.buildErr

@@ -17,11 +17,10 @@ var (
 	scannerType = reflect.TypeOf((*sql.Scanner)(nil)).Elem()
 )
 
-// Assign copies one driver value into a non-nil pointer.
-// NULL sets the zero value, and a pointer destination becomes nil.
-// time.Time is parsed as a datetime. sql.Scanner values,
-// including sql.Null*, receive the driver value directly.
-// A row struct is not a cell; use Record.Struct for that.
+// Assign 把一个驱动值写进非空指针。
+// NULL 写零值，指针目标写成 nil。
+// time.Time 按日期时间解析；sql.Scanner（包括 sql.Null*）直接收驱动值。
+// 行结构体不是单元格，用 Record.Struct。
 func Assign(pointer any, src any) error {
 	rv := reflect.ValueOf(pointer)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
@@ -33,8 +32,8 @@ func Assign(pointer any, src any) error {
 	return assignValue(rv.Elem(), src)
 }
 
-// Value reads one typed column from a row.
-// A missing column and NULL return the zero value. Conversion failure returns an error.
+// Value 从一行里读一个带类型的列。
+// 缺列和 NULL 返回零值；转换失败返回错误。
 func Value[T any](record Record, field gooq.Field[T]) (T, error) {
 	var zero T
 	if record == nil {
@@ -51,7 +50,7 @@ func Value[T any](record Record, field gooq.Field[T]) (T, error) {
 	return out, nil
 }
 
-// ColumnOf reads one typed column from every row, in result order.
+// ColumnOf 按结果顺序读出每一行的同一列。
 func ColumnOf[T any](result Result, field gooq.Field[T]) ([]T, error) {
 	out := make([]T, 0, len(result))
 	for _, row := range result {
@@ -64,9 +63,9 @@ func ColumnOf[T any](result Result, field gooq.Field[T]) ([]T, error) {
 	return out, nil
 }
 
-// Cell returns a dynamic view of one column.
-// A nil record, a missing column, and NULL are all IsNil.
-// Named conversions such as Int64 and Time discard parse errors and return the zero value.
+// Cell 返回某一列的动态视图。
+// nil 记录、缺列和 NULL 都是 IsNil。
+// Int64、Time 这类具名转换会吞掉解析错误，返回零值。
 func Cell(record Record, column string) *gvar.Var {
 	if record == nil {
 		return gvar.New(nil)
@@ -78,7 +77,7 @@ func Cell(record Record, column string) *gvar.Var {
 	return gvar.New(value)
 }
 
-// CheckValue reports when dest cannot receive one cell.
+// CheckValue 报告 dest 不能接收单个单元格的情况。
 func CheckValue(dest any) error {
 	base, ok := storedType(dest)
 	if !ok {
@@ -97,7 +96,7 @@ func CheckValue(dest any) error {
 	return nil
 }
 
-// CheckColumn reports when dest cannot receive one column of cells.
+// CheckColumn 报告 dest 不能接收一列单元格的情况。
 func CheckColumn(dest any) error {
 	base, ok := storedType(dest)
 	if !ok || base.Kind() != reflect.Slice {
@@ -174,9 +173,9 @@ func assignValue(dst reflect.Value, src any) error {
 	return gconv.Scan(src, dst.Addr().Interface())
 }
 
-// scanDriver gives the value to a sql.Scanner.
-// database/sql accepts a string for NullString, but NullTime only accepts time.Time.
-// A datetime string is parsed and tried again as time.Time when the first scan fails.
+// scanDriver 把值交给 sql.Scanner。
+// database/sql 允许字符串进 NullString，但 NullTime 只收 time.Time。
+// 第一次 Scan 失败且值是日期时间字符串时，解析成 time.Time 再试一次。
 func scanDriver(scanner sql.Scanner, src any) error {
 	err := scanner.Scan(src)
 	if err == nil {
