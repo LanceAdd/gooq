@@ -607,6 +607,8 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 ## gooq-gen（代码生成工具）
 
 ```bash
+go install github.com/lanceadd/gooq/cmd/gooq-gen@latest             # 安装已发布版本
+# 或在仓库目录内运行：
 cd cmd/gooq-gen && go run . init                                    # 初始化 hack/gooq.yaml + hack/template/{table,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```

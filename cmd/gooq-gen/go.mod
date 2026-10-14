@@ -5,11 +5,9 @@ go 1.24
 require (
 	github.com/gogf/gf/v2 v2.10.2
 	github.com/google/uuid v1.6.0
-	github.com/lanceadd/gooq v0.0.0
+	github.com/lanceadd/gooq v0.1.0
 	golang.org/x/tools v0.26.0
 )
-
-replace github.com/lanceadd/gooq => ../..
 
 require (
 	gitee.com/chunanyong/dm v1.8.12 // indirect

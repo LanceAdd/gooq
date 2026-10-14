@@ -613,6 +613,8 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 ## gooq-gen (codegen tool)
 
 ```bash
+go install github.com/lanceadd/gooq/cmd/gooq-gen@latest             # install the released binary
+# or run from a checkout:
 cd cmd/gooq-gen && go run . init                                    # scaffold hack/gooq.yaml + hack/template/{table,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
