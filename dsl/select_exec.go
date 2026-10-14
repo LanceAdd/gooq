@@ -40,28 +40,7 @@ func (b *SelectBuilder) Value(ctx context.Context, dest any) error {
 	if b.limit > 1 {
 		return errManyRows(b.limit)
 	}
-	restore, err := b.bind(ctx)
-	if err != nil {
-		return err
-	}
-	defer restore()
-	if b.pageCacheOpt != nil {
-		return errPageCache()
-	}
-	dialect := b.dialect()
-	sql, args, err := b.oneRowSQL(dialect)
-	if err != nil {
-		return err
-	}
-	run := func() error {
-		return execValueExact(ctx, b.executor, sql, args, dest)
-	}
-	if b.cacheOption != nil {
-		if adapter := GetCacheAdapter(); adapter != nil {
-			return b.cellWithCache(ctx, adapter, sql, args, dest, "value", run)
-		}
-	}
-	return run()
+	return b.readCell(ctx, dest, "value", b.oneRowSQL, execValueExact)
 }
 
 // Column writes every value of the single column into dest.
@@ -72,7 +51,9 @@ func (b *SelectBuilder) Column(ctx context.Context, dest any) error {
 	if err := db.CheckColumn(dest); err != nil {
 		return err
 	}
-	return b.readCell(ctx, dest, "column", execColumnExact)
+	return b.readCell(ctx, dest, "column", func(dialect gooq.Dialect) (string, []any, error) {
+		return b.ToSql(dialect)
+	}, execColumnExact)
 }
 
 func errManyRows(limit int) error {
@@ -95,7 +76,9 @@ func (b *SelectBuilder) oneRowSQL(dialect gooq.Dialect) (string, []any, error) {
 }
 
 func (b *SelectBuilder) readCell(
-	ctx context.Context, dest any, kind string, run func(context.Context, executor, string, []any, any) error,
+	ctx context.Context, dest any, kind string,
+	prepare func(gooq.Dialect) (string, []any, error),
+	run func(context.Context, executor, string, []any, any) error,
 ) error {
 	restore, err := b.bind(ctx)
 	if err != nil {
@@ -106,7 +89,7 @@ func (b *SelectBuilder) readCell(
 		return errPageCache()
 	}
 	dialect := b.dialect()
-	sql, args, err := b.ToSql(dialect)
+	sql, args, err := prepare(dialect)
 	if err != nil {
 		return err
 	}

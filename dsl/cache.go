@@ -116,13 +116,18 @@ func (o CacheOption) valid() bool {
 	return o.Duration > 0 || o.Name != ""
 }
 
+const (
+	queryCacheKeyPrefix     = "gooq:query:"
+	compositeCacheKeyPrefix = "gooq:multi-query:"
+)
+
 // cacheKey 基于实际执行的 SQL 计算 key。组名隔离不同配置组。kind 区分结果形状，
 // 同 SQL 下 Row/Rows/Count 的 JSON 结构不同，混用同一 key 会反序列化冲突。
 func (b *SelectBuilder) cacheKey(kind, sql string, args []any) (string, error) {
 	if b.cacheOption != nil && b.cacheOption.Name != "" {
 		return b.cacheOption.Name, nil
 	}
-	return "gooq:query:" + b.cacheGroup() + ":" + kind + ":" + hashQuery(sql, args), nil
+	return queryCacheKeyPrefix + b.cacheGroup() + ":" + kind + ":" + hashQuery(sql, args), nil
 }
 
 // compositeCacheKey 是 PageCache 的 key。kind 区分数据 field 的形状：rows 是 db.Result，column 是列切片。
@@ -141,7 +146,7 @@ func (b *SelectBuilder) compositeCacheKey(dialect gooq.Dialect, kind string) (st
 		return "", err
 	}
 	payload := encodeQuery(countSQL, countArgs) + encodeQuery(rowsSQL, rowsArgs)
-	return "gooq:multi-query:" + b.cacheGroup() + ":" + kind + ":" + hashString(payload), nil
+	return compositeCacheKeyPrefix + b.cacheGroup() + ":" + kind + ":" + hashString(payload), nil
 }
 
 // cacheGroup 返回这次执行使用的配置组。已绑定的 DB 或事务优先。

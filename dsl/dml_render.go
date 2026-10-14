@@ -2,6 +2,7 @@ package dsl
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -196,15 +197,6 @@ func placeValue(rc *gooq.RenderContext, row []columnValue, column string) string
 	return "NULL"
 }
 
-func isInStrings(list []string, target string) bool {
-	for _, v := range list {
-		if v == target {
-			return true
-		}
-	}
-	return false
-}
-
 func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error) {
 	if len(b.setValues) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
@@ -254,7 +246,7 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 			where []columnValue
 		)
 		for _, cv := range row {
-			if isInStrings(keys, cv.column) {
+			if slices.Contains(keys, cv.column) {
 				where = append(where, cv)
 			} else {
 				sets = append(sets, cv)
