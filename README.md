@@ -557,6 +557,10 @@ gooq:
 // Inject a global cache adapter (e.g. a gredis-backed implementation).
 dsl.SetCacheAdapter(redisAdapter)
 dsl.SetHashCacheAdapter(redisHashAdapter)
+// Cached values are JSON unless SetCacheCodec installs another process-wide codec.
+// For Row and Rows, the number and time types after a hit come from that codec.
+// JSON keeps integers as json.Number and times as RFC3339 strings.
+dsl.SetCacheCodec(codec)
 
 // Single-query cache: Value, Column, Row, Rows, Count, and Exists go through it.
 // Cache() with no arg or a zero option disables caching; a custom Name fixes the key

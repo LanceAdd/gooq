@@ -1,9 +1,7 @@
 package dsl
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -629,8 +627,9 @@ func (b *SelectBuilder) cellWithCache(
 	if err != nil {
 		return err
 	}
+	codec := GetCacheCodec()
 	if payload, ok, err := adapter.Get(ctx, key); err == nil && ok {
-		return json.Unmarshal(payload, dest)
+		return codec.Unmarshal(payload, dest)
 	}
 	if err = run(); err != nil {
 		return err
@@ -638,17 +637,10 @@ func (b *SelectBuilder) cellWithCache(
 	if isEmptyResult(dest) && !b.cacheOption.Force {
 		return nil
 	}
-	if payload, err := json.Marshal(dest); err == nil {
+	if payload, err := codec.Marshal(dest); err == nil {
 		_ = adapter.Set(ctx, key, payload, b.cacheOption.Duration)
 	}
 	return nil
-}
-
-// unmarshalUseNumber 把 JSON 数字解成 json.Number，避免 map[string]any 里的大整数变成 float64。
-func unmarshalUseNumber(data []byte, dest any) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.UseNumber()
-	return decoder.Decode(dest)
 }
 
 // rowWithCache 单行缓存：db.Record 空结果不缓存（与 count=0 空结果策略一致）。
@@ -659,9 +651,10 @@ func (b *SelectBuilder) rowWithCache(
 	if err != nil {
 		return nil, err
 	}
+	codec := GetCacheCodec()
 	if payload, ok, err := adapter.Get(ctx, key); err == nil && ok {
 		var record db.Record
-		if err := unmarshalUseNumber(payload, &record); err != nil {
+		if err := codec.UnmarshalRecord(payload, &record); err != nil {
 			return nil, err
 		}
 		return record, nil
@@ -673,7 +666,7 @@ func (b *SelectBuilder) rowWithCache(
 	if record == nil && !b.cacheOption.Force {
 		return nil, nil
 	}
-	if payload, err := json.Marshal(record); err == nil {
+	if payload, err := codec.Marshal(record); err == nil {
 		_ = adapter.Set(ctx, key, payload, b.cacheOption.Duration)
 	}
 	return record, nil
@@ -722,9 +715,10 @@ func (b *SelectBuilder) rowsWithCache(
 	if err != nil {
 		return nil, err
 	}
+	codec := GetCacheCodec()
 	if payload, ok, err := adapter.Get(ctx, key); err == nil && ok {
 		var rows db.Result
-		if err := unmarshalUseNumber(payload, &rows); err != nil {
+		if err := codec.UnmarshalRecord(payload, &rows); err != nil {
 			return nil, err
 		}
 		return rows, nil
@@ -736,7 +730,7 @@ func (b *SelectBuilder) rowsWithCache(
 	if rows == nil && !b.cacheOption.Force {
 		return nil, nil
 	}
-	if payload, err := json.Marshal(rows); err == nil {
+	if payload, err := codec.Marshal(rows); err == nil {
 		_ = adapter.Set(ctx, key, payload, b.cacheOption.Duration)
 	}
 	return rows, nil
@@ -963,8 +957,9 @@ func (b *SelectBuilder) compositeCacheBegin(ctx context.Context, dialect gooq.Di
 func (b *SelectBuilder) resolveCompositeCount(
 	ctx context.Context, dialect gooq.Dialect, adapter HashCacheAdapter, key, countField string, fields map[string][]byte,
 ) (count int64, short bool, err error) {
+	codec := GetCacheCodec()
 	if payload, ok := fields[countField]; ok {
-		if err := json.Unmarshal(payload, &count); err != nil {
+		if err := codec.Unmarshal(payload, &count); err != nil {
 			return 0, false, err
 		}
 		return count, count == 0, nil
@@ -976,7 +971,7 @@ func (b *SelectBuilder) resolveCompositeCount(
 	if count == 0 && !b.pageCacheOpt.Force {
 		return 0, true, nil
 	}
-	if payload, err := json.Marshal(count); err == nil {
+	if payload, err := codec.Marshal(count); err == nil {
 		_ = adapter.HSet(ctx, key, countField, payload, b.pageCacheOpt.Duration)
 	}
 	return count, count == 0, nil
@@ -996,9 +991,10 @@ func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.
 		return nil, 0, nil
 	}
 	// rows：命中直接可用；未命中查询回填。
+	codec := GetCacheCodec()
 	if payload, ok := fields[dataField]; ok {
 		var rows db.Result
-		if err := unmarshalUseNumber(payload, &rows); err != nil {
+		if err := codec.UnmarshalRecord(payload, &rows); err != nil {
 			return nil, 0, err
 		}
 		return rows, count, nil
@@ -1010,7 +1006,7 @@ func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.
 	if rows == nil {
 		rows = db.Result{}
 	}
-	if payload, err := json.Marshal(rows); err == nil {
+	if payload, err := codec.Marshal(rows); err == nil {
 		_ = adapter.HSet(ctx, key, dataField, payload, b.pageCacheOpt.Duration)
 	}
 	return rows, count, nil
@@ -1067,8 +1063,9 @@ func (b *SelectBuilder) columnAndCountWithCache(ctx context.Context, dialect goo
 	if err != nil || short {
 		return count, err
 	}
+	codec := GetCacheCodec()
 	if payload, ok := fields[dataField]; ok {
-		if err = json.Unmarshal(payload, dest); err != nil {
+		if err = codec.Unmarshal(payload, dest); err != nil {
 			return 0, err
 		}
 		return count, nil
@@ -1080,7 +1077,7 @@ func (b *SelectBuilder) columnAndCountWithCache(ctx context.Context, dialect goo
 	if err = execColumnExact(ctx, b.executor, sql, args, dest); err != nil {
 		return 0, err
 	}
-	if payload, err := json.Marshal(dest); err == nil {
+	if payload, err := codec.Marshal(dest); err == nil {
 		_ = adapter.HSet(ctx, key, dataField, payload, b.pageCacheOpt.Duration)
 	}
 	return count, nil

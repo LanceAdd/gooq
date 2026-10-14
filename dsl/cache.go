@@ -1,9 +1,11 @@
 package dsl
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -55,6 +57,49 @@ func GetHashCacheAdapter() HashCacheAdapter {
 	cacheAdapterMu.RLock()
 	defer cacheAdapterMu.RUnlock()
 	return hashCacheAdapter
+}
+
+// CacheCodec 编码缓存值。整个进程共用一个实现，未设置时使用 JSON。
+// Unmarshal 解进具体类型。UnmarshalRecord 解进行记录，JSON 实现使用 UseNumber。
+type CacheCodec interface {
+	Marshal(v any) ([]byte, error)
+	Unmarshal(data []byte, dest any) error
+	UnmarshalRecord(data []byte, dest any) error
+}
+
+var cacheCodec CacheCodec
+
+// SetCacheCodec 设置缓存值的编码方式。nil 恢复为 JSON。
+func SetCacheCodec(codec CacheCodec) {
+	cacheAdapterMu.Lock()
+	defer cacheAdapterMu.Unlock()
+	cacheCodec = codec
+}
+
+// GetCacheCodec 返回当前编码方式。未设置时是 JSON。
+func GetCacheCodec() CacheCodec {
+	cacheAdapterMu.RLock()
+	defer cacheAdapterMu.RUnlock()
+	if cacheCodec == nil {
+		return jsonCacheCodec{}
+	}
+	return cacheCodec
+}
+
+type jsonCacheCodec struct{}
+
+func (jsonCacheCodec) Marshal(v any) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+func (jsonCacheCodec) Unmarshal(data []byte, dest any) error {
+	return json.Unmarshal(data, dest)
+}
+
+func (jsonCacheCodec) UnmarshalRecord(data []byte, dest any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode(dest)
 }
 
 type CacheOption struct {

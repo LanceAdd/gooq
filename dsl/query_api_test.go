@@ -1,8 +1,11 @@
 package dsl
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -270,4 +273,186 @@ CREATE TABLE user (
 	if err = cached.Value(ctx, &name); err != nil || name != "ann" {
 		t.Fatalf("cache hit %q err=%v", name, err)
 	}
+}
+
+type prefixCodec struct{}
+
+func (prefixCodec) Marshal(v any) ([]byte, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte{'X'}, raw...), nil
+}
+
+func (prefixCodec) Unmarshal(data []byte, dest any) error {
+	if len(data) == 0 || data[0] != 'X' {
+		return fmt.Errorf("missing codec prefix")
+	}
+	return json.Unmarshal(data[1:], dest)
+}
+
+func (prefixCodec) UnmarshalRecord(data []byte, dest any) error {
+	if len(data) == 0 || data[0] != 'X' {
+		return fmt.Errorf("missing codec prefix")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data[1:]))
+	decoder.UseNumber()
+	return decoder.Decode(dest)
+}
+
+type byteCache struct {
+	mu   sync.Mutex
+	str  map[string][]byte
+	hash map[string]map[string][]byte
+}
+
+func (c *byteCache) Get(_ context.Context, key string) ([]byte, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	value, ok := c.str[key]
+	return value, ok, nil
+}
+
+func (c *byteCache) Set(_ context.Context, key string, value []byte, _ time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.str == nil {
+		c.str = map[string][]byte{}
+	}
+	c.str[key] = append([]byte(nil), value...)
+	return nil
+}
+
+func (c *byteCache) Remove(context.Context, string) error { return nil }
+
+func (c *byteCache) Removes(context.Context, []string) error { return nil }
+
+func (c *byteCache) HGet(_ context.Context, key, field string) ([]byte, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	value, ok := c.hash[key][field]
+	return value, ok, nil
+}
+
+func (c *byteCache) HGetAll(_ context.Context, key string) (map[string][]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := map[string][]byte{}
+	for field, value := range c.hash[key] {
+		out[field] = value
+	}
+	return out, nil
+}
+
+func (c *byteCache) HSet(_ context.Context, key, field string, value []byte, _ time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hash == nil {
+		c.hash = map[string]map[string][]byte{}
+	}
+	if c.hash[key] == nil {
+		c.hash[key] = map[string][]byte{}
+	}
+	c.hash[key][field] = append([]byte(nil), value...)
+	return nil
+}
+
+func (c *byteCache) HDel(context.Context, string, ...string) error { return nil }
+
+func TestCacheCodecUsedByQuery(t *testing.T) {
+	ctx := context.Background()
+	group := "cache-codec"
+	path := filepath.Join(t.TempDir(), "codec.db")
+	err := db.SetConfig(group, db.Config{Link: "sqlite::@file(" + filepath.ToSlash(path) + ")"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.RemoveConfig(group) })
+	database, err := db.Instance(group)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = database.Exec(ctx, `
+CREATE TABLE user (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    age INTEGER,
+    status TEXT,
+    created_at TEXT,
+    deleted_at TEXT
+)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = database.Exec(ctx, `INSERT INTO user(id, name) VALUES (1, 'ann')`); err != nil {
+		t.Fatal(err)
+	}
+
+	cache := &byteCache{}
+	previousAdapter := GetCacheAdapter()
+	previousHash := GetHashCacheAdapter()
+	SetCacheAdapter(cache)
+	SetHashCacheAdapter(cache)
+	SetCacheCodec(prefixCodec{})
+	t.Cleanup(func() {
+		SetCacheAdapter(previousAdapter)
+		SetHashCacheAdapter(previousHash)
+		SetCacheCodec(nil)
+	})
+
+	option := CacheOption{Duration: time.Minute}
+	var name string
+	query := Select(testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).DB(group).Cache(option)
+	if err = query.Value(ctx, &name); err != nil || name != "ann" {
+		t.Fatalf("value %q err=%v", name, err)
+	}
+	stored, _, err := cache.Get(ctx, mustCacheKey(t, query, "value"))
+	if err != nil || len(stored) == 0 || stored[0] != 'X' || string(stored[1:]) != `"ann"` {
+		t.Fatalf("value payload %q err=%v", stored, err)
+	}
+	if _, err = database.Exec(ctx, `DELETE FROM user WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	name = ""
+	if err = query.Value(ctx, &name); err != nil || name != "ann" {
+		t.Fatalf("value hit %q err=%v", name, err)
+	}
+
+	if _, err = database.Exec(ctx, `INSERT INTO user(id, name) VALUES (1, 'ann')`); err != nil {
+		t.Fatal(err)
+	}
+	rowQuery := Select(testUser.Id, testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).DB(group).Cache(option)
+	row, err := rowQuery.Row(ctx)
+	if err != nil || row["name"] != "ann" {
+		t.Fatalf("row %#v err=%v", row, err)
+	}
+	stored, _, err = cache.Get(ctx, mustCacheKey(t, rowQuery, "row"))
+	if err != nil || len(stored) == 0 || stored[0] != 'X' {
+		t.Fatalf("row payload %q err=%v", stored, err)
+	}
+	if _, err = database.Exec(ctx, `DELETE FROM user WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	row, err = rowQuery.Row(ctx)
+	if err != nil || row["name"] != "ann" {
+		t.Fatalf("row hit %#v err=%v", row, err)
+	}
+	id, err := db.Value(row, testUser.Id)
+	if err != nil || id != int64(1) {
+		t.Fatalf("row id %#v err=%v", id, err)
+	}
+}
+
+func mustCacheKey(t *testing.T, b *SelectBuilder, kind string) string {
+	t.Helper()
+	sql, args, err := b.oneRowSQL(gooq.DialectSQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := b.cacheKey(kind, sql, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
 }

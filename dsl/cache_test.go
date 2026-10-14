@@ -3,7 +3,6 @@
 package dsl
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -141,18 +140,19 @@ func TestCacheRecordKeepsLargeInt(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		const id int64 = 9007199254740993
 		idField := gooq.NewField[int64]("user", "id")
-		raw, err := json.Marshal(db.Record{"id": id})
+		codec := GetCacheCodec()
+		raw, err := codec.Marshal(db.Record{"id": id})
 		t.AssertNil(err)
 		var row db.Record
-		t.AssertNil(unmarshalUseNumber(raw, &row))
+		t.AssertNil(codec.UnmarshalRecord(raw, &row))
 		got, err := db.Value(row, idField)
 		t.AssertNil(err)
 		t.Assert(got, id)
 
-		list, err := json.Marshal(db.Result{{"id": id}})
+		list, err := codec.Marshal(db.Result{{"id": id}})
 		t.AssertNil(err)
 		var rows db.Result
-		t.AssertNil(unmarshalUseNumber(list, &rows))
+		t.AssertNil(codec.UnmarshalRecord(list, &rows))
 		t.Assert(len(rows), 1)
 		got, err = db.Value(rows[0], idField)
 		t.AssertNil(err)

@@ -553,6 +553,9 @@ gooq:
 // 全局注入缓存适配器（如 gredis 实现）。
 dsl.SetCacheAdapter(redisAdapter)
 dsl.SetHashCacheAdapter(redisHashAdapter)
+// 缓存值默认是 JSON。SetCacheCodec 换成别的实现，整个进程共用。
+// Row 和 Rows 命中后的数字、时间类型由这个实现决定。JSON 下整数是 json.Number，时间是 RFC3339 字符串。
+dsl.SetCacheCodec(codec)
 
 // 单查询缓存：Value、Column、Row、Rows、Count、Exists 走缓存。
 // Cache() 无参或零值 option 不开启；自定义 Name 固定 key（便于手动失效）。
