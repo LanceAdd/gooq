@@ -505,8 +505,10 @@ err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
     return err
 })
 
-// 便捷方法：Count 自动补全 COUNT(*)。Exists 按方言包装存在性查询：
-// 达梦是 SELECT COUNT(*) FROM (...) WHERE ROWNUM = 1，其他方言是 SELECT EXISTS(...)。
+// Count 统计去掉分页和排序后的结果行数。DISTINCT、分组或集合操作套子查询再 COUNT(*)。
+// Exists 判断这批行是否至少有一行：选择列表换成 1，同样去掉分页和排序。
+// 达梦是 SELECT COUNT(*) FROM (SELECT 1 ...) WHERE ROWNUM = 1，其他方言是 SELECT EXISTS (SELECT 1 ...)。
+// Value 和 Column 要求恰好一列，RETURNING 也一样。Row 和 Value 在没有 Limit 时补 LIMIT 1；Limit 大于 1 时返回错误。
 total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).Count(ctx)
 exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).Exists(ctx)
 

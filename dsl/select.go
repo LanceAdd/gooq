@@ -312,7 +312,12 @@ func (b *SelectBuilder) Having(conditions ...gooq.Expression) *SelectBuilder {
 	return b
 }
 
+// Limit 设置返回行数。0 表示不限制。负数写入构造错误，渲染和执行都会失败。
 func (b *SelectBuilder) Limit(n int) *SelectBuilder {
+	if n < 0 {
+		b.buildErr = fmt.Errorf("gooq: LIMIT must be greater than or equal to 0")
+		return b
+	}
 	b.limit = n
 	return b
 }
@@ -322,7 +327,12 @@ func (b *SelectBuilder) Offset(n int) *SelectBuilder {
 	return b
 }
 
+// Page 按页码和页大小写入 OFFSET 与 LIMIT。页大小为负数时写入构造错误。
 func (b *SelectBuilder) Page(page, size int) *SelectBuilder {
+	if size < 0 {
+		b.buildErr = fmt.Errorf("gooq: page size must be greater than or equal to 0")
+		return b
+	}
 	b.offset = (page - 1) * size
 	b.limit = size
 	return b
@@ -519,25 +529,71 @@ func (b *SelectBuilder) queryWithCache(ctx context.Context, sql string, args []a
 	return run()
 }
 
-// Value writes the first column of the first row into dest.
+// Value writes the single column of the single row into dest.
 // dest is one cell, such as *time.Time, *sql.NullTime, *sql.NullString, or *int.
-// No row returns sql.ErrNoRows. NULL writes the zero value.
+// A result with any other column count returns an error.
+// A query without Limit runs with LIMIT 1 for this call and keeps Offset. The builder is left unchanged.
+// Limit greater than 1 returns an error. No row returns sql.ErrNoRows. NULL writes the zero value.
 // A row struct uses Row and Record.Struct. A slice uses Column.
 func (b *SelectBuilder) Value(ctx context.Context, dest any) error {
 	if err := db.CheckValue(dest); err != nil {
 		return err
 	}
-	return b.readCell(ctx, dest, "value", execValue)
+	if b.limit > 1 {
+		return errManyRows(b.limit)
+	}
+	restore, err := b.bind(ctx)
+	if err != nil {
+		return err
+	}
+	defer restore()
+	if b.pageCacheOpt != nil {
+		return errPageCache()
+	}
+	dialect := b.dialect()
+	sql, args, err := b.oneRowSQL(dialect)
+	if err != nil {
+		return err
+	}
+	run := func() error {
+		return execValueExact(ctx, b.executor, sql, args, dest)
+	}
+	if b.cacheOption != nil {
+		if adapter := GetCacheAdapter(); adapter != nil {
+			return b.cellWithCache(ctx, adapter, sql, args, dest, "value", run)
+		}
+	}
+	return run()
 }
 
-// Column writes the first column of every row into dest.
-// dest is a pointer to a slice of cells. No rows sets an empty slice.
-// A slice of row structs uses Rows and Result.Structs.
+// Column writes every value of the single column into dest.
+// dest is a pointer to a slice of cells. Pagination on the builder is kept.
+// A result with any other column count returns an error.
+// No rows sets an empty slice. A slice of row structs uses Rows and Result.Structs.
 func (b *SelectBuilder) Column(ctx context.Context, dest any) error {
 	if err := db.CheckColumn(dest); err != nil {
 		return err
 	}
-	return b.readCell(ctx, dest, "column", execColumn)
+	return b.readCell(ctx, dest, "column", execColumnExact)
+}
+
+func errManyRows(limit int) error {
+	return fmt.Errorf("gooq: query limit %d returns more than one row", limit)
+}
+
+// oneRowSQL 准备只返回一行的语句。Limit 为 1 时原样渲染，可以带 Offset。
+// 还没有 Limit 时，这次执行补 LIMIT 1 并保留 Offset，不改调用方的查询链。
+// Limit 大于 1 时返回错误。
+func (b *SelectBuilder) oneRowSQL(dialect gooq.Dialect) (string, []any, error) {
+	if b.limit > 1 {
+		return "", nil, errManyRows(b.limit)
+	}
+	query := b
+	if b.limit != 1 {
+		query = b.Clone()
+		query.limit = 1
+	}
+	return query.ToSql(dialect)
 }
 
 func (b *SelectBuilder) readCell(
@@ -623,14 +679,20 @@ func (b *SelectBuilder) rowWithCache(
 	return record, nil
 }
 
+// Row returns one row. No row returns nil, nil.
+// A query without Limit runs with LIMIT 1 for this call and keeps Offset. The builder is left unchanged.
+// Limit greater than 1 returns an error. The cache key uses that executed statement.
 func (b *SelectBuilder) Row(ctx context.Context) (db.Record, error) {
+	if b.limit > 1 {
+		return nil, errManyRows(b.limit)
+	}
 	restore, err := b.bind(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer restore()
 	dialect := b.dialect()
-	sql, args, err := b.ToSql(dialect)
+	sql, args, err := b.oneRowSQL(dialect)
 	if err != nil {
 		return nil, err
 	}
@@ -715,30 +777,77 @@ func (b *SelectBuilder) rowsValue(ctx context.Context, dialect gooq.Dialect) (db
 	return result, nil
 }
 
-// countBuilderOf 构造 COUNT(*) 子查询：清除分页与排序（计数是全量语义）；
+// countWrapped 为 true 时，计数和存在性判断都要把原查询套成子查询。
+// 普通查询直接改选择列表会丢掉 DISTINCT、分组或集合操作的结果行。
+func (b *SelectBuilder) countWrapped() bool {
+	return b.distinct || len(b.groupBy) > 0 || b.groupExt != groupExtNone || len(b.setOps) > 0
+}
+
+// unbounded 复制查询并去掉分页和排序。原查询链不变。
+func (b *SelectBuilder) unbounded() *SelectBuilder {
+	inner := b.Clone()
+	inner.limit = 0
+	inner.offset = 0
+	inner.orderBy = nil
+	return inner
+}
+
+// countBuilderOf 构造 COUNT(*)：清除分页与排序。
 // 分组、集合操作或 DISTINCT 外包子查询 (SELECT COUNT(*) FROM (原查询) AS t)，
 // 计数为分组、集合或去重后的结果行数。
 func (b *SelectBuilder) countBuilderOf() *SelectBuilder {
-	if b.distinct || len(b.groupBy) > 0 || b.groupExt != groupExtNone || len(b.setOps) > 0 {
-		inner := b.Clone()
-		inner.limit = 0
-		inner.offset = 0
-		inner.orderBy = nil
+	if b.countWrapped() {
 		outer := Select(gooq.Raw("COUNT(*)"))
-		outer.from = inner.As("t")
+		outer.from = b.unbounded().As("t")
 		return outer
 	}
-	countBuilder := b.Clone()
+	countBuilder := b.unbounded()
 	countBuilder.fields = []gooq.Expression{gooq.Raw("COUNT(*)")}
-	countBuilder.limit = 0
-	countBuilder.offset = 0
-	countBuilder.orderBy = nil
 	return countBuilder
+}
+
+// existsBuilder 构造存在性子查询，判断的行与 Count 相同。
+// 普通查询把选择列表换成 1。DISTINCT、分组或集合操作套的子查询与 Count 相同。
+func (b *SelectBuilder) existsBuilder() *SelectBuilder {
+	if b.countWrapped() {
+		outer := Select(gooq.Raw("1"))
+		outer.from = b.unbounded().As("t")
+		return outer
+	}
+	sub := b.unbounded()
+	sub.fields = []gooq.Expression{gooq.Raw("1")}
+	return sub
+}
+
+// checkedSQL 在改写语句之前校验构造错误和原查询的方言能力。
+// 包裹后的外层查询看不到内层 GROUP BY 扩展，也不会带回 buildErr。
+func (b *SelectBuilder) checkedSQL(dialect gooq.Dialect, build func() *SelectBuilder) (string, []any, error) {
+	if b.buildErr != nil {
+		return "", nil, b.buildErr
+	}
+	if err := b.ValidateDialect(dialect); err != nil {
+		return "", nil, err
+	}
+	return build().ToSql(dialect)
+}
+
+// existsSQL 渲染存在性探测。普通方言是 SELECT EXISTS (SELECT 1 ...)。
+// 达梦是 SELECT COUNT(*) FROM (SELECT 1 ...) WHERE ROWNUM = 1。
+func (b *SelectBuilder) existsSQL(dialect gooq.Dialect) (string, []any, error) {
+	sql, args, err := b.checkedSQL(dialect, b.existsBuilder)
+	if err != nil {
+		return "", nil, err
+	}
+	spec, err := gooq.DialectSpecOf(dialect)
+	if err != nil {
+		return "", nil, err
+	}
+	return spec.RenderExists(gooq.NewRenderContext(dialect), sql), args, nil
 }
 
 // countValue 执行 COUNT(*) 查询（Count/RowsAndCount 共用）。
 func (b *SelectBuilder) countValue(ctx context.Context, dialect gooq.Dialect) (int64, error) {
-	sql, args, err := b.countBuilderOf().ToSql(dialect)
+	sql, args, err := b.countSQL(dialect)
 	if err != nil {
 		return 0, err
 	}
@@ -749,11 +858,12 @@ func (b *SelectBuilder) countValue(ctx context.Context, dialect gooq.Dialect) (i
 	return toInt64(value)
 }
 
-// countSQL 生成 COUNT(*) 查询 SQL（Count 缓存 key 需要）。
+// countSQL 生成 COUNT(*) 查询 SQL（Count 缓存 key 与 countValue 共用）。
 func (b *SelectBuilder) countSQL(dialect gooq.Dialect) (string, []any, error) {
-	return b.countBuilderOf().ToSql(dialect)
+	return b.checkedSQL(dialect, b.countBuilderOf)
 }
 
+// Count 返回去掉分页和排序之后的结果行数。查询链上的 Page 或 Limit 在执行时去掉。
 func (b *SelectBuilder) Count(ctx context.Context) (int64, error) {
 	restore, err := b.bind(ctx)
 	if err != nil {
@@ -772,6 +882,8 @@ func (b *SelectBuilder) Count(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
+// Exists 判断 Count 是否大于 0。分页和排序会去掉，选择列表换成 1。
+// 有 DISTINCT、分组或集合操作时，套的子查询与 Count 相同。
 func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 	restore, err := b.bind(ctx)
 	if err != nil {
@@ -779,16 +891,12 @@ func (b *SelectBuilder) Exists(ctx context.Context) (bool, error) {
 	}
 	defer restore()
 	dialect := b.dialect()
-	sql, args, err := b.ToSql(dialect)
-	if err != nil {
-		return false, err
-	}
-	spec, err := gooq.DialectSpecOf(dialect)
+	sql, args, err := b.existsSQL(dialect)
 	if err != nil {
 		return false, err
 	}
 	var ok bool
-	if err := b.queryWithCache(ctx, spec.RenderExists(gooq.NewRenderContext(dialect), sql), args, &ok, "exists"); err != nil {
+	if err := b.queryWithCache(ctx, sql, args, &ok, "exists"); err != nil {
 		return false, err
 	}
 	return ok, nil
@@ -920,7 +1028,8 @@ func (b *SelectBuilder) StructsAndCount(ctx context.Context, dest any) (int64, e
 	return count, nil
 }
 
-// ColumnAndCount 先取总数，再把当前页第一列填进单元格切片。总数为 0 时不再查页。
+// ColumnAndCount 先取总数，再把当前页的那一列填进单元格切片。总数为 0 时不再查页。
+// 结果列数不是 1 时返回错误。
 func (b *SelectBuilder) ColumnAndCount(ctx context.Context, dest any) (int64, error) {
 	if err := db.CheckColumn(dest); err != nil {
 		return 0, err
@@ -942,7 +1051,7 @@ func (b *SelectBuilder) ColumnAndCount(ctx context.Context, dest any) (int64, er
 	if err != nil {
 		return 0, err
 	}
-	if err = execColumn(ctx, b.executor, sql, args, dest); err != nil {
+	if err = execColumnExact(ctx, b.executor, sql, args, dest); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -968,7 +1077,7 @@ func (b *SelectBuilder) columnAndCountWithCache(ctx context.Context, dialect goo
 	if err != nil {
 		return 0, err
 	}
-	if err = execColumn(ctx, b.executor, sql, args, dest); err != nil {
+	if err = execColumnExact(ctx, b.executor, sql, args, dest); err != nil {
 		return 0, err
 	}
 	if payload, err := json.Marshal(dest); err == nil {

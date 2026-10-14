@@ -42,6 +42,7 @@ func (f *fakeExecutor) GetAll(ctx context.Context, query string, args ...any) (d
 
 func (f *fakeExecutor) GetOne(ctx context.Context, query string, args ...any) (db.Record, error) {
 	f.calls = append(f.calls, "GetOne")
+	f.lastSql = query
 	return nil, nil
 }
 

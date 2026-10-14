@@ -372,23 +372,25 @@ func (r *batchResult) RowsAffected() (int64, error) {
 	return r.affected, nil
 }
 
-// Value writes the first RETURNING column into dest. dest is one cell.
+// Value writes the single RETURNING column of the first row into dest.
+// More than one returned column is an error. Several returned rows still yield the first row.
 func (b *DMLBuilder) Value(ctx context.Context, dest any) error {
 	if err := db.CheckValue(dest); err != nil {
 		return err
 	}
 	return b.readReturning(ctx, func(sqlStr string, args []any) error {
-		return execValue(ctx, b.executor, sqlStr, args, dest)
+		return execValueExact(ctx, b.executor, sqlStr, args, dest)
 	})
 }
 
-// Column writes the first RETURNING column of every row into dest.
+// Column writes the single RETURNING column of every row into dest.
+// More than one returned column is an error.
 func (b *DMLBuilder) Column(ctx context.Context, dest any) error {
 	if err := db.CheckColumn(dest); err != nil {
 		return err
 	}
 	return b.readReturning(ctx, func(sqlStr string, args []any) error {
-		return execColumn(ctx, b.executor, sqlStr, args, dest)
+		return execColumnExact(ctx, b.executor, sqlStr, args, dest)
 	})
 }
 
@@ -400,6 +402,9 @@ func (b *DMLBuilder) readReturning(ctx context.Context, run func(string, []any) 
 	defer restore()
 	if len(b.returning) == 0 {
 		return fmt.Errorf("gooq: Value and Column on DML require Returning fields")
+	}
+	if len(b.returning) != 1 {
+		return fmt.Errorf("gooq: query must select exactly one column")
 	}
 	sqlStr, args, err := b.ToSql(b.dmlDialect())
 	if err != nil {

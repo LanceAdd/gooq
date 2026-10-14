@@ -44,60 +44,63 @@ func readOne(ctx context.Context, query Queryer, driver Driver, statement string
 }
 
 func readValue(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (any, error) {
-	value, _, err := readScalar(ctx, query, driver, statement, args...)
+	value, _, _, err := readScalar(ctx, query, driver, statement, args...)
 	return value, err
 }
 
 // readScalar 读取第一行的第一列。
 // 查询没有行时 found 为 false。列为 NULL 时 found 为 true，值为 nil。
-func readScalar(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (value any, found bool, err error) {
+// width 是结果列数。没有行时也能从结果集元数据得到，调用方据此拒绝多列。
+func readScalar(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (value any, found bool, width int, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
 	}
 	defer func() {
 		err = closeRows(rows, err)
 	}()
-	if !rows.Next() {
-		if err = rows.Err(); err != nil {
-			return nil, false, err
-		}
-		return nil, false, nil
-	}
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, false, err
+		return nil, false, 0, err
+	}
+	width = len(columns)
+	if !rows.Next() {
+		if err = rows.Err(); err != nil {
+			return nil, false, width, err
+		}
+		return nil, false, width, nil
 	}
 	values, err := scanValues(rows, columns, columnTypeNames(rows), driver)
 	if err != nil {
-		return nil, false, err
+		return nil, false, width, err
 	}
 	if err = rows.Err(); err != nil {
-		return nil, false, err
+		return nil, false, width, err
 	}
 	if len(values) == 0 {
-		return nil, true, nil
+		return nil, true, width, nil
 	}
-	return values[0], true, nil
+	return values[0], true, width, nil
 }
 
-func readColumn(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (values []any, err error) {
+func readColumn(ctx context.Context, query Queryer, driver Driver, statement string, args ...any) (values []any, width int, err error) {
 	rows, err := query.QueryContext(ctx, statement, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer func() {
 		err = closeRows(rows, err)
 	}()
 	columns, err := rows.Columns()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+	width = len(columns)
 	dbTypes := columnTypeNames(rows)
 	for rows.Next() {
 		scanned, scanErr := scanValues(rows, columns, dbTypes, driver)
 		if scanErr != nil {
-			return nil, scanErr
+			return nil, width, scanErr
 		}
 		if len(scanned) == 0 {
 			values = append(values, nil)
@@ -106,9 +109,9 @@ func readColumn(ctx context.Context, query Queryer, driver Driver, statement str
 		values = append(values, scanned[0])
 	}
 	if err = rows.Err(); err != nil {
-		return nil, err
+		return nil, width, err
 	}
-	return values, nil
+	return values, width, nil
 }
 
 func closeRows(rows *sql.Rows, err error) error {

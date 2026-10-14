@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/lanceadd/gooq"
 	"github.com/lanceadd/gooq/db"
 	_ "github.com/lanceadd/gooq/drivers/sqlite"
 )
@@ -99,5 +101,47 @@ CREATE TABLE user (
 	}
 	if returned.Format("2006-01-02 15:04:05") != "2026-10-11 09:00:00" {
 		t.Fatalf("returning %s", returned)
+	}
+
+	var before int64
+	if before, err = Select(testUser.Id).From(testUser).Unscoped().DB(group).Count(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var name string
+	err = Insert(testUser).Columns(testUser.Id, testUser.Name).
+		Values(30, "nope").
+		Returning(testUser.Id, testUser.Name).DB(group).Value(ctx, &name)
+	if err == nil || !strings.Contains(err.Error(), "exactly one column") {
+		t.Fatalf("returning value err=%v", err)
+	}
+	var after int64
+	if after, err = Select(testUser.Id).From(testUser).Unscoped().DB(group).Count(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatalf("rejected returning inserted a row: %d -> %d", before, after)
+	}
+
+	err = Insert(testUser).Columns(testUser.Id, testUser.Name).
+		Values(31, "raw").
+		Returning(gooq.Raw("id, name")).DB(group).Value(ctx, &name)
+	if err == nil || !strings.Contains(err.Error(), "expected 1") {
+		t.Fatalf("raw returning err=%v", err)
+	}
+
+	names = nil
+	err = Insert(testUser).Columns(testUser.Id, testUser.Name).
+		Values(32, "first").
+		Values(33, "second").
+		Returning(testUser.Name).DB(group).Value(ctx, &name)
+	if err != nil || name != "first" {
+		t.Fatalf("first returning %q err=%v", name, err)
+	}
+	err = Insert(testUser).Columns(testUser.Id, testUser.Name).
+		Values(34, "a").
+		Values(35, "b").
+		Returning(testUser.Name).DB(group).Column(ctx, &names)
+	if err != nil || len(names) != 2 || names[0] != "a" || names[1] != "b" {
+		t.Fatalf("returning column %v err=%v", names, err)
 	}
 }

@@ -484,7 +484,7 @@ func (d *DB) Value(ctx context.Context, dest any, query string, args ...any) err
 	if d != nil && d.dryRun != nil && d.dryRun.Val() {
 		return d.observe(ctx, query, args, func(context.Context) error { return nil })
 	}
-	value, found, err := d.scalar(ctx, query, args...)
+	value, found, _, err := d.scalar(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -502,8 +502,50 @@ func (t *Tx) Value(ctx context.Context, dest any, query string, args ...any) err
 	if t != nil && t.db != nil && t.db.dryRun != nil && t.db.dryRun.Val() {
 		return t.db.observe(ctx, query, args, func(context.Context) error { return nil })
 	}
-	value, found, err := t.scalar(ctx, query, args...)
+	value, found, _, err := t.scalar(ctx, query, args...)
 	if err != nil {
+		return err
+	}
+	if !found {
+		return sql.ErrNoRows
+	}
+	return Assign(dest, value)
+}
+
+// ValueExact 写入恰好一列的第一行。结果列数不是 1 时返回错误。没有行时返回 sql.ErrNoRows。
+func (d *DB) ValueExact(ctx context.Context, dest any, query string, args ...any) error {
+	if err := CheckValue(dest); err != nil {
+		return err
+	}
+	if d != nil && d.dryRun != nil && d.dryRun.Val() {
+		return d.observe(ctx, query, args, func(context.Context) error { return nil })
+	}
+	value, found, width, err := d.scalar(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if err = oneColumnWidth(width); err != nil {
+		return err
+	}
+	if !found {
+		return sql.ErrNoRows
+	}
+	return Assign(dest, value)
+}
+
+// ValueExact 在事务内写入恰好一列的第一行。约束与 DB.ValueExact 相同。
+func (t *Tx) ValueExact(ctx context.Context, dest any, query string, args ...any) error {
+	if err := CheckValue(dest); err != nil {
+		return err
+	}
+	if t != nil && t.db != nil && t.db.dryRun != nil && t.db.dryRun.Val() {
+		return t.db.observe(ctx, query, args, func(context.Context) error { return nil })
+	}
+	value, found, width, err := t.scalar(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if err = oneColumnWidth(width); err != nil {
 		return err
 	}
 	if !found {
@@ -521,7 +563,7 @@ func (d *DB) Column(ctx context.Context, dest any, query string, args ...any) er
 	if d != nil && d.dryRun != nil && d.dryRun.Val() {
 		return d.observe(ctx, query, args, func(context.Context) error { return nil })
 	}
-	values, err := d.column(ctx, query, args...)
+	values, _, err := d.column(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -536,11 +578,54 @@ func (t *Tx) Column(ctx context.Context, dest any, query string, args ...any) er
 	if t != nil && t.db != nil && t.db.dryRun != nil && t.db.dryRun.Val() {
 		return t.db.observe(ctx, query, args, func(context.Context) error { return nil })
 	}
-	values, err := t.column(ctx, query, args...)
+	values, _, err := t.column(ctx, query, args...)
 	if err != nil {
 		return err
 	}
 	return assignColumn(dest, values)
+}
+
+// ColumnExact 把恰好一列的每一行写入 dest。结果列数不是 1 时返回错误。没有行时写成空切片。
+func (d *DB) ColumnExact(ctx context.Context, dest any, query string, args ...any) error {
+	if err := CheckColumn(dest); err != nil {
+		return err
+	}
+	if d != nil && d.dryRun != nil && d.dryRun.Val() {
+		return d.observe(ctx, query, args, func(context.Context) error { return nil })
+	}
+	values, width, err := d.column(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if err = oneColumnWidth(width); err != nil {
+		return err
+	}
+	return assignColumn(dest, values)
+}
+
+// ColumnExact 在事务内把恰好一列的每一行写入 dest。约束与 DB.ColumnExact 相同。
+func (t *Tx) ColumnExact(ctx context.Context, dest any, query string, args ...any) error {
+	if err := CheckColumn(dest); err != nil {
+		return err
+	}
+	if t != nil && t.db != nil && t.db.dryRun != nil && t.db.dryRun.Val() {
+		return t.db.observe(ctx, query, args, func(context.Context) error { return nil })
+	}
+	values, width, err := t.column(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	if err = oneColumnWidth(width); err != nil {
+		return err
+	}
+	return assignColumn(dest, values)
+}
+
+func oneColumnWidth(width int) error {
+	if width == 1 {
+		return nil
+	}
+	return fmt.Errorf("gooq: result has %d columns, expected 1", width)
 }
 
 func (d *DB) executor(ctx context.Context, write bool) (Queryer, error) {
@@ -553,56 +638,64 @@ func (d *DB) executor(ctx context.Context, write bool) (Queryer, error) {
 	return d.readDB()
 }
 
-func (d *DB) scalar(ctx context.Context, query string, args ...any) (any, bool, error) {
+func (d *DB) scalar(ctx context.Context, query string, args ...any) (any, bool, int, error) {
 	var (
 		value any
 		found bool
+		width int
 	)
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
 		conn, err := d.executor(ctx, false)
 		if err != nil {
 			return err
 		}
-		value, found, err = readScalar(ctx, conn, d.driver, query, d.bindArgs(args)...)
+		value, found, width, err = readScalar(ctx, conn, d.driver, query, d.bindArgs(args)...)
 		return err
 	})
-	return value, found, err
+	return value, found, width, err
 }
 
-func (t *Tx) scalar(ctx context.Context, query string, args ...any) (any, bool, error) {
+func (t *Tx) scalar(ctx context.Context, query string, args ...any) (any, bool, int, error) {
 	var (
 		value any
 		found bool
+		width int
 	)
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
-		value, found, err = readScalar(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
+		value, found, width, err = readScalar(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
 		return err
 	})
-	return value, found, err
+	return value, found, width, err
 }
 
-func (d *DB) column(ctx context.Context, query string, args ...any) ([]any, error) {
-	var values []any
+func (d *DB) column(ctx context.Context, query string, args ...any) ([]any, int, error) {
+	var (
+		values []any
+		width  int
+	)
 	err := d.observe(ctx, query, args, func(ctx context.Context) error {
 		conn, err := d.executor(ctx, false)
 		if err != nil {
 			return err
 		}
-		values, err = readColumn(ctx, conn, d.driver, query, d.bindArgs(args)...)
+		values, width, err = readColumn(ctx, conn, d.driver, query, d.bindArgs(args)...)
 		return err
 	})
-	return values, err
+	return values, width, err
 }
 
-func (t *Tx) column(ctx context.Context, query string, args ...any) ([]any, error) {
-	var values []any
+func (t *Tx) column(ctx context.Context, query string, args ...any) ([]any, int, error) {
+	var (
+		values []any
+		width  int
+	)
 	err := t.db.observe(ctx, query, args, func(ctx context.Context) error {
 		var err error
-		values, err = readColumn(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
+		values, width, err = readColumn(ctx, t.sql, t.db.driver, query, t.db.bindArgs(args)...)
 		return err
 	})
-	return values, err
+	return values, width, err
 }
 
 func assignColumn(dest any, values []any) error {

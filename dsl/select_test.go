@@ -2,6 +2,7 @@
 package dsl
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -491,5 +492,163 @@ func TestDsl_Select_CountGroup(t *testing.T) {
 		sql, _, err = Select(testUser.Status).From(testUser).Distinct().Limit(10).countSQL(gooq.DialectPgsql)
 		t.AssertNil(err)
 		t.Assert(sql, `SELECT COUNT(*) FROM (SELECT DISTINCT "user"."status" FROM "user" WHERE "user"."deleted_at" IS NULL) AS "t"`)
+
+		sql, args, err := Select(testUser.Id, testUser.Name).From(testUser).
+			Where(testUser.Age.Gt(18)).
+			Order(testUser.Id.Desc()).
+			Page(2, 10).
+			countSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT COUNT(*) FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL")
+		t.AssertEQ(args, []any{18})
+
+		union := Select(testUser.Id).From(testUser).Where(testUser.Age.Eq(1)).
+			UnionAll(Select(testUser.Id).From(testUser).Where(testUser.Age.Eq(2))).
+			Order(testUser.Id.Asc()).
+			Limit(5)
+		sql, args, err = union.countSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT COUNT(*) FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` = ? AND `user`.`deleted_at` IS NULL UNION ALL SELECT `user`.`id` FROM `user` WHERE `user`.`age` = ? AND `user`.`deleted_at` IS NULL) AS `t`")
+		t.AssertEQ(args, []any{1, 2})
+		unchanged, _, err := union.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(unchanged, "LIMIT 5"), true)
+	})
+}
+
+func TestDsl_Select_ExistsSQL(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		sql, args, err := Select(testUser.Id, testUser.Name).From(testUser).
+			Where(testUser.Age.Gt(18)).
+			Order(testUser.Id.Desc()).
+			Page(2, 10).
+			existsSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT EXISTS (SELECT 1 FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL)")
+		t.AssertEQ(args, []any{18})
+
+		sql, args, err = Select(testUser.Id).From(testUser).
+			Order(testUser.Id.Desc()).
+			Page(2, 10).
+			existsSQL(gooq.DialectDM)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT COUNT(*) FROM (SELECT 1 FROM "USER" WHERE "USER"."DELETED_AT" IS NULL) WHERE ROWNUM = 1`)
+		t.AssertEQ(len(args), 0)
+
+		sql, _, err = Select(testUser.Status).From(testUser).
+			Group(testUser.Status).
+			Order(testUser.Status.Asc()).
+			Limit(3).
+			existsSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT EXISTS (SELECT 1 FROM (SELECT `user`.`status` FROM `user` WHERE `user`.`deleted_at` IS NULL GROUP BY `user`.`status`) AS `t`)")
+
+		sql, _, err = Select(testUser.Status).From(testUser).Distinct().existsSQL(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT EXISTS (SELECT 1 FROM (SELECT DISTINCT "user"."status" FROM "user" WHERE "user"."deleted_at" IS NULL) AS "t")`)
+
+		sql, args, err = Select(testUser.Id).From(testUser).Where(testUser.Age.Eq(1)).
+			UnionAll(Select(testUser.Id).From(testUser).Where(testUser.Age.Eq(2))).
+			Order(testUser.Id.Asc()).
+			Limit(5).
+			existsSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT EXISTS (SELECT 1 FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` = ? AND `user`.`deleted_at` IS NULL UNION ALL SELECT `user`.`id` FROM `user` WHERE `user`.`age` = ? AND `user`.`deleted_at` IS NULL) AS `t`)")
+		t.AssertEQ(args, []any{1, 2})
+	})
+}
+
+func TestDsl_Select_OneRowSQL(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		offsetOnly := Select(testUser.Id).From(testUser).Offset(4)
+		sql, _, err := offsetOnly.oneRowSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL LIMIT 1 OFFSET 4")
+		unchanged, _, err := offsetOnly.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(unchanged, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL LIMIT 18446744073709551615 OFFSET 4")
+
+		limited := Select(testUser.Id).From(testUser).Limit(1).Offset(4)
+		sql, _, err = limited.oneRowSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		same, _, err := limited.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, same)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL LIMIT 1 OFFSET 4")
+
+		pageOne := Select(testUser.Id).From(testUser).Page(3, 1)
+		sql, _, err = pageOne.oneRowSQL(gooq.DialectSQLite)
+		t.AssertNil(err)
+		same, _, err = pageOne.ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, same)
+		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL LIMIT 1 OFFSET 2`)
+
+		widePage := Select(testUser.Id).From(testUser).Page(2, 10)
+		_, _, err = widePage.oneRowSQL(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "limit 10"), true)
+		unchanged, _, err = widePage.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(unchanged, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL LIMIT 10 OFFSET 10")
+
+		plain := Select(testUser.Id).From(testUser)
+		sql, args, err := plain.oneRowSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, "LIMIT 1"), true)
+		key, err := plain.cacheKey("row", sql, args)
+		t.AssertNil(err)
+		plainSQL, plainArgs, err := plain.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		plainKey, err := plain.cacheKey("row", plainSQL, plainArgs)
+		t.AssertNil(err)
+		t.AssertNE(key, plainKey)
+		t.Assert(strings.HasPrefix(key, "gooq:query:row:"), true)
+
+	})
+}
+
+func TestDsl_AggregateDialectCheck(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		b := Select(testUser.Status).From(testUser).GroupRollup(testUser.Status)
+		_, _, err := b.countSQL(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "ROLLUP is not supported"), true)
+		_, _, err = b.existsSQL(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "ROLLUP is not supported"), true)
+
+		fe := &fakeExecutor{}
+		b.executor = fe
+		_, err = b.countValue(context.Background(), gooq.DialectSQLite)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "ROLLUP is not supported"), true)
+		t.AssertEQ(len(fe.calls), 0)
+
+		broken := Select(testUser.Status).From(testUser).GroupRollup(testUser.Status).GroupCube(testUser.Status)
+		_, _, err = broken.countSQL(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "GROUP BY extension is already set"), true)
+		_, _, err = broken.existsSQL(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "GROUP BY extension is already set"), true)
+	})
+}
+
+func TestDsl_NegativeLimit(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		_, _, err := Select(testUser.Id).From(testUser).Limit(-3).ToSql(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "LIMIT"), true)
+		_, _, err = Select(testUser.Id).From(testUser).Limit(-3).oneRowSQL(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "LIMIT"), true)
+		_, _, err = Select(testUser.Id).From(testUser).Page(1, -5).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "page size"), true)
+
+		sql, _, err := Select(testUser.Id).From(testUser).Limit(0).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, "LIMIT"), false)
 	})
 }

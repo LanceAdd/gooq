@@ -508,8 +508,11 @@ err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
     return err
 })
 
-// Convenience: Count auto-wraps COUNT(*). Exists wraps a dialect-specific existence query:
-// Dameng uses SELECT COUNT(*) FROM (...) WHERE ROWNUM = 1; the others use SELECT EXISTS(...).
+// Count is the number of rows after pagination and ordering are removed.
+// DISTINCT, grouping, and set operations are counted through a subquery.
+// Exists reports whether that count is greater than zero: the select list becomes 1, and pagination and ordering are removed.
+// Dameng uses SELECT COUNT(*) FROM (SELECT 1 ...) WHERE ROWNUM = 1. Other dialects use SELECT EXISTS (SELECT 1 ...).
+// Value and Column require exactly one column, including RETURNING. Row and Value add LIMIT 1 when Limit is absent, and return an error when Limit is greater than 1.
 total, err := dsl.SelectFrom(User).Where(User.Status.Eq("vip")).Count(ctx)
 exists, err := dsl.Select(User.Id).From(User).Where(User.Account.Eq("x")).Exists(ctx)
 

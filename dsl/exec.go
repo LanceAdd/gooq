@@ -79,12 +79,23 @@ func execValue(ctx context.Context, exec executor, query string, args []any, des
 	}
 }
 
-func execColumn(ctx context.Context, exec executor, query string, args []any, dest any) error {
+func execValueExact(ctx context.Context, exec executor, query string, args []any, dest any) error {
 	switch typed := exec.(type) {
 	case *db.DB:
-		return typed.Column(ctx, dest, query, args...)
+		return typed.ValueExact(ctx, dest, query, args...)
 	case *db.Tx:
-		return typed.Column(ctx, dest, query, args...)
+		return typed.ValueExact(ctx, dest, query, args...)
+	default:
+		return fmt.Errorf("gooq: Value requires a database executor")
+	}
+}
+
+func execColumnExact(ctx context.Context, exec executor, query string, args []any, dest any) error {
+	switch typed := exec.(type) {
+	case *db.DB:
+		return typed.ColumnExact(ctx, dest, query, args...)
+	case *db.Tx:
+		return typed.ColumnExact(ctx, dest, query, args...)
 	default:
 		return fmt.Errorf("gooq: Column requires a database executor")
 	}

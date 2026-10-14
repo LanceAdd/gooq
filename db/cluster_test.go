@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -262,6 +263,19 @@ func TestGetValueUsesFirstDuplicateColumn(t *testing.T) {
 	}
 	if record["a"] != int64(2) {
 		t.Fatalf("record duplicate = %#v", record["a"])
+	}
+	if err = database.ValueExact(ctx, &value, `SELECT 1 AS a, 2 AS a`); err == nil {
+		t.Fatal("expected exact value to reject two columns")
+	}
+	var values []int64
+	if err = database.ColumnExact(ctx, &values, `SELECT 1 AS a, 2 AS a`); err == nil {
+		t.Fatal("expected exact column to reject two columns")
+	}
+	if err = database.ValueExact(ctx, &value, `SELECT 1 WHERE 0`); err != sql.ErrNoRows {
+		t.Fatalf("missing exact value err=%v", err)
+	}
+	if err = database.ValueExact(ctx, &value, `SELECT 1 AS a, 2 AS b WHERE 0`); err == nil {
+		t.Fatal("expected exact value to reject two columns when no row is returned")
 	}
 }
 
