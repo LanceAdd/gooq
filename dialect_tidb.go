@@ -6,10 +6,8 @@ type TiDBDialect struct {
 	MySQLDialect
 }
 
-// Name 返回 tidb。
 func (TiDBDialect) Name() Dialect { return DialectTiDB }
 
-// SupportsGroup 拒绝 CUBE 和 GROUPING SETS，错误里写 tidb。
 func (TiDBDialect) SupportsGroup(ext string) error {
 	return rejectMySQLGroups(DialectTiDB, ext)
 }

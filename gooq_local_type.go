@@ -1,7 +1,6 @@
 package gooq
 
 // LocalType 是字段值的本地存储类型。
-// 它决定字段值在本地如何处理。
 type LocalType string
 
 const (

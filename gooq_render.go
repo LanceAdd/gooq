@@ -27,17 +27,14 @@ func NewRenderContext(dialect Dialect) *RenderContext {
 	return rc
 }
 
-// Dialect 返回当前渲染方言。
 func (rc *RenderContext) Dialect() Dialect {
 	return rc.dialect
 }
 
-// Spec 返回当前渲染方言。未注册方言时为 nil。
 func (rc *RenderContext) Spec() DialectSpec {
 	return rc.spec
 }
 
-// Args 返回当前累积的参数列表。
 func (rc *RenderContext) Args() []any {
 	return rc.args
 }
@@ -62,7 +59,6 @@ func (rc *RenderContext) Quote(ident string) string {
 	return `"` + ident + `"`
 }
 
-// AddArg 追加值参数并返回其占位符。
 func (rc *RenderContext) AddArg(v any) string {
 	rc.args = append(rc.args, v)
 	rc.argIndex++

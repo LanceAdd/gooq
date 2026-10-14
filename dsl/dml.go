@@ -20,7 +20,7 @@ const (
 type upsertClause struct {
 	conflictCols []string
 	updateMap    map[string]any
-	doNothing    bool // 冲突时不做任何操作。
+	doNothing    bool
 }
 
 type columnValue struct {

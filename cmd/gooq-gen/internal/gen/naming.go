@@ -17,7 +17,6 @@ const (
 	FieldNameCaseCamel FieldNameCase = "CaseCamel"
 )
 
-// formatFieldName 把字段名格式化成生成 Go 代码使用的新名字。
 func formatFieldName(fieldName string, nameCase FieldNameCase) string {
 	// mysql、pgsql、sqlite 这类普通数据库，字段/表名是正常大小写。
 	var newFieldName = fieldName
@@ -33,7 +32,6 @@ func formatFieldName(fieldName string, nameCase FieldNameCase) string {
 	}
 }
 
-// formatFileName 把文件名格式化成生成源文件使用的新名字。
 func formatFileName(fileName, nameCase string) string {
 	if nameCase == "" {
 		nameCase = string(gstr.Snake)
@@ -54,7 +52,6 @@ func normalizeNameForCaseConvert(name string) string {
 	return name
 }
 
-// goFieldName 生成列的 Go 字段名：保留字加 Field 后缀，非法或撞名返回错误。
 func goFieldName(column string, reserved map[string]bool, used map[string]string) (string, error) {
 	name := formatFieldName(column, FieldNameCaseCamel)
 	if reserved[name] {

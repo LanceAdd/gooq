@@ -6,10 +6,8 @@ type MariaDBDialect struct {
 	MySQLDialect
 }
 
-// Name 返回 mariadb。
 func (MariaDBDialect) Name() Dialect { return DialectMariaDB }
 
-// SupportsGroup 拒绝 CUBE 和 GROUPING SETS，错误里写 mariadb。
 func (MariaDBDialect) SupportsGroup(ext string) error {
 	return rejectMySQLGroups(DialectMariaDB, ext)
 }

@@ -79,32 +79,32 @@ const (
 )
 
 type SelectBuilder struct {
-	fields       []gooq.Expression   // SELECT 字段。
-	from         gooq.Table          // FROM 表或派生表。
-	joins        []*joinClause       // JOIN 子句。
-	conditions   []gooq.Expression   // WHERE 条件（默认 AND）。
-	groupBy      []gooq.Expression   // GROUP BY。
+	fields       []gooq.Expression
+	from         gooq.Table
+	joins        []*joinClause
+	conditions   []gooq.Expression // 默认 AND。
+	groupBy      []gooq.Expression
 	groupExt     groupExtKind        // GROUP BY 扩展（ROLLUP/CUBE/GROUPING SETS）。
 	groupExtSets [][]gooq.Expression // 扩展分组字段（ROLLUP/CUBE 单组；GROUPING SETS 每组一个列表）。
-	having       []gooq.Expression   // HAVING 条件。
-	orderBy      []gooq.Expression   // ORDER BY。
-	limit        int                 // LIMIT（0 表示不限制）。
-	offset       int                 // OFFSET。
-	distinct     bool                // DISTINCT。
-	unscoped     bool                // 是否绕过软删除自动条件。
-	alias        string              // 子查询别名（派生表或标量子查询的 AS alias）。
-	cacheOption  *CacheOption        // 单查询缓存配置（nil 不缓存）。
-	pageCacheOpt *CacheOption        // 分页缓存配置（count 与各页 data 同 key 同生命周期，共享一个配置）。
-	buildErr     error               // 构造期错误，ToSql 和执行时返回它。
-	lock         lockMode            // 行锁模式（默认无锁）。
-	setOps       []setOpClause       // 集合操作（UNION/INTERSECT/EXCEPT）。
-	ctes         []cteClause         // CTE（WITH name AS (query)）。
-	recursive    bool                // CTE 是否递归（WITH RECURSIVE）。
-	executor     executor            // 测试注入的执行器；正式执行由 DB(name) 和 ctx 中的事务决定。
-	group        string              // DB(name) 指定的配置组；空字符串表示默认组。
-	groupSet     bool                // 是否显式指定了非默认配置组。
-	route        db.Route            // 主从路由（默认读从库、写主库）。
-	columns      []string            // 结果列名（字段收集；派生表列访问与 FieldsEx 使用）。
+	having       []gooq.Expression
+	orderBy      []gooq.Expression
+	limit        int // 0 表示不限制。
+	offset       int
+	distinct     bool
+	unscoped     bool   // 绕过软删除自动条件。
+	alias        string // 子查询别名（派生表或标量子查询的 AS alias）。
+	cacheOption  *CacheOption
+	pageCacheOpt *CacheOption // count 与各页 data 同 key 同生命周期。
+	buildErr     error        // 构造期错误，ToSql 和执行时返回它。
+	lock         lockMode
+	setOps       []setOpClause
+	ctes         []cteClause
+	recursive    bool     // CTE 递归（WITH RECURSIVE）。
+	executor     executor // 测试注入的执行器；正式执行由 DB(name) 和 ctx 中的事务决定。
+	group        string   // DB(name) 指定的配置组；空字符串表示默认组。
+	groupSet     bool     // 是否显式指定了非默认配置组。
+	route        db.Route
+	columns      []string // 结果列名（字段收集；派生表列访问与 FieldsEx 使用）。
 }
 
 func (b *SelectBuilder) TableName() string {

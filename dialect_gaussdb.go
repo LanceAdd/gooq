@@ -10,7 +10,6 @@ type GaussDBDialect struct {
 	PostgresDialect
 }
 
-// Name 返回 gaussdb。
 func (GaussDBDialect) Name() Dialect { return DialectGaussDB }
 
 // RenderUpsert 渲染 ON DUPLICATE KEY UPDATE。

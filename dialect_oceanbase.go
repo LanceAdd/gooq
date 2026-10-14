@@ -6,10 +6,8 @@ type OceanBaseDialect struct {
 	MySQLDialect
 }
 
-// Name 返回 oceanbase。
 func (OceanBaseDialect) Name() Dialect { return DialectOceanBase }
 
-// SupportsGroup 拒绝 CUBE 和 GROUPING SETS，错误里写 oceanbase。
 func (OceanBaseDialect) SupportsGroup(ext string) error {
 	return rejectMySQLGroups(DialectOceanBase, ext)
 }

@@ -473,7 +473,6 @@ func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.
 	if short {
 		return nil, 0, nil
 	}
-	// rows：命中直接可用；未命中查询回填。
 	codec := GetCacheCodec()
 	if payload, ok := fields[dataField]; ok {
 		var rows db.Result

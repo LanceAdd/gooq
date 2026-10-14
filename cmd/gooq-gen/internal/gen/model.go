@@ -23,7 +23,6 @@ var reservedModelNames = map[string]bool{
 	"ToModel":     true,
 }
 
-// generateModel 为指定表生成行模型与写入记录。
 func generateModel(ctx context.Context, database *db.DB, tableNames []string, dirPath string) {
 	for _, tableName := range tableNames {
 		generateModelSingle(ctx, database, tableName, dirPath)

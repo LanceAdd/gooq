@@ -268,7 +268,6 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
 	return sql.String()
 }
 
-// renderTable 渲染表或派生表。
 func (b *SelectBuilder) renderTable(rc *gooq.RenderContext, t gooq.Table) string {
 	return renderTableName(rc, t)
 }

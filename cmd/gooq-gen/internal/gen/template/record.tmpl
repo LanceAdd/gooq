@@ -8,14 +8,10 @@ import (
 {{.TplImports}}
 )
 
-// {{.TplRecordType}} 是表 "{{.TplTableName}}" 的写入记录，可以只写部分列。
-// New{{.TplRecordType}} 创建时所有列都未设置；setter 标记要写入的列，交给 ValuesOf。
-// ToModel 把已设置的值复制进 {{.TplType}}；New{{.TplRecordType}}From 复制全列。
 type {{.TplRecordType}} struct {
 {{.TplRecordFields}}
 }
 
-// New{{.TplRecordType}} 返回空写入记录；未设置的列不会出现在 SQL 里。
 func New{{.TplRecordType}}() *{{.TplRecordType}} {
 	return &{{.TplRecordType}}{}
 }

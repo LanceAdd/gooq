@@ -33,14 +33,12 @@ var reservedFieldNames = map[string]bool{
 	"BoundBase":  true,
 }
 
-// generateTable 为指定表生成 gooq 类型化表对象文件。
 func generateTable(ctx context.Context, database *db.DB, tableNames []string, dirPathTable string) {
 	for _, tableName := range tableNames {
 		generateTableSingle(ctx, database, tableName, dirPathTable)
 	}
 }
 
-// generateTableSingle 为单张表生成 gooq 表对象。
 func generateTableSingle(ctx context.Context, database *db.DB, tableName, dirPathTable string) {
 	columns, err := database.TableFields(ctx, tableName)
 	if err != nil {
@@ -61,7 +59,6 @@ func generateTableSingle(ctx context.Context, database *db.DB, tableName, dirPat
 	mlog.Print("generated:", gfile.RealPath(path))
 }
 
-// generateTableContent 构造并渲染单张表的 gooq 表对象内容。
 func generateTableContent(
 	ctx context.Context, database *db.DB, tableName, dirPathTable string, columns []db.Column,
 ) (string, error) {
@@ -136,7 +133,6 @@ func generateTableContent(
 	return tplView.ParseContent(ctx, tplContent)
 }
 
-// tableFieldTypes 返回字段对应的 Go 类型名。
 func tableFieldTypes(field db.Column, hasStdTime, hasUUID *bool) string {
 	goType := string(field.LocalType)
 	switch field.LocalType {
@@ -214,7 +210,6 @@ func currentSchema(ctx context.Context, database *db.DB) string {
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 
-// boolSuffix 渲染布尔 meta 标记对应的字段后缀。
 func boolSuffix(fieldName string, flag bool) string {
 	if flag {
 		return ", " + fieldName + ": true"

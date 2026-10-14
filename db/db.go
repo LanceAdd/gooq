@@ -333,12 +333,10 @@ func pick(nodes []node) (*sql.DB, error) {
 	return nodes[len(nodes)-1].sql, nil
 }
 
-// Dialect 返回这条连接渲染 SQL 所用的方言。
 func (d *DB) Dialect() gooq.Dialect {
 	return d.dialect
 }
 
-// Dialect 返回事务所属连接的方言。
 func (t *Tx) Dialect() gooq.Dialect {
 	return t.dialect
 }

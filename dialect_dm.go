@@ -39,7 +39,6 @@ var dmFormatReplacer = strings.NewReplacer(
 	"%e", "FMDD", "%j", "DDD",
 )
 
-// Name 返回 dm。
 func (DMDialect) Name() Dialect { return DialectDM }
 
 // Quote 用大写双引号包裹标识符。
@@ -47,10 +46,8 @@ func (DMDialect) Quote(ident string) string {
 	return `"` + strings.ToUpper(strings.ReplaceAll(ident, `"`, `""`)) + `"`
 }
 
-// Placeholder 返回问号占位符。
 func (DMDialect) Placeholder(int) string { return "?" }
 
-// CastType 返回达梦的 CAST 类型名。
 func (DMDialect) CastType(localType LocalType) string {
 	return castType(dmCastTypes, localType)
 }
@@ -62,10 +59,8 @@ func (DMDialect) RenderExists(_ *RenderContext, subSQL string) string {
 	return "SELECT COUNT(*) FROM (" + subSQL + ") WHERE ROWNUM = 1"
 }
 
-// Returning 返回空字符串。达梦不支持 RETURNING。
 func (DMDialect) Returning() string { return "" }
 
-// RenderLimit 渲染 LIMIT/OFFSET。只有偏移时写 OFFSET n ROWS。
 func (DMDialect) RenderLimit(rc *RenderContext, limit, offset int) string {
 	if limit <= 0 && offset > 0 {
 		return fmt.Sprintf(" OFFSET %d ROWS", offset)
@@ -73,7 +68,7 @@ func (DMDialect) RenderLimit(rc *RenderContext, limit, offset int) string {
 	return renderLimitOffset(rc, limit, offset)
 }
 
-// InsertKeyword 返回 INSERT。冲突动作由 MERGE 整句表达。
+// 冲突动作由 MERGE 整句表达。
 func (DMDialect) InsertKeyword(bool) string { return "INSERT" }
 
 // RenderUpsert 不生成后缀。达梦的冲突动作用 RenderInsert 写成 MERGE。
@@ -86,7 +81,6 @@ func (DMDialect) RenderExcluded(rc *RenderContext, column string) string {
 	return "T2." + rc.Quote(column)
 }
 
-// RenderInsert 把带冲突动作的 INSERT 渲染成 MERGE。
 func (DMDialect) RenderInsert(rc *RenderContext, stmt InsertStatement) (string, error) {
 	if stmt.Upsert == nil {
 		return "", fmt.Errorf("gooq: dialect %s MERGE is missing an upsert clause", DialectDM)
@@ -170,7 +164,6 @@ func matchColumn(columns []string, name string) (string, bool) {
 	return "", false
 }
 
-// RenderDelete 渲染 DELETE。达梦不支持带连接的删除。
 func (DMDialect) RenderDelete(_ *RenderContext, target string, joins []JoinRender, where string) (string, error) {
 	if len(joins) > 0 {
 		return "", fmt.Errorf("gooq: DELETE with JOIN is not supported by dialect %s", DialectDM)
@@ -178,18 +171,14 @@ func (DMDialect) RenderDelete(_ *RenderContext, target string, joins []JoinRende
 	return renderDeleteFrom(target, where), nil
 }
 
-// QuoteLiteral 转义达梦字符串字面量。只加倍单引号。
 func (DMDialect) QuoteLiteral(s string) string { return quoteLiteralStandard(s) }
 
-// RenderIfNull 渲染 NVL。
 func (DMDialect) RenderIfNull(a, b string) string {
 	return fmt.Sprintf("NVL(%s, %s)", a, b)
 }
 
-// RenderCurDate 渲染 CURRENT_DATE。
 func (DMDialect) RenderCurDate() string { return "CURRENT_DATE" }
 
-// RenderDateAdd 渲染 DATEADD。单位必须在白名单内。
 func (DMDialect) RenderDateAdd(field, count, unit string) (string, error) {
 	canonical, err := canonicalDateUnit(unit)
 	if err != nil {
@@ -203,13 +192,10 @@ func (DMDialect) RenderDateDiff(a, b string) string {
 	return fmt.Sprintf("DATEDIFF(DAY, %s, %s)", b, a)
 }
 
-// RenderRound 渲染 ROUND。
 func (DMDialect) RenderRound(field, decimals string) string {
 	return fmt.Sprintf("ROUND(%s, %s)", field, decimals)
 }
 
-// RenderUpdate 渲染 UPDATE。全部内连接时使用 FROM，并把 ON 并入 WHERE。
-// 出现外连接时返回错误。
 func (DMDialect) RenderUpdate(_ *RenderContext, target, sets, where string, joins []JoinRender) (string, error) {
 	if joinsHaveOuter(joins) {
 		return "", fmt.Errorf("gooq: UPDATE with an outer join is not supported by dialect %s", DialectDM)
@@ -217,24 +203,18 @@ func (DMDialect) RenderUpdate(_ *RenderContext, target, sets, where string, join
 	return renderUpdateFrom(target, sets, where, joins), nil
 }
 
-// JoinKeyword 原样返回连接关键字。
 func (DMDialect) JoinKeyword(keyword string) string { return keyword }
 
-// SupportsGroup 接受全部 GROUP BY 扩展。
 func (DMDialect) SupportsGroup(string) error { return nil }
 
-// RollupWith 为 false。ROLLUP 使用函数形式。
 func (DMDialect) RollupWith() bool { return false }
 
-// OmitLock 为 false。达梦保留 FOR UPDATE。
 func (DMDialect) OmitLock() bool { return false }
 
-// RenderDateFormat 把 MySQL 格式符转换成 TO_CHAR。
 func (DMDialect) RenderDateFormat(fieldSQL, format string) (string, error) {
 	return fmt.Sprintf("TO_CHAR(%s, %s)", fieldSQL, quoteLiteralStandard(dmFormatReplacer.Replace(format))), nil
 }
 
-// RenderGroupConcat 渲染 LISTAGG。
 func (DMDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
 	separator := in.Separator
 	if separator == "" {
@@ -251,7 +231,6 @@ func (DMDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
 	return sqlStr, nil
 }
 
-// RenderMedian 渲染 MEDIAN。
 func (DMDialect) RenderMedian(fieldSQL string) string {
 	return fmt.Sprintf("MEDIAN(%s)", fieldSQL)
 }

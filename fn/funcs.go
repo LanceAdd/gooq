@@ -4,7 +4,6 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-// 聚合函数。
 func Count(field gooq.Expression) *FuncExpr {
 	return New("COUNT", field)
 }
@@ -77,7 +76,6 @@ func XmlAgg(field gooq.Expression) *FuncExpr {
 	return New("XMLAGG", field)
 }
 
-// 字符串与数学函数。
 func Concat(args ...any) *FuncExpr {
 	return New("CONCAT", args...)
 }
@@ -132,7 +130,6 @@ func Mod(a, b any) *FuncExpr {
 	return New("MOD", a, b)
 }
 
-// 值函数。
 func Coalesce(args ...any) *FuncExpr {
 	return New("COALESCE", args...)
 }
@@ -147,7 +144,6 @@ func IfNull(a, b gooq.Expression) *FuncExpr {
 	})
 }
 
-// 日期函数。
 func Now() *FuncExpr {
 	return New("NOW")
 }
@@ -200,7 +196,6 @@ func DateDiff(a, b gooq.Expression) *FuncExpr {
 	})
 }
 
-// 窗口函数。
 func Rank() *FuncExpr {
 	return New("RANK")
 }

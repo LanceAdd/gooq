@@ -11,30 +11,24 @@ import (
 type Dialect string
 
 const (
-	// DialectMySQL 是 MySQL 渲染方言。
-	DialectMySQL Dialect = "mysql"
-	// DialectPgsql 是 PostgreSQL 渲染方言。
-	DialectPgsql Dialect = "pgsql"
-	// DialectSQLite 是 SQLite 渲染方言。
+	DialectMySQL  Dialect = "mysql"
+	DialectPgsql  Dialect = "pgsql"
 	DialectSQLite Dialect = "sqlite"
-	// DialectMariaDB 是 MariaDB 渲染方言。语句形状与 MySQL 相同。
+	// DialectMariaDB 的语句形状与 MySQL 相同。
 	DialectMariaDB Dialect = "mariadb"
-	// DialectTiDB 是 TiDB 渲染方言。语句形状与 MySQL 相同。
+	// DialectTiDB 的语句形状与 MySQL 相同。
 	DialectTiDB Dialect = "tidb"
 	// DialectGaussDB 是 GaussDB（openGauss）渲染方言。
 	DialectGaussDB Dialect = "gaussdb"
-	// DialectOceanBase 是 OceanBase MySQL 模式的渲染方言。语句形状与 MySQL 相同。
+	// DialectOceanBase 的语句形状与 MySQL 相同。
 	DialectOceanBase Dialect = "oceanbase"
 	// DialectDM 是达梦渲染方言。
 	DialectDM Dialect = "dm"
 )
 
 const (
-	// GroupRollup 是 GROUP BY ROLLUP。
-	GroupRollup = "ROLLUP"
-	// GroupCube 是 GROUP BY CUBE。
-	GroupCube = "CUBE"
-	// GroupGroupingSets 是 GROUP BY GROUPING SETS。
+	GroupRollup       = "ROLLUP"
+	GroupCube         = "CUBE"
 	GroupGroupingSets = "GROUPING SETS"
 )
 

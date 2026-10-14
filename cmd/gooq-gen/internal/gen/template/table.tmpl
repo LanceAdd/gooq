@@ -11,14 +11,12 @@ import (
 {{- end}}
 )
 
-// {{.TplTableNameCamelCase}}Table 是表 "{{.TplTableName}}" 的类型化表对象。
 type {{.TplTableNameCamelCase}}Table struct {
 	*{{.TplGooqRef}}TableBase
 
 {{.TplGooqFields}}
 }
 
-// {{.TplTableNameCamelCase}}Meta 是表 {{.TplTableName}} 的静态元数据。
 var {{.TplTableNameCamelCase}}Meta = &{{.TplGooqRef}}TableMeta{
 	TableName: "{{.TplTableName}}",
 	Schema:    "{{.TplTableSchema}}",
@@ -36,15 +34,12 @@ func new{{.TplTableNameCamelCase}}Table(alias ...string) *{{.TplTableNameCamelCa
 	return t
 }
 
-// {{.TplTableNameCamelCase}} 是表 {{.TplTableName}} 的全局表对象。
 var {{.TplTableNameCamelCase}} = new{{.TplTableNameCamelCase}}Table()
 
-// As 返回带指定别名的表对象副本。
 func (t *{{.TplTableNameCamelCase}}Table) As(alias string) *{{.TplTableNameCamelCase}}Table {
 	return new{{.TplTableNameCamelCase}}Table(alias)
 }
 
-// Clone 返回不带别名的表对象副本。
 func (t *{{.TplTableNameCamelCase}}Table) Clone() *{{.TplTableNameCamelCase}}Table {
 	return new{{.TplTableNameCamelCase}}Table()
 }

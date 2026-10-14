@@ -35,7 +35,6 @@ func init() {
 	}
 }
 
-// SetHeaderPrint 开关输出到 stdout 的头部打印。
 func SetHeaderPrint(enabled bool) {
 	logger.SetHeaderPrint(enabled)
 	if enabled {

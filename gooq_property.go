@@ -17,7 +17,6 @@ func Null[T any]() Property[T] {
 	return Property[T]{state: ValueNull}
 }
 
-// Unset 返回不进入 SQL 的未设置单元格。
 func Unset[T any]() Property[T] {
 	return Property[T]{}
 }
@@ -27,7 +26,6 @@ func (p Property[T]) Get() T {
 	return p.v
 }
 
-// Value 返回已设置的值；未设置和 NULL 的单元格第二个返回值为 false。
 func (p Property[T]) Value() (T, bool) {
 	if p.state != ValueSet {
 		var zero T
@@ -36,7 +34,6 @@ func (p Property[T]) Value() (T, bool) {
 	return p.v, true
 }
 
-// IsUnset 判断单元格是否不进 SQL。
 func (p Property[T]) IsUnset() bool {
 	return p.state == ValueUnset
 }
@@ -46,17 +43,14 @@ func (p Property[T]) IsSet() bool {
 	return p.state == ValueSet
 }
 
-// IsNull 判断单元格是否写 SQL NULL。
 func (p Property[T]) IsNull() bool {
 	return p.state == ValueNull
 }
 
-// State 返回单元格是未设置、已设置还是 NULL。
 func (p Property[T]) State() ValueState {
 	return p.state
 }
 
-// Assignment 返回要写入的列；未设置的单元格返回 false。
 func (p Property[T]) Assignment(column string) (Assignment, bool) {
 	switch p.state {
 	case ValueNull:

@@ -12,13 +12,11 @@ import (
 	"github.com/lanceadd/gooq/db"
 )
 
-// Input 是 gooq-gen 的输入参数。
 type Input struct {
-	Link string // 数据库连接，如 mysql:root:pass@tcp(127.0.0.1:3306)/db。
-	Path string // 输出目录，默认 internal。
+	Link string // 如 mysql:root:pass@tcp(127.0.0.1:3306)/db。
+	Path string
 }
 
-// 固定目录与文件名。
 const (
 	dirPathTable   = "table"
 	tplFileTable   = "table.tmpl"
@@ -29,7 +27,6 @@ const (
 	configFileName = "gooq.yaml"
 )
 
-// initConfigContent 是 init 命令生成的配置模板。
 const initConfigContent = `# gooq-gen configuration; CLI options take priority over this file.
 gooq:
   gen:
@@ -59,7 +56,6 @@ func getTemplate(name string) string {
 	return embeddedTemplate(name)
 }
 
-// embeddedTemplate 返回内嵌模板内容。
 func embeddedTemplate(name string) string {
 	content, err := gooqTemplateFS.ReadFile("template/" + name)
 	if err != nil {
@@ -88,7 +84,6 @@ func Init() {
 	mlog.Print(fmt.Sprintf(`edit "%s" to set the database link, then run gooq-gen`, gfile.Join(hackDirName, configFileName)))
 }
 
-// Generate 为数据库里的所有表生成 gooq 类型化表文件。
 func Generate(ctx context.Context, in Input) {
 	if in.Path == "" {
 		in.Path = "internal"

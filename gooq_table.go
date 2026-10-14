@@ -1,19 +1,19 @@
 package gooq
 
 type FieldMeta struct {
-	ColumnName    string    // 列名。
-	LocalType     LocalType // 本地类型标记（json/jsonb/切片数组等）。
-	Primary       bool      // 是否主键。
-	AutoIncrement bool      // 是否自增。
-	SoftDelete    bool      // 是否软删除字段。
-	Unique        bool      // 是否唯一索引列。
-	Comment       string    // 列注释。
+	ColumnName    string
+	LocalType     LocalType
+	Primary       bool
+	AutoIncrement bool
+	SoftDelete    bool
+	Unique        bool
+	Comment       string
 }
 
 type TableMeta struct {
-	TableName string      // 表名。
-	Schema    string      // schema 名（空则不渲染前缀）。
-	Fields    []FieldMeta // 字段列表（含顺序）。
+	TableName string
+	Schema    string // 空则不渲染前缀。
+	Fields    []FieldMeta
 }
 
 func (m *TableMeta) FieldMetaOf(columnName string) *FieldMeta {
