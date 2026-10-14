@@ -86,7 +86,7 @@ func generateTableContent(
 			return "", nameErr
 		}
 
-		goType, localType := tableFieldTypes(field, &hasStdTime, &hasUUID)
+		goType := tableFieldTypes(field, &hasStdTime, &hasUUID)
 		softDelete := isSoftDeleteColumn(fieldName)
 		primary := field.Primary
 		autoIncrement := field.AutoIncrement
@@ -96,8 +96,8 @@ func generateTableContent(
 			"\t%-20s %sField[%s]", camelName, gooqRef, goType,
 		))
 		metaLines = append(metaLines, fmt.Sprintf(
-			"\t\t{ColumnName: %q, LocalType: %sLocalType(%q)%s%s%s%s},",
-			fieldName, gooqRef, localType,
+			"\t\t{ColumnName: %q, LocalType: %s%s%s%s%s},",
+			fieldName, localTypeRef(gooqRef, field.LocalType),
 			boolSuffix("Primary", primary),
 			boolSuffix("AutoIncrement", autoIncrement),
 			boolSuffix("SoftDelete", softDelete),
@@ -136,10 +136,9 @@ func generateTableContent(
 	return tplView.ParseContent(ctx, tplContent)
 }
 
-// tableFieldTypes returns the Go type name and LocalType string for the given field.
-func tableFieldTypes(field db.Column, hasStdTime, hasUUID *bool) (goType string, localTypeStr string) {
-	localTypeStr = string(field.LocalType)
-	goType = localTypeStr
+// tableFieldTypes returns the Go type name for the given field.
+func tableFieldTypes(field db.Column, hasStdTime, hasUUID *bool) string {
+	goType := string(field.LocalType)
 	switch field.LocalType {
 	case gooq.LocalTypeDate, gooq.LocalTypeTime, gooq.LocalTypeDatetime:
 		goType = "time.Time"
@@ -156,7 +155,51 @@ func tableFieldTypes(field db.Column, hasStdTime, hasUUID *bool) (goType string,
 	case gooq.LocalTypeUUIDSlice:
 		*hasUUID = true
 	}
-	return goType, localTypeStr
+	return goType
+}
+
+var localTypeConstantNames = map[gooq.LocalType]string{
+	gooq.LocalTypeUndefined:    "LocalTypeUndefined",
+	gooq.LocalTypeString:       "LocalTypeString",
+	gooq.LocalTypeTime:         "LocalTypeTime",
+	gooq.LocalTypeDate:         "LocalTypeDate",
+	gooq.LocalTypeDatetime:     "LocalTypeDatetime",
+	gooq.LocalTypeInt:          "LocalTypeInt",
+	gooq.LocalTypeUint:         "LocalTypeUint",
+	gooq.LocalTypeInt32:        "LocalTypeInt32",
+	gooq.LocalTypeUint32:       "LocalTypeUint32",
+	gooq.LocalTypeInt64:        "LocalTypeInt64",
+	gooq.LocalTypeUint64:       "LocalTypeUint64",
+	gooq.LocalTypeBigInt:       "LocalTypeBigInt",
+	gooq.LocalTypeIntSlice:     "LocalTypeIntSlice",
+	gooq.LocalTypeUintSlice:    "LocalTypeUintSlice",
+	gooq.LocalTypeInt32Slice:   "LocalTypeInt32Slice",
+	gooq.LocalTypeUint32Slice:  "LocalTypeUint32Slice",
+	gooq.LocalTypeInt64Slice:   "LocalTypeInt64Slice",
+	gooq.LocalTypeUint64Slice:  "LocalTypeUint64Slice",
+	gooq.LocalTypeStringSlice:  "LocalTypeStringSlice",
+	gooq.LocalTypeInt64Bytes:   "LocalTypeInt64Bytes",
+	gooq.LocalTypeUint64Bytes:  "LocalTypeUint64Bytes",
+	gooq.LocalTypeFloat32:      "LocalTypeFloat32",
+	gooq.LocalTypeFloat64:      "LocalTypeFloat64",
+	gooq.LocalTypeDecimal:      "LocalTypeDecimal",
+	gooq.LocalTypeFloat32Slice: "LocalTypeFloat32Slice",
+	gooq.LocalTypeFloat64Slice: "LocalTypeFloat64Slice",
+	gooq.LocalTypeBytes:        "LocalTypeBytes",
+	gooq.LocalTypeBytesSlice:   "LocalTypeBytesSlice",
+	gooq.LocalTypeBool:         "LocalTypeBool",
+	gooq.LocalTypeBoolSlice:    "LocalTypeBoolSlice",
+	gooq.LocalTypeJson:         "LocalTypeJson",
+	gooq.LocalTypeJsonb:        "LocalTypeJsonb",
+	gooq.LocalTypeUUID:         "LocalTypeUUID",
+	gooq.LocalTypeUUIDSlice:    "LocalTypeUUIDSlice",
+}
+
+func localTypeRef(gooqRef string, localType gooq.LocalType) string {
+	if name, ok := localTypeConstantNames[localType]; ok {
+		return gooqRef + name
+	}
+	return fmt.Sprintf("%sLocalType(%q)", gooqRef, string(localType))
 }
 
 // currentSchema returns the default schema for schema-qualified rendering (PG only).

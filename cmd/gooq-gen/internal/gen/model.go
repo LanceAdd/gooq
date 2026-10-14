@@ -147,7 +147,7 @@ func modelJSONName(column string) string {
 }
 
 func modelFieldTypes(field db.Column, nullable bool, hasStdTime, hasUUID *bool) (fieldType, setType string) {
-	setType, _ = tableFieldTypes(field, hasStdTime, hasUUID)
+	setType = tableFieldTypes(field, hasStdTime, hasUUID)
 	fieldType = setType
 	if nullable {
 		fieldType = "*" + setType

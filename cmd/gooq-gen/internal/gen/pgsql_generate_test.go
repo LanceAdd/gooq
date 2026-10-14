@@ -68,10 +68,10 @@ func TestGenerateFromPostgres(t *testing.T) {
 	defer gfile.Remove(out)
 	Generate(ctx, Input{Link: genLink, Path: out})
 	content := gfile.GetContents(filepath.Join(out, "table", "sample.go"))
-	if !gstr.Contains(content, `LocalType: gooq.LocalType("decimal")`) || !gstr.Contains(content, "gooq.Field[string]") {
+	if !gstr.Contains(content, `LocalType: gooq.LocalTypeDecimal`) || !gstr.Contains(content, "gooq.Field[string]") {
 		t.Fatalf("numeric was not generated as string:\n%s", content)
 	}
-	if !gstr.Contains(content, "gooq.Field[[]string]") || !gstr.Contains(content, `LocalType: gooq.LocalType("string")`) {
+	if !gstr.Contains(content, "gooq.Field[[]string]") || !gstr.Contains(content, `LocalType: gooq.LocalTypeString`) {
 		t.Fatalf("array or interval type missing:\n%s", content)
 	}
 	if !gstr.Contains(content, "[]uuid.UUID") || !gstr.Contains(content, `"github.com/google/uuid"`) {
@@ -80,7 +80,7 @@ func TestGenerateFromPostgres(t *testing.T) {
 	if !gstr.Contains(content, `ColumnName: "amount"`) || !gstr.Contains(content, "Unique: true") {
 		t.Fatalf("unique amount missing:\n%s", content)
 	}
-	if gstr.Contains(content, `ColumnName: "id", LocalType: gooq.LocalType("int"), Primary: true, Unique: true`) {
+	if gstr.Contains(content, `ColumnName: "id", LocalType: gooq.LocalTypeInt, Primary: true, Unique: true`) {
 		t.Fatalf("primary key was marked unique:\n%s", content)
 	}
 }

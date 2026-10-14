@@ -114,7 +114,7 @@ func TestGen_Sqlite(t *testing.T) {
 		t.Assert(gstr.Contains(content, `var User = newUserTable()`), true)
 		t.Assert(gstr.Contains(content, `gooq.TableMeta{`), true)
 		t.Assert(gstr.Contains(content, `TableName: "user"`), true)
-		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalType("int")`), true)
+		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalTypeInt`), true)
 		t.Assert(gstr.Contains(content, `SoftDelete: true`), true)
 
 		// NewFieldAt 赋值与 As/Clone。
@@ -178,7 +178,7 @@ func TestGenerateSpecialTypes(t *testing.T) {
 		content, err := generateTableContent(context.Background(), database, "sample", "table", columns)
 		t.AssertNil(err)
 		t.Assert(gstr.Contains(content, "gooq.Field[string]"), true)
-		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalType("decimal")`), true)
+		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalTypeDecimal`), true)
 		t.Assert(gstr.Contains(content, "gooq.Field[[]string]"), true)
 		t.Assert(gstr.Contains(content, "gooq.Field[[]uuid.UUID]"), true)
 		t.Assert(gstr.Contains(content, `"github.com/google/uuid"`), true)
