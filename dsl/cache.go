@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lanceadd/gooq"
+	"github.com/lanceadd/gooq/db"
 )
 
 type CacheAdapter interface {
@@ -115,13 +116,13 @@ func (o CacheOption) valid() bool {
 	return o.Duration > 0 || o.Name != ""
 }
 
-// cacheKey 基于实际执行的 SQL 计算 key；kind 区分结果形状（同 SQL 下 Row/Rows/Count 的
-// JSON 结构不同，混用同一 key 会反序列化冲突）。
+// cacheKey 基于实际执行的 SQL 计算 key。组名隔离不同配置组。kind 区分结果形状，
+// 同 SQL 下 Row/Rows/Count 的 JSON 结构不同，混用同一 key 会反序列化冲突。
 func (b *SelectBuilder) cacheKey(kind, sql string, args []any) (string, error) {
 	if b.cacheOption != nil && b.cacheOption.Name != "" {
 		return b.cacheOption.Name, nil
 	}
-	return "gooq:query:" + kind + ":" + hashQuery(sql, args), nil
+	return "gooq:query:" + b.cacheGroup() + ":" + kind + ":" + hashQuery(sql, args), nil
 }
 
 // compositeCacheKey 是 PageCache 的 key。kind 区分数据 field 的形状：rows 是 db.Result，column 是列切片。
@@ -140,7 +141,28 @@ func (b *SelectBuilder) compositeCacheKey(dialect gooq.Dialect, kind string) (st
 		return "", err
 	}
 	payload := encodeQuery(countSQL, countArgs) + encodeQuery(rowsSQL, rowsArgs)
-	return "gooq:multi-query:" + kind + ":" + hashString(payload), nil
+	return "gooq:multi-query:" + b.cacheGroup() + ":" + kind + ":" + hashString(payload), nil
+}
+
+// cacheGroup 返回这次执行使用的配置组。已绑定的 DB 或事务优先。
+// 省略 DB() 时用当前默认组，不把空字符串写进 key。
+func (b *SelectBuilder) cacheGroup() string {
+	switch typed := b.executor.(type) {
+	case *db.DB:
+		if group := typed.Group(); group != "" {
+			return group
+		}
+	case *db.Tx:
+		if database := typed.DB(); database != nil {
+			if group := database.Group(); group != "" {
+				return group
+			}
+		}
+	}
+	if b.groupSet && b.group != "" {
+		return b.group
+	}
+	return db.GetDefaultGroup()
 }
 
 // encodeQuery 用长度前缀拼出 SQL 和参数，避免两段文本粘连后发生碰撞。

@@ -560,6 +560,7 @@ dsl.SetCacheCodec(codec)
 // 单查询缓存：Value、Column、Row、Rows、Count、Exists 走缓存。
 // Cache() 无参或零值 option 不开启；自定义 Name 固定 key（便于手动失效）。
 // 参数 key 带类型名，int64(1) 与 "1" 不会共用一把 key。
+// 自动生成的 key 含实际执行的配置组名。省略 DB() 时用当前默认组。自定义 Name 不加组名。
 rows, err := dsl.Select(User.AllFields()).From(User).
     Cache(dsl.CacheOption{Duration: time.Minute}).
     Rows(ctx)

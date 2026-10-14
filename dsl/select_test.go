@@ -603,7 +603,7 @@ func TestDsl_Select_OneRowSQL(t *testing.T) {
 		plainKey, err := plain.cacheKey("row", plainSQL, plainArgs)
 		t.AssertNil(err)
 		t.AssertNE(key, plainKey)
-		t.Assert(strings.HasPrefix(key, "gooq:query:row:"), true)
+		t.Assert(strings.HasPrefix(key, "gooq:query:default:row:"), true)
 
 	})
 }

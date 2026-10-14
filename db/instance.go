@@ -29,6 +29,15 @@ func SetDefaultGroup(name string) {
 	defaultGroup.Set(name)
 }
 
+// GetDefaultGroup 返回 Instance 不传名字时使用的配置组。
+func GetDefaultGroup() string {
+	name := defaultGroup.Val()
+	if name == "" {
+		return DefaultGroupName
+	}
+	return name
+}
+
 // SetConfig 为一组注册一个或多个节点。
 // 组名为空时使用当前默认组。Role 为空的节点视为主库。打开该组时至少要有一个主库。
 // 配置先保存，Instance 再打开。再次调用会关掉已经打开的实例。

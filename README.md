@@ -566,6 +566,8 @@ dsl.SetCacheCodec(codec)
 // Cache() with no arg or a zero option disables caching; a custom Name fixes the key
 // (useful for manual invalidation). Argument keys include the type name, so
 // int64(1) and "1" do not share a key.
+// A generated key includes the config group that runs the query. Omitting DB() uses the
+// current default group. A custom Name does not gain a group name.
 rows, err := dsl.Select(User.AllFields()).From(User).
     Cache(dsl.CacheOption{Duration: time.Minute}).
     Rows(ctx)

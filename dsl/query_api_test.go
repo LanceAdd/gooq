@@ -444,6 +444,58 @@ CREATE TABLE user (
 	}
 }
 
+func TestCacheIsolatesConfigGroups(t *testing.T) {
+	ctx := context.Background()
+	cache := &memCache{}
+	previous := GetCacheAdapter()
+	SetCacheAdapter(cache)
+	t.Cleanup(func() { SetCacheAdapter(previous) })
+	option := CacheOption{Duration: time.Minute}
+	for _, item := range []struct {
+		group string
+		name  string
+	}{
+		{group: "cache-group-a", name: "ann"},
+		{group: "cache-group-b", name: "bob"},
+	} {
+		path := filepath.Join(t.TempDir(), item.group+".db")
+		err := db.SetConfig(item.group, db.Config{Link: "sqlite::@file(" + filepath.ToSlash(path) + ")"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = db.RemoveConfig(item.group) })
+		database, err := db.Instance(item.group)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = database.Exec(ctx, `
+CREATE TABLE user (
+    id INTEGER PRIMARY KEY,
+    name TEXT,
+    age INTEGER,
+    status TEXT,
+    created_at TEXT,
+    deleted_at TEXT
+)`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = database.Exec(ctx, `INSERT INTO user(id, name) VALUES (1, '`+item.name+`')`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var name string
+	err := Select(testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).DB("cache-group-a").Cache(option).Value(ctx, &name)
+	if err != nil || name != "ann" {
+		t.Fatalf("group a %q err=%v", name, err)
+	}
+	name = ""
+	err = Select(testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).DB("cache-group-b").Cache(option).Value(ctx, &name)
+	if err != nil || name != "bob" {
+		t.Fatalf("group b %q err=%v", name, err)
+	}
+}
+
 func mustCacheKey(t *testing.T, b *SelectBuilder, kind string) string {
 	t.Helper()
 	sql, args, err := b.oneRowSQL(gooq.DialectSQLite)
