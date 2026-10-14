@@ -165,3 +165,24 @@ func scalarText(value any) string {
 		return fmt.Sprint(typed)
 	}
 }
+
+// Tables 返回当前 schema 里的用户表名。查询在主库上执行。
+func (d *DB) Tables(ctx context.Context) ([]string, error) {
+	conn, err := d.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return d.driver.Tables(ctx, conn)
+}
+
+// TableFields 按定义顺序返回一张表的列。表名必须是普通标识符。查询在主库上执行。
+func (d *DB) TableFields(ctx context.Context, table string) ([]Column, error) {
+	if err := validIdent(table); err != nil {
+		return nil, err
+	}
+	conn, err := d.writeDB()
+	if err != nil {
+		return nil, err
+	}
+	return d.driver.Columns(ctx, conn, table)
+}
