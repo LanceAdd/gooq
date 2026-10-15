@@ -11,6 +11,7 @@ import (
 // spec == nil 时，标识符用双引号，占位符用 ?，共享锁用 FOR SHARE。
 // LIMIT 与 FOR UPDATE 保持现在的通用写法。调用方要得到方言错误，使用 ToSql。
 func (b *SelectBuilder) Render(rc *gooq.RenderContext) string {
+	rc.SetShardingValue(b.shardingValue)
 	sql := b.renderSelect(rc)
 	sql = "(" + sql + ")"
 	if b.alias != "" {
@@ -42,6 +43,7 @@ func (b *SelectBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 		return "", nil, err
 	}
 	rc := gooq.NewRenderContext(dialect)
+	rc.SetShardingValue(b.shardingValue)
 	sql := b.renderSelect(rc)
 	if err := rc.Err(); err != nil {
 		return "", nil, err
@@ -289,11 +291,21 @@ func renderTableName(rc *gooq.RenderContext, t gooq.Table) string {
 	return sql
 }
 
-// tableNameSQL 渲染限定表名（schema.table）；表元数据无 schema 时仅表名。
+// tableNameSQL 渲染限定表名（schema.table）；分片表先按分片值解析物理名。
 func tableNameSQL(rc *gooq.RenderContext, t gooq.Table) string {
-	var name = rc.Quote(t.TableName())
-	if m := t.Meta(); m != nil && m.Schema != "" {
-		name = rc.Quote(m.Schema) + "." + name
+	var (
+		tableName = t.TableName()
+		schema    string
+	)
+	if m := t.Meta(); m != nil {
+		if m.Sharding != nil {
+			tableName = m.Sharding.Resolve(rc, tableName)
+		}
+		schema = m.Schema
+	}
+	name := rc.Quote(tableName)
+	if schema != "" {
+		name = rc.Quote(schema) + "." + name
 	}
 	return name
 }

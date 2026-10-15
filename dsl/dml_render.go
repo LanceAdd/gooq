@@ -25,6 +25,7 @@ func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 		return "", nil, fmt.Errorf("gooq: batch delete/update renders multiple SQL, use Exec")
 	}
 	rc := gooq.NewRenderContext(dialect)
+	rc.SetShardingValue(b.shardingValue)
 	var (
 		sql  string
 		args []any
@@ -255,6 +256,7 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 			continue
 		}
 		rc := gooq.NewRenderContext(dialect)
+		rc.SetShardingValue(b.shardingValue)
 		var sqlStr string
 		switch b.kind {
 		case dmlDelete:

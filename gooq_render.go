@@ -12,11 +12,13 @@ type Subquery interface {
 
 // RenderContext 是一次渲染过程的方言与参数状态。
 type RenderContext struct {
-	dialect  Dialect
-	spec     DialectSpec
-	args     []any
-	argIndex int
-	err      error
+	dialect       Dialect
+	spec          DialectSpec
+	args          []any
+	argIndex      int
+	err           error
+	shardingValue any
+	shardNames    map[*ShardingSlot]string
 }
 
 func NewRenderContext(dialect Dialect) *RenderContext {
@@ -94,4 +96,16 @@ func (rc *RenderContext) RenderValue(v any) string {
 		return e.Render(rc)
 	}
 	return rc.AddArg(v)
+}
+
+// SetShardingValue 保存本次渲染的分片值，只保存第一个非空值。
+func (rc *RenderContext) SetShardingValue(value any) {
+	if rc.shardingValue == nil {
+		rc.shardingValue = value
+	}
+}
+
+// ShardingValue 返回本次渲染的分片值。没有时为 nil。
+func (rc *RenderContext) ShardingValue() any {
+	return rc.shardingValue
 }

@@ -67,7 +67,7 @@ func (f Field[T]) NamePrefix() string {
 
 func (f Field[T]) Render(rc *RenderContext) string {
 	var sql string
-	if parts := f.prefixParts(); len(parts) > 0 && parts[0] != "" {
+	if parts := f.prefixParts(rc); len(parts) > 0 && parts[0] != "" {
 		var quoted []string
 		for _, p := range parts {
 			quoted = append(quoted, rc.Quote(p))
@@ -82,14 +82,21 @@ func (f Field[T]) Render(rc *RenderContext) string {
 	return sql
 }
 
-func (f Field[T]) prefixParts() []string {
+func (f Field[T]) prefixParts(rc *RenderContext) []string {
 	if f.table != nil {
 		if alias := f.table.AliasName(); alias != "" {
 			return []string{alias}
 		}
-		if schema := f.table.Meta().Schema; schema != "" {
-			return []string{schema, f.tableName}
+		name := f.tableName
+		if m := f.table.Meta(); m != nil {
+			if m.Sharding != nil {
+				name = m.Sharding.Resolve(rc, name)
+			}
+			if m.Schema != "" {
+				return []string{m.Schema, name}
+			}
 		}
+		return []string{name}
 	}
 	return strings.Split(f.tableName, ".")
 }

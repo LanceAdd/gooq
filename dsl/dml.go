@@ -48,7 +48,8 @@ type DMLBuilder struct {
 	group           string            // DB(name) 指定的配置组；空字符串表示默认组。
 	groupSet        bool              // 是否显式指定了非默认配置组。
 	route           db.Route          // 主从路由（默认写主库）。
-	err             error             // 构造期错误（如 Values 数量不匹配），ToSql / Exec 返回它。
+	shardingValue   any
+	err             error // 构造期错误（如 Values 数量不匹配），ToSql / Exec 返回它。
 }
 
 func Insert(t gooq.Table) *DMLBuilder {
@@ -293,6 +294,12 @@ func (b *DMLBuilder) Master() *DMLBuilder {
 // Slave 把这条语句强制路由到从库；组里没有从库时回落到主库。
 func (b *DMLBuilder) Slave() *DMLBuilder {
 	b.route = db.RouteSlave
+	return b
+}
+
+// ShardingValue 给这条语句设置分片值；注册过分片的表用它解析物理表名。
+func (b *DMLBuilder) ShardingValue(value any) *DMLBuilder {
+	b.shardingValue = value
 	return b
 }
 
