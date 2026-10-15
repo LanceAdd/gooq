@@ -618,6 +618,43 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - Table, column, and function aliases go through `Quote`. `numeric` / `decimal` generate `string`. PostgreSQL arrays generate a slice of the element type.
 - PostgreSQL 16 can run `STRING_AGG(DISTINCT ...)`, `JSON_ARRAYAGG`, and `ANY_VALUE`.
 
+## Sharding
+
+Tables matched by `shardPattern` (e.g. `user_?`) are generated as one logical table with an unexported slot and a register function. The application registers a rule implementation at init; queries pass the shard key, and the physical table name is resolved at render time.
+
+```go
+// generated table/user.go — sharded tables only
+var userSharding = gooq.NewShardingSlot()
+
+func RegisterUserSharding(rule gooq.ShardingRule) { userSharding.Inject(rule) }
+
+// application package (blank-imported so its init runs first)
+type userRule struct {
+    prefix string
+    shards int64
+}
+
+func (r userRule) TableName(value any) (string, error) {
+    uid, ok := value.(int64)
+    if !ok {
+        return "", fmt.Errorf("user shard key must be int64, got %T", value)
+    }
+    return fmt.Sprintf("%s%02d", r.prefix, uid%r.shards), nil
+}
+
+func init() { table.RegisterUserSharding(userRule{prefix: "user_", shards: 16}) }
+
+// queries pass the key; ToSql renders "user_03"
+err := dsl.Select(table.User.Id, table.User.Name).From(table.User).
+    ShardingValue(uid).Value(ctx, &name)
+```
+
+- `gooq-gen -sp "user_?"` (or `shardPattern` in `hack/gooq.yaml`) marks shard tables: one logical table object is generated from a representative shard, and all matched shards must have identical columns (checked at generation time). Unmatched tables are generated as usual, so non-sharding projects have zero footprint.
+- `ShardingRule.TableName` returns the full physical name. Register once at init (a nil rule panics; re-registering overwrites). Each sharded table resolves once per statement: field prefixes, `FROM`, `JOIN`, and subqueries reuse the result.
+- Using a registered table without `ShardingValue` fails in `ToSql`, before hitting the database. One value drives every registered table in the statement, so co-located joins share the key.
+- `Named("user_05")` bypasses the rule and returns a plain table object on that physical name (migration scripts, per-shard fan-out loops); an empty name panics.
+- Conventions: no logical placeholder table in the database; shard key in `WHERE`; no AutoIncrement primary key (use a business key, or snowflake ids with embedded shard bits). Disabled by convention while sharding: `Cache`/`PageCache`, cross-shard transactions, cross-database joins, and automatic merge or broadcast. Cross-shard reads are explicit application loops (one `Named` per shard).
+
 ## gooq-gen (codegen tool)
 
 ```bash
@@ -631,6 +668,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority.
 - Templates: `<hack>/template/table.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
+- `-sp/--shard-pattern` shard table patterns (`user_?`); matched shards generate one logical table with a sharding slot and `RegisterXxxSharding`.
 - Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
 - Built-in connection drivers live in `drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/oceanbase`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/dm`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses. Link prefixes are `mysql`, `mariadb`, `tidb`, `oceanbase`, `pgsql`/`postgres`, `gaussdb`, `dm`, and `sqlite`.

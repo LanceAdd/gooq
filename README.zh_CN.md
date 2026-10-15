@@ -610,6 +610,43 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - 表别名、列别名和函数别名都走 `Quote`。`numeric` / `decimal` 生成 `string`。PostgreSQL 数组按元素类型生成切片。
 - PostgreSQL 16 起可用 `STRING_AGG(DISTINCT ...)`、`JSON_ARRAYAGG` 和 `ANY_VALUE`。
 
+## 分片
+
+`shardPattern`（如 `user_?`）命中的表只生成一个逻辑表对象，带一个不导出的槽和注册函数。应用在 init 里注册规则实现；查询显式传片键，物理表名在渲染期解析。
+
+```go
+// 生成物 table/user.go —— 仅分片表
+var userSharding = gooq.NewShardingSlot()
+
+func RegisterUserSharding(rule gooq.ShardingRule) { userSharding.Inject(rule) }
+
+// 应用侧包（被空白导入，保证 init 先跑）
+type userRule struct {
+    prefix string
+    shards int64
+}
+
+func (r userRule) TableName(value any) (string, error) {
+    uid, ok := value.(int64)
+    if !ok {
+        return "", fmt.Errorf("user shard key must be int64, got %T", value)
+    }
+    return fmt.Sprintf("%s%02d", r.prefix, uid%r.shards), nil
+}
+
+func init() { table.RegisterUserSharding(userRule{prefix: "user_", shards: 16}) }
+
+// 查询传片键；ToSql 渲染出 "user_03"
+err := dsl.Select(table.User.Id, table.User.Name).From(table.User).
+    ShardingValue(uid).Value(ctx, &name)
+```
+
+- `gooq-gen -sp "user_?"`（或 `hack/gooq.yaml` 的 `shardPattern`）标记分片表：从代表分片生成一个逻辑表对象，各分片列结构必须一致（生成期校验）；未命中的表照常生成，非分片项目零足迹。
+- `ShardingRule.TableName` 返回完整物理表名。只在 init 注册一次（nil 注册 panic，重复注册覆盖）。每张分片表每语句只解析一次：字段前缀、`FROM`、`JOIN`、子查询共用结果。
+- 注册过的表没传 `ShardingValue` 在 `ToSql` 就报错，不落到数据库。一条语句一个值，驱动所有注册过的表——co-location 的 join 天然同键。
+- `Named("user_05")` 绕过规则返回普通表对象（迁移脚本、逐片 fan-out 循环）；空名 panic。
+- 约定：库里不保留逻辑占位表；片键进 `WHERE`；不用自增主键（用业务键或嵌分片位的雪花 id）。分片场景约定禁用：`Cache`/`PageCache`、跨分片事务、跨库 join、自动归并或广播。跨分片读是应用层显式循环（逐片 `Named`）。
+
 ## gooq-gen（代码生成工具）
 
 ```bash
@@ -623,6 +660,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。
 - 模板：`<hack>/template/table.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
+- `-sp/--shard-pattern` 分片表模式（`user_?`）；命中的分片生成一个逻辑表对象，带分片槽与 `RegisterXxxSharding`。
 - 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与表基方法同名的列加 `Field` 后缀（`meta` → `MetaField`）。
 - 内置连接驱动在 `drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。链接前缀分别是 `mysql`、`mariadb`、`tidb`、`oceanbase`、`pgsql`/`postgres`、`gaussdb`、`dm`、`sqlite`。
