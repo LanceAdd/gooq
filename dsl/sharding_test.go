@@ -256,6 +256,29 @@ func TestShardingSubqueryDoesNotInherit(t *testing.T) {
 	}
 }
 
+func TestShardingBatchDMLRequiresShardBy(t *testing.T) {
+	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
+	rows := []gooq.ValueSource{
+		assignRow{setCol("id", int64(1)), setCol("name", "a")},
+		assignRow{setCol("id", int64(2)), setCol("name", "b")},
+	}
+	sqls, _, err := Update(u).Keys(u.Id).ValuesOf(rows...).renderBatchDML(gooq.DialectPgsql)
+	if err == nil || !strings.Contains(err.Error(), "ShardBy is required") || sqls != nil {
+		t.Fatalf("update err %v sqls %v", err, sqls)
+	}
+	sqls, _, err = Update(u).Keys(u.Id).ValuesOf(rows...).ShardBy(int64(19)).renderBatchDML(gooq.DialectPgsql)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sqls) != 2 || !strings.Contains(sqls[0], `UPDATE "shard_user_03"`) {
+		t.Fatalf("sqls %v", sqls)
+	}
+	sqls, _, err = Delete(u).Keys(u.Id).ValuesOf(assignRow{setCol("id", int64(1))}).renderBatchDML(gooq.DialectPgsql)
+	if err == nil || !strings.Contains(err.Error(), "ShardBy is required") || sqls != nil {
+		t.Fatalf("delete err %v sqls %v", err, sqls)
+	}
+}
+
 func TestShardingGroupedCountUsesInnerShard(t *testing.T) {
 	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
 	q := Select(u.Name, gooq.Raw("count(*)")).From(u).Where(u.Id.Eq(int64(19))).Group(u.Name).ShardBy(int64(19))

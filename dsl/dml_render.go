@@ -297,6 +297,9 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 		if extra := b.renderWhere(rc); extra != "" {
 			whereParts = append(whereParts, extra)
 		}
+		if err := rc.Err(); err != nil {
+			return nil, nil, err
+		}
 		sqls = append(sqls, sqlStr+" WHERE "+strings.Join(whereParts, " AND "))
 		argss = append(argss, rc.Args())
 	}
