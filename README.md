@@ -620,13 +620,16 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 ## Sharding
 
-Tables matched by `shardPattern` (e.g. `user_?`) are generated as one logical table with an unexported slot and a register function. The application registers a rule implementation at init; queries pass the shard key, and the physical table name is resolved at render time.
+Tables matched by `shardPattern` (e.g. `user_?`) are generated as one logical table with a register function that assigns the rule to `TableMeta.Sharding`. The application registers a rule implementation at init; queries pass the shard key, and the physical table name is resolved at render time.
 
 ```go
 // generated table/user.go — sharded tables only
-var userSharding = gooq.NewShardingSlot()
-
-func RegisterUserSharding(rule gooq.ShardingRule) { userSharding.Inject(rule) }
+func RegisterUserSharding(rule gooq.ShardingRule) {
+    if rule == nil {
+        panic("gooq: sharding rule is required")
+    }
+    UserMeta.Sharding = rule
+}
 
 // application package (blank-imported so its init runs first)
 type userRule struct {

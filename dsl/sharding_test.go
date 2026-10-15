@@ -42,12 +42,6 @@ func (r shardUserRule) TableName(value any) (string, error) {
 	return fmt.Sprintf("%s%02d", r.prefix, id%r.shards), nil
 }
 
-func userShardSlot() *gooq.ShardingSlot {
-	slot := gooq.NewShardingSlot()
-	slot.Inject(shardUserRule{prefix: "shard_user_", shards: 16})
-	return slot
-}
-
 type countingShardRule struct {
 	calls *int
 }
@@ -59,9 +53,7 @@ func (r countingShardRule) TableName(value any) (string, error) {
 
 func TestShardingResolvesOncePerStatement(t *testing.T) {
 	calls := 0
-	slot := gooq.NewShardingSlot()
-	slot.Inject(countingShardRule{calls: &calls})
-	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: slot, Fields: shardUserFields}, "")
+	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: countingShardRule{calls: &calls}, Fields: shardUserFields}, "")
 	sql, _, err := Select(u.Id, u.Name).From(u).Where(u.Id.Eq(int64(19))).ShardingValue(int64(19)).ToSql(gooq.DialectPgsql)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +81,7 @@ func (t *shardUserTable) As(alias string) *shardUserTable { return newShardUserT
 func (t *shardUserTable) Clone() *shardUserTable { return newShardUserTable(t.Meta(), "") }
 
 func TestShardingSelectPhysicalName(t *testing.T) {
-	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: userShardSlot(), Fields: shardUserFields}, "")
+	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
 	sql, _, err := Select(u.Id, u.Name).From(u).Where(u.Id.Eq(int64(19))).ShardingValue(int64(19)).ToSql(gooq.DialectPgsql)
 	if err != nil {
 		t.Fatal(err)
@@ -103,7 +95,7 @@ func TestShardingSelectPhysicalName(t *testing.T) {
 }
 
 func TestShardingMissingValue(t *testing.T) {
-	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: userShardSlot(), Fields: shardUserFields}, "")
+	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
 	_, _, err := Select(u.Id).From(u).ToSql(gooq.DialectPgsql)
 	if err == nil || !strings.Contains(err.Error(), "ShardingValue is required") {
 		t.Fatalf("err %v", err)
@@ -111,7 +103,7 @@ func TestShardingMissingValue(t *testing.T) {
 }
 
 func TestShardingRuleError(t *testing.T) {
-	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: userShardSlot(), Fields: shardUserFields}, "")
+	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
 	_, _, err := Select(u.Id).From(u).ShardingValue("bad").ToSql(gooq.DialectPgsql)
 	if err == nil || !strings.Contains(err.Error(), "shard key must be int64") {
 		t.Fatalf("err %v", err)
@@ -130,7 +122,7 @@ func TestShardingUnregisteredKeepsLogicalName(t *testing.T) {
 }
 
 func TestShardingSubquerySharesValue(t *testing.T) {
-	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: userShardSlot(), Fields: shardUserFields}, "")
+	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
 	sub := Select(u.Id).From(u).Where(u.Id.Eq(int64(19))).Limit(1)
 	sql, _, err := Select(u.Name).From(u).Where(u.Id.InExpr(sub)).ShardingValue(int64(19)).ToSql(gooq.DialectPgsql)
 	if err != nil {
@@ -142,8 +134,8 @@ func TestShardingSubquerySharesValue(t *testing.T) {
 }
 
 func TestShardingUnionSharesValue(t *testing.T) {
-	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: userShardSlot(), Fields: shardUserFields}, "")
-	other := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: userShardSlot(), Fields: shardUserFields}, "")
+	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
+	other := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
 	sql, _, err := Select(u.Id).From(u).ShardingValue(int64(19)).UnionAll(Select(other.Id).From(other)).ToSql(gooq.DialectPgsql)
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +146,7 @@ func TestShardingUnionSharesValue(t *testing.T) {
 }
 
 func TestShardingDMLPhysicalName(t *testing.T) {
-	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: userShardSlot(), Fields: shardUserFields}, "")
+	u := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
 	sql, _, err := Update(u).Set(u.Name, "x").Where(u.Id.Eq(int64(19))).ShardingValue(int64(19)).ToSql(gooq.DialectPgsql)
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +162,7 @@ func TestShardingDMLPhysicalName(t *testing.T) {
 }
 
 func TestShardingNamedEscape(t *testing.T) {
-	base := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: userShardSlot(), Fields: shardUserFields}, "")
+	base := newShardUserTable(&gooq.TableMeta{TableName: "shard_user", Sharding: shardUserRule{prefix: "shard_user_", shards: 16}, Fields: shardUserFields}, "")
 	u := base.Named("shard_user_05")
 	sql, _, err := Select(u.Id).From(u).ToSql(gooq.DialectPgsql)
 	if err != nil {

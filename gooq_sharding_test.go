@@ -24,70 +24,53 @@ func (r countingShardingRule) TableName(value any) (string, error) {
 	return fmt.Sprintf("user_%02d", value.(int64)%16), nil
 }
 
-func TestShardingSlotInjectRequiresRule(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected panic for a nil rule")
-		}
-	}()
-	NewShardingSlot().Inject(nil)
+func shardedTestMeta(rule ShardingRule) *TableMeta {
+	return &TableMeta{TableName: "user", Sharding: rule}
 }
 
-func TestShardingSlotOverwrite(t *testing.T) {
-	slot := NewShardingSlot()
-	slot.Inject(testShardingRule{name: "first"})
-	slot.Inject(testShardingRule{name: "second"})
-	rc := NewRenderContext(DialectMySQL)
-	rc.SetShardingValue(int64(1))
-	if got := slot.Resolve(rc, "user"); got != "second" || rc.Err() != nil {
-		t.Fatalf("got %q err %v", got, rc.Err())
+func TestResolveShardedNameUnregistered(t *testing.T) {
+	if got := ResolveShardedName(NewRenderContext(DialectMySQL), shardedTestMeta(nil), "user"); got != "user" {
+		t.Fatalf("got %q", got)
 	}
 }
 
-func TestShardingSlotResolve(t *testing.T) {
-	slot := NewShardingSlot()
-	if got := slot.Resolve(NewRenderContext(DialectMySQL), "user"); got != "user" {
-		t.Fatalf("unregistered slot resolved to %q", got)
-	}
-	slot.Inject(testShardingRule{name: "user_03"})
+func TestResolveShardedName(t *testing.T) {
+	meta := shardedTestMeta(testShardingRule{name: "user_03"})
 
 	rc := NewRenderContext(DialectMySQL)
-	if got := slot.Resolve(rc, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "ShardingValue is required") {
+	if got := ResolveShardedName(rc, meta, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "ShardingValue is required") {
 		t.Fatalf("missing value got %q err %v", got, rc.Err())
 	}
 
 	rc = NewRenderContext(DialectMySQL)
 	rc.SetShardingValue(int64(19))
-	if got := slot.Resolve(rc, "user"); got != "user_03" || rc.Err() != nil {
+	if got := ResolveShardedName(rc, meta, "user"); got != "user_03" || rc.Err() != nil {
 		t.Fatalf("resolve got %q err %v", got, rc.Err())
 	}
 
 	boom := fmt.Errorf("rule boom")
-	broken := NewShardingSlot()
-	broken.Inject(testShardingRule{err: boom})
+	broken := shardedTestMeta(testShardingRule{err: boom})
 	rc = NewRenderContext(DialectMySQL)
 	rc.SetShardingValue(int64(1))
-	if got := broken.Resolve(rc, "user"); got != "user" || rc.Err() != boom {
+	if got := ResolveShardedName(rc, broken, "user"); got != "user" || rc.Err() != boom {
 		t.Fatalf("rule error got %q err %v", got, rc.Err())
 	}
 
-	empty := NewShardingSlot()
-	empty.Inject(testShardingRule{})
+	empty := shardedTestMeta(testShardingRule{})
 	rc = NewRenderContext(DialectMySQL)
 	rc.SetShardingValue(int64(1))
-	if got := empty.Resolve(rc, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "empty name") {
+	if got := ResolveShardedName(rc, empty, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "empty name") {
 		t.Fatalf("empty name got %q err %v", got, rc.Err())
 	}
 }
 
-func TestShardingSlotResolvesOncePerContext(t *testing.T) {
+func TestResolveShardedNameOncePerContext(t *testing.T) {
 	calls := 0
-	slot := NewShardingSlot()
-	slot.Inject(countingShardingRule{calls: &calls})
+	meta := shardedTestMeta(countingShardingRule{calls: &calls})
 	rc := NewRenderContext(DialectMySQL)
 	rc.SetShardingValue(int64(19))
 	for i := 0; i < 3; i++ {
-		if got := slot.Resolve(rc, "user"); got != "user_03" {
+		if got := ResolveShardedName(rc, meta, "user"); got != "user_03" {
 			t.Fatalf("got %q", got)
 		}
 	}
@@ -95,11 +78,10 @@ func TestShardingSlotResolvesOncePerContext(t *testing.T) {
 		t.Fatalf("rule called %d times", calls)
 	}
 
-	missing := NewShardingSlot()
-	missing.Inject(countingShardingRule{calls: &calls})
+	missing := shardedTestMeta(countingShardingRule{calls: &calls})
 	rc = NewRenderContext(DialectMySQL)
 	for i := 0; i < 2; i++ {
-		if got := missing.Resolve(rc, "user"); got != "user" {
+		if got := ResolveShardedName(rc, missing, "user"); got != "user" {
 			t.Fatalf("missing value got %q", got)
 		}
 	}

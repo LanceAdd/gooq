@@ -612,13 +612,16 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 ## 分片
 
-`shardPattern`（如 `user_?`）命中的表只生成一个逻辑表对象，带一个不导出的槽和注册函数。应用在 init 里注册规则实现；查询显式传片键，物理表名在渲染期解析。
+`shardPattern`（如 `user_?`）命中的表只生成一个逻辑表对象；注册函数把规则挂到 `TableMeta.Sharding`。应用在 init 里注册规则实现；查询显式传片键，物理表名在渲染期解析。
 
 ```go
 // 生成物 table/user.go —— 仅分片表
-var userSharding = gooq.NewShardingSlot()
-
-func RegisterUserSharding(rule gooq.ShardingRule) { userSharding.Inject(rule) }
+func RegisterUserSharding(rule gooq.ShardingRule) {
+    if rule == nil {
+        panic("gooq: sharding rule is required")
+    }
+    UserMeta.Sharding = rule
+}
 
 // 应用侧包（被空白导入，保证 init 先跑）
 type userRule struct {

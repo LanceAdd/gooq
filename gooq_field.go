@@ -89,9 +89,7 @@ func (f Field[T]) prefixParts(rc *RenderContext) []string {
 		}
 		name := f.tableName
 		if m := f.table.Meta(); m != nil {
-			if m.Sharding != nil {
-				name = m.Sharding.Resolve(rc, name)
-			}
+			name = ResolveShardedName(rc, m, name)
 			if m.Schema != "" {
 				return []string{m.Schema, name}
 			}

@@ -17,13 +17,10 @@ type {{.TplTableNameCamelCase}}Table struct {
 {{.TplGooqFields}}
 }
 
-{{if .TplTableSharding}}var {{.TplTableNameCamelLowerCase}}Sharding = {{.TplGooqRef}}NewShardingSlot()
-
-{{end}}var {{.TplTableNameCamelCase}}Meta = &{{.TplGooqRef}}TableMeta{
+var {{.TplTableNameCamelCase}}Meta = &{{.TplGooqRef}}TableMeta{
 	TableName: "{{.TplTableName}}",
 	Schema:    "{{.TplTableSchema}}",
-{{if .TplTableSharding}}	Sharding:  {{.TplTableNameCamelLowerCase}}Sharding,
-{{end}}	Fields: []{{.TplGooqRef}}FieldMeta{
+	Fields: []{{.TplGooqRef}}FieldMeta{
 {{.TplGooqFieldMetas}}
 	},
 }
@@ -40,7 +37,10 @@ func new{{.TplTableNameCamelCase}}Table(meta *{{.TplGooqRef}}TableMeta, alias st
 var {{.TplTableNameCamelCase}} = new{{.TplTableNameCamelCase}}Table({{.TplTableNameCamelCase}}Meta, "")
 {{if .TplTableSharding}}
 func Register{{.TplTableNameCamelCase}}Sharding(rule {{.TplGooqRef}}ShardingRule) {
-	{{.TplTableNameCamelLowerCase}}Sharding.Inject(rule)
+	if rule == nil {
+		panic("gooq: sharding rule is required")
+	}
+	{{.TplTableNameCamelCase}}Meta.Sharding = rule
 }
 
 func (t *{{.TplTableNameCamelCase}}Table) Named(name string) *{{.TplTableNameCamelCase}}Table {

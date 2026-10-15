@@ -18,7 +18,7 @@ type RenderContext struct {
 	argIndex      int
 	err           error
 	shardingValue any
-	shardNames    map[*ShardingSlot]string
+	shardNames    map[*TableMeta]string
 }
 
 func NewRenderContext(dialect Dialect) *RenderContext {

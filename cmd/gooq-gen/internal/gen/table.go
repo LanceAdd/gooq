@@ -119,18 +119,17 @@ func generateTableContent(
 	}
 	tplView.ClearAssigns()
 	tplView.Assigns(gview.Params{
-		"TplPackageName":             tplPackageName,
-		"TplGooqRef":                 gooqRef,
-		"TplGooqImport":              tplGooqImport,
-		"TplTableSharding":           spec.Sharding,
-		"TplTableNameCamelCase":      formatFieldName(spec.Logical, FieldNameCaseCamel),
-		"TplTableNameCamelLowerCase": camelLowerName(spec.Logical),
-		"TplTableName":               spec.Logical,
-		"TplTableSchema":             currentSchema(ctx, database),
-		"TplGooqFields":              strings.Join(fieldsLines, "\n"),
-		"TplGooqFieldMetas":          strings.Join(metaLines, "\n"),
-		"TplGooqFieldAssigns":        strings.Join(assignLines, "\n"),
-		"TplGooqImports":             strings.Join(imports, "\n"),
+		"TplPackageName":        tplPackageName,
+		"TplGooqRef":            gooqRef,
+		"TplGooqImport":         tplGooqImport,
+		"TplTableSharding":      spec.Sharding,
+		"TplTableNameCamelCase": formatFieldName(spec.Logical, FieldNameCaseCamel),
+		"TplTableName":          spec.Logical,
+		"TplTableSchema":        currentSchema(ctx, database),
+		"TplGooqFields":         strings.Join(fieldsLines, "\n"),
+		"TplGooqFieldMetas":     strings.Join(metaLines, "\n"),
+		"TplGooqFieldAssigns":   strings.Join(assignLines, "\n"),
+		"TplGooqImports":        strings.Join(imports, "\n"),
 	})
 	return tplView.ParseContent(ctx, tplContent)
 }

@@ -212,11 +212,10 @@ func TestGen_Sharding_Sqlite(t *testing.T) {
 		t.Assert(gfile.Exists(filepath.Join(genPath, "table", "user_00.go")), false)
 		t.Assert(gfile.Exists(filepath.Join(genPath, "table", "user_01.go")), false)
 		content := gfile.GetContents(generated)
-		t.Assert(gstr.Contains(content, `var userSharding = gooq.NewShardingSlot()`), true)
 		t.Assert(gstr.Contains(content, `func RegisterUserSharding(rule gooq.ShardingRule) {`), true)
-		t.Assert(gstr.Contains(content, `userSharding.Inject(rule)`), true)
-		t.Assert(gstr.Contains(content, `Sharding:  userSharding,`), true)
+		t.Assert(gstr.Contains(content, `UserMeta.Sharding = rule`), true)
 		t.Assert(gstr.Contains(content, `TableName: "user"`), true)
+		t.Assert(gstr.Contains(content, "NewShardingSlot"), false)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) Named(name string) *UserTable {`), true)
 		t.Assert(gstr.Contains(content, `type UserTable struct {`), true)
 

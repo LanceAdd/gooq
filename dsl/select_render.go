@@ -298,9 +298,7 @@ func tableNameSQL(rc *gooq.RenderContext, t gooq.Table) string {
 		schema    string
 	)
 	if m := t.Meta(); m != nil {
-		if m.Sharding != nil {
-			tableName = m.Sharding.Resolve(rc, tableName)
-		}
+		tableName = gooq.ResolveShardedName(rc, m, tableName)
 		schema = m.Schema
 	}
 	name := rc.Quote(tableName)

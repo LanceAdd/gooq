@@ -12,8 +12,8 @@ type FieldMeta struct {
 
 type TableMeta struct {
 	TableName string
-	Schema    string        // 空则不渲染前缀。
-	Sharding  *ShardingSlot // nil 表示不分片。
+	Schema    string       // 空则不渲染前缀。
+	Sharding  ShardingRule // nil 表示不分片。
 	Fields    []FieldMeta
 }
 
