@@ -52,6 +52,10 @@ func normalizeNameForCaseConvert(name string) string {
 	return name
 }
 
+func camelLowerName(name string) string {
+	return gstr.CaseCamelLower(normalizeNameForCaseConvert(name))
+}
+
 func goFieldName(column string, reserved map[string]bool, used map[string]string) (string, error) {
 	name := formatFieldName(column, FieldNameCaseCamel)
 	if reserved[name] {

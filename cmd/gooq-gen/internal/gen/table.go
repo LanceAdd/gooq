@@ -33,22 +33,22 @@ var reservedFieldNames = map[string]bool{
 	"BoundBase":  true,
 }
 
-func generateTable(ctx context.Context, database *db.DB, tableNames []string, dirPathTable string) {
-	for _, tableName := range tableNames {
-		generateTableSingle(ctx, database, tableName, dirPathTable)
+func generateTable(ctx context.Context, database *db.DB, specs []tableSpec, dirPathTable string) {
+	for _, spec := range specs {
+		generateTableSingle(ctx, database, spec, dirPathTable)
 	}
 }
 
-func generateTableSingle(ctx context.Context, database *db.DB, tableName, dirPathTable string) {
-	columns, err := database.TableFields(ctx, tableName)
+func generateTableSingle(ctx context.Context, database *db.DB, spec tableSpec, dirPathTable string) {
+	columns, err := database.TableFields(ctx, spec.Physical)
 	if err != nil {
-		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, tableName, err)
+		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, spec.Physical, err)
 	}
-	fileName := formatFileName(tableName, "")
+	fileName := formatFileName(spec.Logical, "")
 	path := filepath.FromSlash(gfile.Join(dirPathTable, fileName+".go"))
-	tableContent, err := generateTableContent(ctx, database, tableName, dirPathTable, columns)
+	tableContent, err := generateTableContent(ctx, database, spec, dirPathTable, columns)
 	if err != nil {
-		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, tableName, err)
+		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, spec.Logical, err)
 	}
 	if err = gfile.PutContents(path, tableContent); err != nil {
 		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
@@ -60,7 +60,7 @@ func generateTableSingle(ctx context.Context, database *db.DB, tableName, dirPat
 }
 
 func generateTableContent(
-	ctx context.Context, database *db.DB, tableName, dirPathTable string, columns []db.Column,
+	ctx context.Context, database *db.DB, spec tableSpec, dirPathTable string, columns []db.Column,
 ) (string, error) {
 	var (
 		fieldsLines []string
@@ -119,16 +119,18 @@ func generateTableContent(
 	}
 	tplView.ClearAssigns()
 	tplView.Assigns(gview.Params{
-		"TplPackageName":        tplPackageName,
-		"TplGooqRef":            gooqRef,
-		"TplGooqImport":         tplGooqImport,
-		"TplTableNameCamelCase": formatFieldName(tableName, FieldNameCaseCamel),
-		"TplTableName":          tableName,
-		"TplTableSchema":        currentSchema(ctx, database),
-		"TplGooqFields":         strings.Join(fieldsLines, "\n"),
-		"TplGooqFieldMetas":     strings.Join(metaLines, "\n"),
-		"TplGooqFieldAssigns":   strings.Join(assignLines, "\n"),
-		"TplGooqImports":        strings.Join(imports, "\n"),
+		"TplPackageName":             tplPackageName,
+		"TplGooqRef":                 gooqRef,
+		"TplGooqImport":              tplGooqImport,
+		"TplTableSharding":           spec.Sharding,
+		"TplTableNameCamelCase":      formatFieldName(spec.Logical, FieldNameCaseCamel),
+		"TplTableNameCamelLowerCase": camelLowerName(spec.Logical),
+		"TplTableName":               spec.Logical,
+		"TplTableSchema":             currentSchema(ctx, database),
+		"TplGooqFields":              strings.Join(fieldsLines, "\n"),
+		"TplGooqFieldMetas":          strings.Join(metaLines, "\n"),
+		"TplGooqFieldAssigns":        strings.Join(assignLines, "\n"),
+		"TplGooqImports":             strings.Join(imports, "\n"),
 	})
 	return tplView.ParseContent(ctx, tplContent)
 }

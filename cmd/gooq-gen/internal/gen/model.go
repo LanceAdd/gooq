@@ -23,21 +23,21 @@ var reservedModelNames = map[string]bool{
 	"ToModel":     true,
 }
 
-func generateModel(ctx context.Context, database *db.DB, tableNames []string, dirPath string) {
-	for _, tableName := range tableNames {
-		generateModelSingle(ctx, database, tableName, dirPath)
+func generateModel(ctx context.Context, database *db.DB, specs []tableSpec, dirPath string) {
+	for _, spec := range specs {
+		generateModelSingle(ctx, database, spec, dirPath)
 	}
 }
 
-func generateModelSingle(ctx context.Context, database *db.DB, tableName, dirPath string) {
-	columns, err := database.TableFields(ctx, tableName)
+func generateModelSingle(ctx context.Context, database *db.DB, spec tableSpec, dirPath string) {
+	columns, err := database.TableFields(ctx, spec.Physical)
 	if err != nil {
-		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, tableName, err)
+		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, spec.Physical, err)
 	}
-	fileName := formatFileName(tableName, "")
-	modelContent, recordContent, err := generateModelContent(ctx, tableName, dirPath, columns)
+	fileName := formatFileName(spec.Logical, "")
+	modelContent, recordContent, err := generateModelContent(ctx, spec.Logical, dirPath, columns)
 	if err != nil {
-		mlog.Fatalf(`generating gooq model content failed for table "%s": %+v`, tableName, err)
+		mlog.Fatalf(`generating gooq model content failed for table "%s": %+v`, spec.Logical, err)
 	}
 	writeGenerated(filepath.Join(dirPath, fileName+"_model.go"), modelContent)
 	writeGenerated(filepath.Join(dirPath, fileName+"_record.go"), recordContent)

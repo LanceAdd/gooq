@@ -5,6 +5,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sync"
 	"testing"
@@ -111,7 +112,9 @@ func TestGen_Sqlite(t *testing.T) {
 		t.Assert(gstr.Contains(content, `gooq.Field[time.Time]`), true)
 
 		// 全局表对象与元数据（软删标记由列名约定识别，与驱动无关）。
-		t.Assert(gstr.Contains(content, `var User = newUserTable()`), true)
+		t.Assert(gstr.Contains(content, `var User = newUserTable(UserMeta, "")`), true)
+		// 未配置 shardPattern 时不生成任何分片件。
+		t.Assert(gstr.Contains(content, "Sharding"), false)
 		t.Assert(gstr.Contains(content, `gooq.TableMeta{`), true)
 		t.Assert(gstr.Contains(content, `TableName: "user"`), true)
 		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalTypeInt`), true)
@@ -163,6 +166,123 @@ func TestGen_Sqlite(t *testing.T) {
 	})
 }
 
+// initShardedSqlite 创建 sqlite 分片测试库：结构相同的 user_00 / user_01。
+func initShardedSqlite(t *gtest.T, dbPath string) {
+	database, err := db.Open(db.Config{Link: "sqlite::@file(" + dbPath + ")"})
+	t.AssertNil(err)
+	defer func() {
+		t.AssertNil(database.Close())
+	}()
+	for _, name := range []string{"user_00", "user_01"} {
+		_, err = database.Exec(context.Background(), `
+CREATE TABLE IF NOT EXISTS `+name+` (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    age        INTEGER NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'active',
+    alias      TEXT,
+    deleted_at DATETIME,
+    created_at DATETIME
+)`)
+		t.AssertNil(err)
+	}
+}
+
+// TestGen_Sharding_Sqlite 验证 shardPattern：分片表只生成一个逻辑表对象，带槽与注册函数。
+func TestGen_Sharding_Sqlite(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			ctx     = context.Background()
+			tmpDir  = gfile.Temp("gooq-gen-shard-test", gtime.TimestampNanoStr())
+			dbPath  = filepath.Join(tmpDir, "gooq_shard.db")
+			genPath = filepath.Join(tmpDir, "gen")
+		)
+		defer gfile.Remove(tmpDir)
+		t.AssertNil(gfile.Mkdir(genPath))
+		initShardedSqlite(t, dbPath)
+
+		Generate(ctx, Input{
+			Link:            "sqlite::@file(" + dbPath + ")",
+			Path:            genPath,
+			ShardingPattern: []string{"user_?"},
+		})
+
+		generated := filepath.Join(genPath, "table", "user.go")
+		t.Assert(gfile.Exists(generated), true)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "table", "user_00.go")), false)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "table", "user_01.go")), false)
+		content := gfile.GetContents(generated)
+		t.Assert(gstr.Contains(content, `var userSharding = gooq.NewShardingSlot()`), true)
+		t.Assert(gstr.Contains(content, `func RegisterUserSharding(rule gooq.ShardingRule) {`), true)
+		t.Assert(gstr.Contains(content, `userSharding.Inject(rule)`), true)
+		t.Assert(gstr.Contains(content, `Sharding:  userSharding,`), true)
+		t.Assert(gstr.Contains(content, `TableName: "user"`), true)
+		t.Assert(gstr.Contains(content, `func (t *UserTable) Named(name string) *UserTable {`), true)
+		t.Assert(gstr.Contains(content, `type UserTable struct {`), true)
+
+		// 模型同样只生成逻辑表。
+		t.Assert(gfile.Exists(filepath.Join(genPath, "model", "user_model.go")), true)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "model", "user_00_model.go")), false)
+	})
+}
+
+func TestTableSpecs(t *testing.T) {
+	specs, err := tableSpecs(
+		[]string{"user_01", "a_b_00", "product", "user_00", "a_00", "user_02"},
+		[]string{"a_?", "user_?", "a_b_?"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 4 {
+		t.Fatalf("specs %+v", specs)
+	}
+	if specs[0].Physical != "a_00" || specs[0].Logical != "a" || !specs[0].Sharding {
+		t.Fatalf("a spec %+v", specs[0])
+	}
+	if specs[1].Physical != "a_b_00" || specs[1].Logical != "a_b" {
+		t.Fatalf("a_b spec %+v", specs[1])
+	}
+	if specs[2].Physical != "product" || specs[2].Sharding {
+		t.Fatalf("product spec %+v", specs[2])
+	}
+	if specs[3].Physical != "user_00" || specs[3].Logical != "user" || !specs[3].Sharding {
+		t.Fatalf("user spec %+v", specs[3])
+	}
+	if !reflect.DeepEqual(specs[3].Shards, []string{"user_00", "user_01", "user_02"}) {
+		t.Fatalf("user shards %v", specs[3].Shards)
+	}
+	if _, err = tableSpecs([]string{"x"}, []string{"no-question"}); err == nil {
+		t.Fatal("expected an invalid pattern error")
+	}
+}
+
+func TestValidateShardSchemas(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			ctx    = context.Background()
+			tmpDir = gfile.Temp("gooq-gen-shard-check", gtime.TimestampNanoStr())
+			dbPath = filepath.Join(tmpDir, "s.db")
+		)
+		defer gfile.Remove(tmpDir)
+		t.AssertNil(gfile.Mkdir(tmpDir))
+		database, err := db.Open(db.Config{Link: "sqlite::@file(" + dbPath + ")"})
+		t.AssertNil(err)
+		defer func() { t.AssertNil(database.Close()) }()
+		_, err = database.Exec(ctx, `CREATE TABLE user_00 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)`)
+		t.AssertNil(err)
+		_, err = database.Exec(ctx, `CREATE TABLE user_01 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, extra TEXT)`)
+		t.AssertNil(err)
+
+		ok := tableSpec{Physical: "user_00", Logical: "user", Sharding: true, Shards: []string{"user_00"}}
+		t.AssertNil(validateShardSchemas(ctx, database, []tableSpec{ok}))
+
+		bad := tableSpec{Physical: "user_00", Logical: "user", Sharding: true, Shards: []string{"user_00", "user_01"}}
+		err = validateShardSchemas(ctx, database, []tableSpec{bad})
+		t.Assert(gstr.Contains(err.Error(), "differ"), true)
+	})
+}
+
 func TestGenerateSpecialTypes(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		database, err := db.Open(db.Config{Link: "sqlite::@file(:memory:)"})
@@ -175,7 +295,7 @@ func TestGenerateSpecialTypes(t *testing.T) {
 			{Name: "span", LocalType: gooq.LocalTypeString},
 			{Name: "email", LocalType: gooq.LocalTypeString, Unique: true},
 		}
-		content, err := generateTableContent(context.Background(), database, "sample", "table", columns)
+		content, err := generateTableContent(context.Background(), database, tableSpec{Physical: "sample", Logical: "sample"}, "table", columns)
 		t.AssertNil(err)
 		t.Assert(gstr.Contains(content, "gooq.Field[string]"), true)
 		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalTypeDecimal`), true)

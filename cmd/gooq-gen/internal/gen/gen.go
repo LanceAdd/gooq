@@ -15,6 +15,8 @@ import (
 type Input struct {
 	Link string // 如 mysql:root:pass@tcp(127.0.0.1:3306)/db。
 	Path string
+	// ShardingPattern 用 "?" 匹配分片表名中的分片段，如 "user_?"。
+	ShardingPattern []string
 }
 
 const (
@@ -34,6 +36,9 @@ gooq:
       # Database link, same format as the ORM configuration of GoFrame.
       # link: "mysql:root:pass@tcp(127.0.0.1:3306)/db"
       path: internal
+      # Table name patterns that mark sharded tables; "?" matches the shard part.
+      # shardPattern:
+      #   - "user_?"
 `
 
 // tplView 是模板渲染视图（跨表生成复用）。
@@ -108,8 +113,15 @@ func Generate(ctx context.Context, in Input) {
 	if err != nil {
 		mlog.Fatalf("fetching tables failed: %+v", err)
 	}
-	generateTable(ctx, database, tableNames, gfile.Join(in.Path, dirPathTable))
-	generateModel(ctx, database, tableNames, gfile.Join(in.Path, dirPathModel))
+	specs, err := tableSpecs(tableNames, in.ShardingPattern)
+	if err != nil {
+		mlog.Fatalf("sharding pattern failed: %+v", err)
+	}
+	if err = validateShardSchemas(ctx, database, specs); err != nil {
+		mlog.Fatalf("sharding tables validation failed: %+v", err)
+	}
+	generateTable(ctx, database, specs, gfile.Join(in.Path, dirPathTable))
+	generateModel(ctx, database, specs, gfile.Join(in.Path, dirPathModel))
 
 	mlog.Print("done!")
 }

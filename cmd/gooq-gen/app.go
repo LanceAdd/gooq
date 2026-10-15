@@ -43,10 +43,11 @@ func init() {
 }
 
 type genInput struct {
-	gmeta.Meta `name:"gooq-gen"`
-	Debug      bool   `short:"d" name:"debug"   brief:"show internal detailed debugging information" orphan:"true"`
-	Link       string `name:"link" short:"l" brief:"database link, like mysql:root:pass@tcp(127.0.0.1:3306)/db"`
-	Path       string `name:"path" short:"p" brief:"directory path for generated files, default internal"`
+	gmeta.Meta      `name:"gooq-gen"`
+	Debug           bool     `short:"d" name:"debug"   brief:"show internal detailed debugging information" orphan:"true"`
+	Link            string   `name:"link" short:"l" brief:"database link, like mysql:root:pass@tcp(127.0.0.1:3306)/db"`
+	Path            string   `name:"path" short:"p" brief:"directory path for generated files, default internal"`
+	ShardingPattern []string `name:"shard-pattern" short:"sp" brief:"table name patterns marking sharded tables, \"?\" matches the shard part, like user_?"`
 }
 
 type genOutput struct{}
@@ -64,10 +65,16 @@ func (c appCmd) Index(ctx context.Context, in genInput) (out *genOutput, err err
 				in.Path = v.String()
 			}
 		}
+		if len(in.ShardingPattern) == 0 {
+			if v, err := g.Cfg().Get(ctx, "gooq.gen.table.shardPattern"); err == nil && v != nil {
+				in.ShardingPattern = v.Strings()
+			}
+		}
 	}
 	gen.Generate(ctx, gen.Input{
-		Link: in.Link,
-		Path: in.Path,
+		Link:            in.Link,
+		Path:            in.Path,
+		ShardingPattern: in.ShardingPattern,
 	})
 	return
 }
