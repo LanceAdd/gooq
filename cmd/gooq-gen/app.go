@@ -8,6 +8,7 @@ import (
 	"github.com/gogf/gf/v2/util/gtag"
 
 	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/gen"
+	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/mlog"
 )
 
 const (
@@ -43,11 +44,10 @@ func init() {
 }
 
 type genInput struct {
-	gmeta.Meta      `name:"gooq-gen"`
-	Debug           bool     `short:"d" name:"debug"   brief:"show internal detailed debugging information" orphan:"true"`
-	Link            string   `name:"link" short:"l" brief:"database link, like mysql:root:pass@tcp(127.0.0.1:3306)/db"`
-	Path            string   `name:"path" short:"p" brief:"directory path for generated files, default internal"`
-	ShardingPattern []string `name:"shard-pattern" short:"sp" brief:"table name patterns marking sharded tables, \"?\" matches the shard part, like user_?"`
+	gmeta.Meta `name:"gooq-gen"`
+	Debug      bool   `short:"d" name:"debug"   brief:"show internal detailed debugging information" orphan:"true"`
+	Link       string `name:"link" short:"l" brief:"database link, like mysql:root:pass@tcp(127.0.0.1:3306)/db"`
+	Path       string `name:"path" short:"p" brief:"directory path for generated files, default internal"`
 }
 
 type genOutput struct{}
@@ -65,17 +65,33 @@ func (c appCmd) Index(ctx context.Context, in genInput) (out *genOutput, err err
 				in.Path = v.String()
 			}
 		}
-		if len(in.ShardingPattern) == 0 {
-			if v, err := g.Cfg().Get(ctx, "gooq.gen.table.shardPattern"); err == nil && v != nil {
-				in.ShardingPattern = v.Strings()
-			}
+		if v, err := g.Cfg().Get(ctx, "gooq.gen.table.shardPattern"); err == nil && v != nil && !v.IsEmpty() {
+			mlog.Print(`ignore gooq.gen.table.shardPattern; grouping is hack/gooq.tables.yaml`)
 		}
 	}
 	gen.Generate(ctx, gen.Input{
-		Link:            in.Link,
-		Path:            in.Path,
-		ShardingPattern: in.ShardingPattern,
+		Link:       in.Link,
+		Path:       in.Path,
+		TablesFile: gen.TablesFilePath(),
 	})
+	return
+}
+
+type tablesInput struct {
+	gmeta.Meta `name:"tables" brief:"create or check hack/gooq.tables.yaml" usage:"gooq-gen tables {init|check|diff}" eg:"gooq-gen tables init"`
+	Action     string `arg:"true" name:"action" brief:"init, check, or diff"`
+	Link       string `name:"link" short:"l" brief:"database link, like mysql:root:pass@tcp(127.0.0.1:3306)/db"`
+}
+
+type tablesOutput struct{}
+
+func (c appCmd) Tables(ctx context.Context, in tablesInput) (out *tablesOutput, err error) {
+	if in.Link == "" && g.Cfg().Available(ctx) {
+		if v, err := g.Cfg().Get(ctx, "gooq.gen.table.link"); err == nil && v != nil {
+			in.Link = v.String()
+		}
+	}
+	gen.RunTables(ctx, in.Link, in.Action)
 	return
 }
 

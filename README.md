@@ -620,7 +620,9 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 ## Sharding
 
-Tables matched by `shardPattern` (e.g. `user_?`) are generated as one logical table with a register function that assigns the rule to `TableMeta.Sharding`. The application registers a rule implementation at init; queries pass the shard key, and the physical table name is resolved at render time.
+Shard groups live in `hack/gooq.tables.yaml`. `single` lists ordinary tables. `groups` lists sharded tables. Without that file, each physical table is generated as its own object. `gooq-gen tables init` writes the file with every table under `single`. `tables check` reports duplicate, missing, and extra names. `tables diff` reports tables added or removed in the database. Neither command rewrites the file.
+
+A group generates one logical table and `RegisterXxxSharding`. Register the rule in `init`. A nil rule panics. Registering again overwrites. The rule is stored on `TableMeta.Sharding`.
 
 ```go
 // generated table/user.go — sharded tables only
@@ -642,21 +644,31 @@ func (r userRule) TableName(value any) (string, error) {
     if !ok {
         return "", fmt.Errorf("user shard key must be int64, got %T", value)
     }
-    return fmt.Sprintf("%s%02d", r.prefix, uid%r.shards), nil
+    n := uid % r.shards
+    if n < 0 {
+        n += r.shards
+    }
+    return fmt.Sprintf("%s%02d", r.prefix, n), nil
 }
 
 func init() { table.RegisterUserSharding(userRule{prefix: "user_", shards: 16}) }
 
-// queries pass the key; ToSql renders "user_03"
+// ShardBy applies only to the main table (From / Insert / Update / Delete).
 err := dsl.Select(table.User.Id, table.User.Name).From(table.User).
-    ShardingValue(uid).Value(ctx, &name)
+    ShardBy(uid).Value(ctx, &name)
+
+// a joined sharded table carries its own value; a plain table does not
+r := table.UserRole.ShardBy(uid)
+err = dsl.Select(table.User.Name, r.Name).From(table.User).
+    InnerJoin(r).On(r.UserId.EqExpr(table.User.Id)).
+    ShardBy(uid).Value(ctx, &name)
 ```
 
-- `gooq-gen -sp "user_?"` (or `shardPattern` in `hack/gooq.yaml`) marks shard tables: one logical table object is generated from a representative shard, and all matched shards must have identical columns (checked at generation time). Unmatched tables are generated as usual, so non-sharding projects have zero footprint.
-- `ShardingRule.TableName` returns the full physical name. Register once at init (a nil rule panics; re-registering overwrites). Each sharded table resolves once per statement: field prefixes, `FROM`, `JOIN`, and subqueries reuse the result.
-- Using a registered table without `ShardingValue` fails in `ToSql`, before hitting the database. One value drives every registered table in the statement, so co-located joins share the key.
-- `Named("user_05")` bypasses the rule and returns a plain table object on that physical name (migration scripts, per-shard fan-out loops); an empty name panics.
-- Conventions: no logical placeholder table in the database; shard key in `WHERE`; no AutoIncrement primary key (use a business key, or snowflake ids with embedded shard bits). Disabled by convention while sharding: `Cache`/`PageCache`, cross-shard transactions, cross-database joins, and automatic merge or broadcast. Cross-shard reads are explicit application loops (one `Named` per shard).
+- `TableName` returns one unquoted table name, such as `user_03`. gooq quotes it. Leave schema on `TableMeta`; do not put it in the return value. A non-negative id can use `uid % shards` directly. Do not take the absolute value first: `-3` and `3` would land on the same shard.
+- `ShardBy` on a query applies only to that query's main table. A subquery, CTE, or each branch of `UNION` sets its own value and does not inherit the outer one. Another sharded table in the query calls `ShardBy` and returns a new table; `As` and `Clone` keep that value. A sharded table with neither `ShardBy` nor `Physical` fails in `ToSql`.
+- `Physical("user_05")` clears the rule and uses that table name. An empty name panics.
+- Generation compares column name, order, `LocalType`, nullability, primary key, auto-increment, and uniqueness against the first table in the group. A group with one table skips that check.
+- Conventions: no logical placeholder table in the database; shard key in `WHERE`; no AutoIncrement primary key (use a business key, or snowflake ids with embedded shard bits). Disabled by convention while sharding: `Cache`/`PageCache`, cross-shard transactions, cross-database joins, and automatic merge or broadcast. Cross-shard reads are explicit application loops (one `Physical` per shard). Group multi-row writes by shard first; one `ShardBy` writes one physical table. `Batch` only splits rows of that same table.
 
 ## gooq-gen (codegen tool)
 
@@ -671,7 +683,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority.
 - Templates: `<hack>/template/table.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
-- `-sp/--shard-pattern` shard table patterns (`user_?`); matched shards generate one logical table with a sharding slot and `RegisterXxxSharding`.
+- Shard groups are `hack/gooq.tables.yaml`, maintained with `gooq-gen tables init`, `tables check`, and `tables diff`. See Sharding above.
 - Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
 - Built-in connection drivers live in `drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/oceanbase`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/dm`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses. Link prefixes are `mysql`, `mariadb`, `tidb`, `oceanbase`, `pgsql`/`postgres`, `gaussdb`, `dm`, and `sqlite`.

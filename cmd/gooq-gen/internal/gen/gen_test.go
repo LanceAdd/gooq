@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 
@@ -188,7 +189,7 @@ CREATE TABLE IF NOT EXISTS `+name+` (
 	}
 }
 
-// TestGen_Sharding_Sqlite 验证 shardPattern：分片表只生成一个逻辑表对象，带槽与注册函数。
+// TestGen_Sharding_Sqlite 验证分组文件：分片表只生成一个逻辑表对象，带注册函数和 Physical、ShardBy。
 func TestGen_Sharding_Sqlite(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		var (
@@ -196,15 +197,17 @@ func TestGen_Sharding_Sqlite(t *testing.T) {
 			tmpDir  = gfile.Temp("gooq-gen-shard-test", gtime.TimestampNanoStr())
 			dbPath  = filepath.Join(tmpDir, "gooq_shard.db")
 			genPath = filepath.Join(tmpDir, "gen")
+			yaml    = filepath.Join(tmpDir, "gooq.tables.yaml")
 		)
 		defer gfile.Remove(tmpDir)
 		t.AssertNil(gfile.Mkdir(genPath))
 		initShardedSqlite(t, dbPath)
+		t.AssertNil(gfile.PutContents(yaml, "# 单一表\nsingle: []\n# 分表\ngroups:\n  - name: user\n    table:\n      - user_00\n      - user_01\n"))
 
 		Generate(ctx, Input{
-			Link:            "sqlite::@file(" + dbPath + ")",
-			Path:            genPath,
-			ShardingPattern: []string{"user_?"},
+			Link:       "sqlite::@file(" + dbPath + ")",
+			Path:       genPath,
+			TablesFile: yaml,
 		})
 
 		generated := filepath.Join(genPath, "table", "user.go")
@@ -216,7 +219,9 @@ func TestGen_Sharding_Sqlite(t *testing.T) {
 		t.Assert(gstr.Contains(content, `UserMeta.Sharding = rule`), true)
 		t.Assert(gstr.Contains(content, `TableName: "user"`), true)
 		t.Assert(gstr.Contains(content, "NewShardingSlot"), false)
-		t.Assert(gstr.Contains(content, `func (t *UserTable) Named(name string) *UserTable {`), true)
+		t.Assert(gstr.Contains(content, `func (t *UserTable) Physical(name string) *UserTable {`), true)
+		t.Assert(gstr.Contains(content, `func (t *UserTable) ShardBy(value any) *UserTable {`), true)
+		t.Assert(gstr.Contains(content, `func (t *UserTable) Named(name string) *UserTable {`), false)
 		t.Assert(gstr.Contains(content, `type UserTable struct {`), true)
 
 		// 模型同样只生成逻辑表。
@@ -225,34 +230,35 @@ func TestGen_Sharding_Sqlite(t *testing.T) {
 	})
 }
 
-func TestTableSpecs(t *testing.T) {
-	specs, err := tableSpecs(
-		[]string{"user_01", "a_b_00", "product", "user_00", "a_00", "user_02"},
-		[]string{"a_?", "user_?", "a_b_?"},
-	)
-	if err != nil {
-		t.Fatal(err)
+func TestCheckTables(t *testing.T) {
+	cfg := tablesConfig{
+		Single: []string{"role", "user_00"},
+		Groups: []tableGroup{
+			{Name: "user", Table: []string{"user_00", "user_01", "user_01"}},
+			{Name: "user", Table: []string{}},
+			{Name: "role", Table: []string{"role_00"}},
+		},
 	}
-	if len(specs) != 4 {
-		t.Fatalf("specs %+v", specs)
+	report := checkTables(cfg, []string{"role", "user_00", "user_01", "order_00"})
+	text := report.String()
+	for _, want := range []string{
+		"user_00  在 single，也在 user",
+		"user_01  在 user 里写了两次",
+		"order_00",
+		"role  组名与 single 里的表同名",
+		"user  有两个组都叫这个名字",
+		"user  没有物理表",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in\n%s", want, text)
+		}
 	}
-	if specs[0].Physical != "a_00" || specs[0].Logical != "a" || !specs[0].Sharding {
-		t.Fatalf("a spec %+v", specs[0])
+	diff := diffTables(cfg, []string{"role", "user_00", "user_01", "order_00"})
+	if !reflect.DeepEqual(diff.New, []string{"order_00"}) {
+		t.Fatalf("new %v", diff.New)
 	}
-	if specs[1].Physical != "a_b_00" || specs[1].Logical != "a_b" {
-		t.Fatalf("a_b spec %+v", specs[1])
-	}
-	if specs[2].Physical != "product" || specs[2].Sharding {
-		t.Fatalf("product spec %+v", specs[2])
-	}
-	if specs[3].Physical != "user_00" || specs[3].Logical != "user" || !specs[3].Sharding {
-		t.Fatalf("user spec %+v", specs[3])
-	}
-	if !reflect.DeepEqual(specs[3].Shards, []string{"user_00", "user_01", "user_02"}) {
-		t.Fatalf("user shards %v", specs[3].Shards)
-	}
-	if _, err = tableSpecs([]string{"x"}, []string{"no-question"}); err == nil {
-		t.Fatal("expected an invalid pattern error")
+	if !reflect.DeepEqual(diff.Stale, []string{"role_00"}) {
+		t.Fatalf("stale %v", diff.Stale)
 	}
 }
 
@@ -272,13 +278,21 @@ func TestValidateShardSchemas(t *testing.T) {
 		t.AssertNil(err)
 		_, err = database.Exec(ctx, `CREATE TABLE user_01 (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, extra TEXT)`)
 		t.AssertNil(err)
+		_, err = database.Exec(ctx, `CREATE TABLE user_02 (id INTEGER, name TEXT NOT NULL)`)
+		t.AssertNil(err)
+		_, err = database.Exec(ctx, `CREATE TABLE user_03 (id INTEGER, name TEXT)`)
+		t.AssertNil(err)
 
 		ok := tableSpec{Physical: "user_00", Logical: "user", Sharding: true, Shards: []string{"user_00"}}
 		t.AssertNil(validateShardSchemas(ctx, database, []tableSpec{ok}))
 
 		bad := tableSpec{Physical: "user_00", Logical: "user", Sharding: true, Shards: []string{"user_00", "user_01"}}
 		err = validateShardSchemas(ctx, database, []tableSpec{bad})
-		t.Assert(gstr.Contains(err.Error(), "differ"), true)
+		t.Assert(gstr.Contains(err.Error(), "column count"), true)
+
+		nullable := tableSpec{Physical: "user_02", Logical: "user", Sharding: true, Shards: []string{"user_02", "user_03"}}
+		err = validateShardSchemas(ctx, database, []tableSpec{nullable})
+		t.Assert(gstr.Contains(err.Error(), `column "name" nullable`), true)
 	})
 }
 

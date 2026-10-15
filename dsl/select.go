@@ -105,6 +105,7 @@ type SelectBuilder struct {
 	groupSet      bool     // 是否显式指定了非默认配置组。
 	route         db.Route
 	shardingValue any
+	hasShardValue bool
 	columns       []string // 结果列名（字段收集；派生表列访问与 FieldsEx 使用）。
 }
 
@@ -383,9 +384,11 @@ func (b *SelectBuilder) PageCache(option ...CacheOption) *SelectBuilder {
 	return b
 }
 
-// ShardingValue 给这条语句设置分片值；注册过分片的表用它解析物理表名。
-func (b *SelectBuilder) ShardingValue(value any) *SelectBuilder {
+// ShardBy 给这条查询的主表设置分片值。nil 也算设置过。
+// JOIN 和其他分片表不使用这个值，要在表上调用 ShardBy。
+func (b *SelectBuilder) ShardBy(value any) *SelectBuilder {
 	b.shardingValue = value
+	b.hasShardValue = true
 	return b
 }
 

@@ -612,7 +612,9 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 ## 分片
 
-`shardPattern`（如 `user_?`）命中的表只生成一个逻辑表对象；注册函数把规则挂到 `TableMeta.Sharding`。应用在 init 里注册规则实现；查询显式传片键，物理表名在渲染期解析。
+分组写在 `hack/gooq.tables.yaml`。`single` 是普通表，`groups` 是分表。没有这份文件时，每张物理表各生成一个对象。`gooq-gen tables init` 把库里的表都写进 `single`。`tables check` 打印重复、缺失和多余的表名。`tables diff` 打印库里新增和配置里已不用的表名。这两条命令都不改文件。
+
+一组生成一个逻辑表和 `RegisterXxxSharding`。在 `init` 里注册规则。nil 会 panic，再次注册覆盖。规则挂在 `TableMeta.Sharding` 上。
 
 ```go
 // 生成物 table/user.go —— 仅分片表
@@ -634,21 +636,31 @@ func (r userRule) TableName(value any) (string, error) {
     if !ok {
         return "", fmt.Errorf("user shard key must be int64, got %T", value)
     }
-    return fmt.Sprintf("%s%02d", r.prefix, uid%r.shards), nil
+    n := uid % r.shards
+    if n < 0 {
+        n += r.shards
+    }
+    return fmt.Sprintf("%s%02d", r.prefix, n), nil
 }
 
 func init() { table.RegisterUserSharding(userRule{prefix: "user_", shards: 16}) }
 
-// 查询传片键；ToSql 渲染出 "user_03"
+// ShardBy 只作用于主表（From / Insert / Update / Delete）
 err := dsl.Select(table.User.Id, table.User.Name).From(table.User).
-    ShardingValue(uid).Value(ctx, &name)
+    ShardBy(uid).Value(ctx, &name)
+
+// JOIN 的分片表自己带分片值；普通表不用
+r := table.UserRole.ShardBy(uid)
+err = dsl.Select(table.User.Name, r.Name).From(table.User).
+    InnerJoin(r).On(r.UserId.EqExpr(table.User.Id)).
+    ShardBy(uid).Value(ctx, &name)
 ```
 
-- `gooq-gen -sp "user_?"`（或 `hack/gooq.yaml` 的 `shardPattern`）标记分片表：从代表分片生成一个逻辑表对象，各分片列结构必须一致（生成期校验）；未命中的表照常生成，非分片项目零足迹。
-- `ShardingRule.TableName` 返回完整物理表名。只在 init 注册一次（nil 注册 panic，重复注册覆盖）。每张分片表每语句只解析一次：字段前缀、`FROM`、`JOIN`、子查询共用结果。
-- 注册过的表没传 `ShardingValue` 在 `ToSql` 就报错，不落到数据库。一条语句一个值，驱动所有注册过的表——co-location 的 join 天然同键。
-- `Named("user_05")` 绕过规则返回普通表对象（迁移脚本、逐片 fan-out 循环）；空名 panic。
-- 约定：库里不保留逻辑占位表；片键进 `WHERE`；不用自增主键（用业务键或嵌分片位的雪花 id）。分片场景约定禁用：`Cache`/`PageCache`、跨分片事务、跨库 join、自动归并或广播。跨分片读是应用层显式循环（逐片 `Named`）。
+- `TableName` 返回一个未加引号的表名，例如 `user_03`。gooq 负责加引号。schema 留在 `TableMeta` 上，不要写进返回值。id 确定非负时可以直接 `uid % shards`。不要先取绝对值，否则 `-3` 和 `3` 会落在同一片。
+- 查询上的 `ShardBy` 只作用于这条查询的主表。子查询、CTE、`UNION` 的每一支各自设置，不沿用外层的值。同一条查询里的其他分片表调用 `ShardBy`，返回新表对象；`As` 和 `Clone` 会带上这个值。还挂着规则、又没有 `ShardBy` 或 `Physical` 的表，在 `ToSql` 失败。
+- `Physical("user_05")` 清空规则并使用这个表名。空名字 panic。
+- 生成时按组里第一张表比对列名、顺序、`LocalType`、可空、主键、自增和唯一。组里只有一张表时跳过。
+- 约定：库里不保留逻辑占位表；片键进 `WHERE`；不用自增主键（用业务键或嵌分片位的雪花 id）。分片场景约定禁用：`Cache`/`PageCache`、跨分片事务、跨库 join、自动归并或广播。跨分片读是应用层显式循环（逐片 `Physical`）。多行写入先按片分组，一次 `ShardBy` 只写一张物理表。`Batch` 只把这张表上的行分批提交。
 
 ## gooq-gen（代码生成工具）
 
@@ -663,7 +675,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 - 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。
 - 模板：`<hack>/template/table.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
-- `-sp/--shard-pattern` 分片表模式（`user_?`）；命中的分片生成一个逻辑表对象，带分片槽与 `RegisterXxxSharding`。
+- 分片分组在 `hack/gooq.tables.yaml`，用 `gooq-gen tables init`、`tables check`、`tables diff` 维护。见上面的分片节。
 - 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名约定）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与表基方法同名的列加 `Field` 后缀（`meta` → `MetaField`）。
 - 内置连接驱动在 `drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。链接前缀分别是 `mysql`、`mariadb`、`tidb`、`oceanbase`、`pgsql`/`postgres`、`gaussdb`、`dm`、`sqlite`。

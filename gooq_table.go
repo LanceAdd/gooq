@@ -52,8 +52,10 @@ type Table interface {
 }
 
 type TableBase struct {
-	meta  *TableMeta
-	alias string
+	meta          *TableMeta
+	alias         string
+	shardValue    any
+	hasShardValue bool
 }
 
 func NewTableBase(meta *TableMeta) *TableBase {
@@ -85,6 +87,33 @@ func (t *TableBase) As(alias string) *TableBase {
 func (t *TableBase) Clone() *TableBase {
 	newT := *t
 	return &newT
+}
+
+// SetShard 在这个表对象上记下分片值。nil 也算设置过。
+func (t *TableBase) SetShard(value any) {
+	t.shardValue = value
+	t.hasShardValue = true
+}
+
+// CopyShard 把这个对象上的分片值复制到 dst。没调用过 ShardBy 时 dst 也保持未设置。
+func (t *TableBase) CopyShard(dst *TableBase) {
+	if t == nil || dst == nil {
+		return
+	}
+	dst.shardValue = t.shardValue
+	dst.hasShardValue = t.hasShardValue
+}
+
+// TableBaseOf 返回表对象底层的 *TableBase。没有嵌入 TableBase 时返回 nil。
+func TableBaseOf(table Table) *TableBase {
+	if table == nil {
+		return nil
+	}
+	carrier, ok := table.(interface{ BoundBase() *TableBase })
+	if !ok {
+		return nil
+	}
+	return carrier.BoundBase()
 }
 
 func (t *TableBase) AllFields() []Field[any] {

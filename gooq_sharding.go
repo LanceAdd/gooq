@@ -2,38 +2,63 @@ package gooq
 
 import "fmt"
 
-// ShardingRule 按分片值算出完整物理表名。
+// ShardingRule 按分片值算出物理表名。
+// 返回值是单个未加引号的表名，例如 user_03。库负责加引号。
+// schema 仍用 TableMeta 上原来的值，不要写进返回值。
 type ShardingRule interface {
 	TableName(value any) (string, error)
 }
 
-// ResolveShardedName 返回渲染用的表名。表未分片（Sharding 为 nil）时是 logical 本身；
-// 分片表缺分片值或实现出错记入 rc。同一个渲染上下文里每张表只解析一次，后续出现直接命中缓存。
-func ResolveShardedName(rc *RenderContext, meta *TableMeta, logical string) string {
-	rule := meta.Sharding
-	if rule == nil {
+// ResolveTableName 返回渲染用的表名。表未分片时是 logical 本身。
+// 表对象自己调用过 ShardBy 时用那个值；否则只有当前主表能用查询上的 ShardBy。
+// 同一个表对象在本次查询的缓存里只解析一次。
+func ResolveTableName(rc *RenderContext, table Table, logical string) string {
+	if table == nil {
 		return logical
 	}
-	if name, ok := rc.shardNames[meta]; ok {
-		return name
+	meta := table.Meta()
+	if meta == nil || meta.Sharding == nil {
+		return logical
+	}
+	base := TableBaseOf(table)
+	if base != nil {
+		if name, ok := rc.shardNames[base]; ok {
+			return name
+		}
 	}
 	name := logical
-	if value := rc.ShardingValue(); value == nil {
-		rc.Fail(fmt.Errorf("gooq: table %q is sharded; ShardingValue is required", logical))
-	} else if resolved, err := rule.TableName(value); err != nil {
+	if value, ok := shardValueFor(rc, base); !ok {
+		if base != nil && rc.mainTable == base {
+			rc.Fail(fmt.Errorf("gooq: table %q is sharded; ShardBy is required", logical))
+		} else {
+			rc.Fail(fmt.Errorf("gooq: table %q is sharded; call ShardBy or Physical", logical))
+		}
+	} else if resolved, err := meta.Sharding.TableName(value); err != nil {
 		rc.Fail(err)
 	} else if resolved == "" {
 		rc.Fail(fmt.Errorf("gooq: sharding rule for table %q returned an empty name", logical))
 	} else {
 		name = resolved
 	}
-	rc.cacheShardName(meta, name)
+	if base != nil {
+		rc.cacheShardName(base, name)
+	}
 	return name
 }
 
-func (rc *RenderContext) cacheShardName(meta *TableMeta, name string) {
-	if rc.shardNames == nil {
-		rc.shardNames = make(map[*TableMeta]string)
+func shardValueFor(rc *RenderContext, base *TableBase) (any, bool) {
+	if base != nil && base.hasShardValue {
+		return base.shardValue, true
 	}
-	rc.shardNames[meta] = name
+	if base != nil && rc.mainTable == base && rc.queryHasShard {
+		return rc.queryShard, true
+	}
+	return nil, false
+}
+
+func (rc *RenderContext) cacheShardName(base *TableBase, name string) {
+	if rc.shardNames == nil {
+		rc.shardNames = make(map[*TableBase]string)
+	}
+	rc.shardNames[base] = name
 }

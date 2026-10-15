@@ -43,20 +43,30 @@ func Register{{.TplTableNameCamelCase}}Sharding(rule {{.TplGooqRef}}ShardingRule
 	{{.TplTableNameCamelCase}}Meta.Sharding = rule
 }
 
-func (t *{{.TplTableNameCamelCase}}Table) Named(name string) *{{.TplTableNameCamelCase}}Table {
+func (t *{{.TplTableNameCamelCase}}Table) Physical(name string) *{{.TplTableNameCamelCase}}Table {
 	if name == "" {
-		panic("gooq: Named requires a non-empty table name")
+		panic("gooq: Physical requires a non-empty table name")
 	}
 	meta := *t.Meta()
 	meta.TableName = name
 	meta.Sharding = nil
 	return new{{.TplTableNameCamelCase}}Table(&meta, t.AliasName())
 }
+
+func (t *{{.TplTableNameCamelCase}}Table) ShardBy(value any) *{{.TplTableNameCamelCase}}Table {
+	next := new{{.TplTableNameCamelCase}}Table(t.Meta(), t.AliasName())
+	next.TableBase.SetShard(value)
+	return next
+}
 {{end}}
 func (t *{{.TplTableNameCamelCase}}Table) As(alias string) *{{.TplTableNameCamelCase}}Table {
-	return new{{.TplTableNameCamelCase}}Table(t.Meta(), alias)
+	next := new{{.TplTableNameCamelCase}}Table(t.Meta(), alias)
+	t.TableBase.CopyShard(next.TableBase)
+	return next
 }
 
 func (t *{{.TplTableNameCamelCase}}Table) Clone() *{{.TplTableNameCamelCase}}Table {
-	return new{{.TplTableNameCamelCase}}Table(t.Meta(), "")
+	next := new{{.TplTableNameCamelCase}}Table(t.Meta(), "")
+	t.TableBase.CopyShard(next.TableBase)
+	return next
 }

@@ -29,6 +29,8 @@ var reservedFieldNames = map[string]bool{
 	"Field":      true,
 	"As":         true,
 	"Clone":      true,
+	"Physical":   true,
+	"ShardBy":    true,
 	"TableBase":  true,
 	"BoundBase":  true,
 }

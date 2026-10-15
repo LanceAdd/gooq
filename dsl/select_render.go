@@ -11,7 +11,6 @@ import (
 // spec == nil 时，标识符用双引号，占位符用 ?，共享锁用 FOR SHARE。
 // LIMIT 与 FOR UPDATE 保持现在的通用写法。调用方要得到方言错误，使用 ToSql。
 func (b *SelectBuilder) Render(rc *gooq.RenderContext) string {
-	rc.SetShardingValue(b.shardingValue)
 	sql := b.renderSelect(rc)
 	sql = "(" + sql + ")"
 	if b.alias != "" {
@@ -43,7 +42,6 @@ func (b *SelectBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 		return "", nil, err
 	}
 	rc := gooq.NewRenderContext(dialect)
-	rc.SetShardingValue(b.shardingValue)
 	sql := b.renderSelect(rc)
 	if err := rc.Err(); err != nil {
 		return "", nil, err
@@ -130,6 +128,11 @@ func joinKeywordSQL(rc *gooq.RenderContext, keyword string) string {
 }
 
 func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
+	prev := rc.SwapQueryShard(b.hasShardValue, b.shardingValue)
+	defer rc.RestoreQueryShard(prev)
+	if base := gooq.TableBaseOf(b.from); base != nil {
+		rc.SetMainTable(base)
+	}
 	var (
 		sql     strings.Builder
 		selects []string
@@ -298,7 +301,7 @@ func tableNameSQL(rc *gooq.RenderContext, t gooq.Table) string {
 		schema    string
 	)
 	if m := t.Meta(); m != nil {
-		tableName = gooq.ResolveShardedName(rc, m, tableName)
+		tableName = gooq.ResolveTableName(rc, t, tableName)
 		schema = m.Schema
 	}
 	name := rc.Quote(tableName)

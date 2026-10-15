@@ -17,8 +17,18 @@ type RenderContext struct {
 	args          []any
 	argIndex      int
 	err           error
-	shardingValue any
-	shardNames    map[*TableMeta]string
+	queryHasShard bool
+	queryShard    any
+	mainTable     *TableBase
+	shardNames    map[*TableBase]string
+}
+
+// QueryShardState 是一次查询的分片渲染状态，供子查询进出时保存和恢复。
+type QueryShardState struct {
+	has   bool
+	value any
+	main  *TableBase
+	names map[*TableBase]string
 }
 
 func NewRenderContext(dialect Dialect) *RenderContext {
@@ -98,14 +108,26 @@ func (rc *RenderContext) RenderValue(v any) string {
 	return rc.AddArg(v)
 }
 
-// SetShardingValue 保存本次渲染的分片值，只保存第一个非空值。
-func (rc *RenderContext) SetShardingValue(value any) {
-	if rc.shardingValue == nil {
-		rc.shardingValue = value
-	}
+// SwapQueryShard 换成这条查询自己的分片值，并换一块空的表名缓存。
+// 没调用 ShardBy 时 has 为 false，不沿用外层的值。
+func (rc *RenderContext) SwapQueryShard(has bool, value any) QueryShardState {
+	prev := QueryShardState{has: rc.queryHasShard, value: rc.queryShard, main: rc.mainTable, names: rc.shardNames}
+	rc.queryHasShard = has
+	rc.queryShard = value
+	rc.mainTable = nil
+	rc.shardNames = nil
+	return prev
 }
 
-// ShardingValue 返回本次渲染的分片值。没有时为 nil。
-func (rc *RenderContext) ShardingValue() any {
-	return rc.shardingValue
+// RestoreQueryShard 恢复 SwapQueryShard 之前的分片状态。
+func (rc *RenderContext) RestoreQueryShard(prev QueryShardState) {
+	rc.queryHasShard = prev.has
+	rc.queryShard = prev.value
+	rc.mainTable = prev.main
+	rc.shardNames = prev.names
+}
+
+// SetMainTable 指定当前查询的主表。查询上的 ShardBy 只作用于这张表。
+func (rc *RenderContext) SetMainTable(base *TableBase) {
+	rc.mainTable = base
 }

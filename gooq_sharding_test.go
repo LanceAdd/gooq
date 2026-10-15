@@ -9,9 +9,11 @@ import (
 type testShardingRule struct {
 	name string
 	err  error
+	got  any
 }
 
-func (r testShardingRule) TableName(any) (string, error) {
+func (r *testShardingRule) TableName(value any) (string, error) {
+	r.got = value
 	return r.name, r.err
 }
 
@@ -24,53 +26,61 @@ func (r countingShardingRule) TableName(value any) (string, error) {
 	return fmt.Sprintf("user_%02d", value.(int64)%16), nil
 }
 
-func shardedTestMeta(rule ShardingRule) *TableMeta {
-	return &TableMeta{TableName: "user", Sharding: rule}
+func shardedTestTable(rule ShardingRule) *TableBase {
+	return NewTableBase(&TableMeta{TableName: "user", Sharding: rule})
 }
 
-func TestResolveShardedNameUnregistered(t *testing.T) {
-	if got := ResolveShardedName(NewRenderContext(DialectMySQL), shardedTestMeta(nil), "user"); got != "user" {
+func TestResolveTableNameUnregistered(t *testing.T) {
+	table := NewTableBase(&TableMeta{TableName: "user"})
+	if got := ResolveTableName(NewRenderContext(DialectMySQL), table, "user"); got != "user" {
 		t.Fatalf("got %q", got)
 	}
 }
 
-func TestResolveShardedName(t *testing.T) {
-	meta := shardedTestMeta(testShardingRule{name: "user_03"})
-
+func TestResolveTableName(t *testing.T) {
+	rule := &testShardingRule{name: "user_03"}
+	table := shardedTestTable(rule)
 	rc := NewRenderContext(DialectMySQL)
-	if got := ResolveShardedName(rc, meta, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "ShardingValue is required") {
+	rc.SetMainTable(table)
+	if got := ResolveTableName(rc, table, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "ShardBy is required") {
 		t.Fatalf("missing value got %q err %v", got, rc.Err())
 	}
 
 	rc = NewRenderContext(DialectMySQL)
-	rc.SetShardingValue(int64(19))
-	if got := ResolveShardedName(rc, meta, "user"); got != "user_03" || rc.Err() != nil {
+	rc.SwapQueryShard(true, int64(19))
+	rc.SetMainTable(table)
+	if got := ResolveTableName(rc, table, "user"); got != "user_03" || rc.Err() != nil {
 		t.Fatalf("resolve got %q err %v", got, rc.Err())
 	}
 
 	boom := fmt.Errorf("rule boom")
-	broken := shardedTestMeta(testShardingRule{err: boom})
+	brokenRule := &testShardingRule{err: boom}
+	broken := shardedTestTable(brokenRule)
 	rc = NewRenderContext(DialectMySQL)
-	rc.SetShardingValue(int64(1))
-	if got := ResolveShardedName(rc, broken, "user"); got != "user" || rc.Err() != boom {
+	rc.SwapQueryShard(true, int64(1))
+	rc.SetMainTable(broken)
+	if got := ResolveTableName(rc, broken, "user"); got != "user" || rc.Err() != boom {
 		t.Fatalf("rule error got %q err %v", got, rc.Err())
 	}
 
-	empty := shardedTestMeta(testShardingRule{})
+	emptyRule := &testShardingRule{}
+	empty := shardedTestTable(emptyRule)
 	rc = NewRenderContext(DialectMySQL)
-	rc.SetShardingValue(int64(1))
-	if got := ResolveShardedName(rc, empty, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "empty name") {
+	rc.SwapQueryShard(true, int64(1))
+	rc.SetMainTable(empty)
+	if got := ResolveTableName(rc, empty, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "empty name") {
 		t.Fatalf("empty name got %q err %v", got, rc.Err())
 	}
 }
 
-func TestResolveShardedNameOncePerContext(t *testing.T) {
+func TestResolveTableNameOncePerObject(t *testing.T) {
 	calls := 0
-	meta := shardedTestMeta(countingShardingRule{calls: &calls})
+	table := shardedTestTable(countingShardingRule{calls: &calls})
 	rc := NewRenderContext(DialectMySQL)
-	rc.SetShardingValue(int64(19))
+	rc.SwapQueryShard(true, int64(19))
+	rc.SetMainTable(table)
 	for i := 0; i < 3; i++ {
-		if got := ResolveShardedName(rc, meta, "user"); got != "user_03" {
+		if got := ResolveTableName(rc, table, "user"); got != "user_03" {
 			t.Fatalf("got %q", got)
 		}
 	}
@@ -78,10 +88,11 @@ func TestResolveShardedNameOncePerContext(t *testing.T) {
 		t.Fatalf("rule called %d times", calls)
 	}
 
-	missing := shardedTestMeta(countingShardingRule{calls: &calls})
+	missing := shardedTestTable(countingShardingRule{calls: &calls})
 	rc = NewRenderContext(DialectMySQL)
+	rc.SetMainTable(missing)
 	for i := 0; i < 2; i++ {
-		if got := ResolveShardedName(rc, missing, "user"); got != "user" {
+		if got := ResolveTableName(rc, missing, "user"); got != "user" {
 			t.Fatalf("missing value got %q", got)
 		}
 	}
@@ -90,17 +101,26 @@ func TestResolveShardedNameOncePerContext(t *testing.T) {
 	}
 }
 
-func TestRenderContextShardingValueKeepsFirst(t *testing.T) {
+func TestResolveTableNameNilShardIsSet(t *testing.T) {
+	rule := &testShardingRule{name: "user_nil"}
+	table := shardedTestTable(rule)
+	table.SetShard(nil)
 	rc := NewRenderContext(DialectMySQL)
-	rc.SetShardingValue(int64(1))
-	rc.SetShardingValue(int64(2))
-	if got := rc.ShardingValue(); got != int64(1) {
-		t.Fatalf("kept %v", got)
+	if got := ResolveTableName(rc, table, "user"); got != "user_nil" || rc.Err() != nil {
+		t.Fatalf("got %q err %v", got, rc.Err())
 	}
-	fresh := NewRenderContext(DialectMySQL)
-	fresh.SetShardingValue(nil)
-	fresh.SetShardingValue(int64(5))
-	if got := fresh.ShardingValue(); got != int64(5) {
-		t.Fatalf("nil did not pass through, got %v", got)
+	if rule.got != nil {
+		t.Fatalf("rule got %v", rule.got)
+	}
+}
+
+func TestResolveTableNameIgnoresQueryShardForOtherTable(t *testing.T) {
+	main := shardedTestTable(&testShardingRule{name: "user_03"})
+	other := shardedTestTable(&testShardingRule{name: "role_03"})
+	rc := NewRenderContext(DialectMySQL)
+	rc.SwapQueryShard(true, int64(19))
+	rc.SetMainTable(main)
+	if got := ResolveTableName(rc, other, "role"); got != "role" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "call ShardBy or Physical") {
+		t.Fatalf("got %q err %v", got, rc.Err())
 	}
 }

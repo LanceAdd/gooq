@@ -9,6 +9,11 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
+func (b *DMLBuilder) installShard(rc *gooq.RenderContext) {
+	rc.SwapQueryShard(b.hasShardValue, b.shardingValue)
+	rc.SetMainTable(gooq.TableBaseOf(b.table))
+}
+
 // ToSql 用指定方言渲染 SQL，不传方言时默认 MySQL。
 func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 	if b.err != nil {
@@ -25,7 +30,7 @@ func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 		return "", nil, fmt.Errorf("gooq: batch delete/update renders multiple SQL, use Exec")
 	}
 	rc := gooq.NewRenderContext(dialect)
-	rc.SetShardingValue(b.shardingValue)
+	b.installShard(rc)
 	var (
 		sql  string
 		args []any
@@ -256,7 +261,7 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 			continue
 		}
 		rc := gooq.NewRenderContext(dialect)
-		rc.SetShardingValue(b.shardingValue)
+		b.installShard(rc)
 		var sqlStr string
 		switch b.kind {
 		case dmlDelete:

@@ -49,6 +49,7 @@ type DMLBuilder struct {
 	groupSet        bool              // 是否显式指定了非默认配置组。
 	route           db.Route          // 主从路由（默认写主库）。
 	shardingValue   any
+	hasShardValue   bool
 	err             error // 构造期错误（如 Values 数量不匹配），ToSql / Exec 返回它。
 }
 
@@ -297,9 +298,11 @@ func (b *DMLBuilder) Slave() *DMLBuilder {
 	return b
 }
 
-// ShardingValue 给这条语句设置分片值；注册过分片的表用它解析物理表名。
-func (b *DMLBuilder) ShardingValue(value any) *DMLBuilder {
+// ShardBy 给这条语句的主表设置分片值。nil 也算设置过。
+// Insert、Update、Delete 的主表是被写入或删除的那一张。
+func (b *DMLBuilder) ShardBy(value any) *DMLBuilder {
 	b.shardingValue = value
+	b.hasShardValue = true
 	return b
 }
 

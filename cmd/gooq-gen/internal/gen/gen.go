@@ -15,8 +15,8 @@ import (
 type Input struct {
 	Link string // 如 mysql:root:pass@tcp(127.0.0.1:3306)/db。
 	Path string
-	// ShardingPattern 用 "?" 匹配分片表名中的分片段，如 "user_?"。
-	ShardingPattern []string
+	// TablesFile 是 hack/gooq.tables.yaml。空表示没有分组文件，每张表生成一个普通对象。
+	TablesFile string
 }
 
 const (
@@ -36,9 +36,6 @@ gooq:
       # Database link, same format as the ORM configuration of GoFrame.
       # link: "mysql:root:pass@tcp(127.0.0.1:3306)/db"
       path: internal
-      # Table name patterns that mark sharded tables; "?" matches the shard part.
-      # shardPattern:
-      #   - "user_?"
 `
 
 // tplView 是模板渲染视图（跨表生成复用）。
@@ -113,10 +110,7 @@ func Generate(ctx context.Context, in Input) {
 	if err != nil {
 		mlog.Fatalf("fetching tables failed: %+v", err)
 	}
-	specs, err := tableSpecs(tableNames, in.ShardingPattern)
-	if err != nil {
-		mlog.Fatalf("sharding pattern failed: %+v", err)
-	}
+	specs := specsForGenerate(in.TablesFile, tableNames)
 	if err = validateShardSchemas(ctx, database, specs); err != nil {
 		mlog.Fatalf("sharding tables validation failed: %+v", err)
 	}
@@ -124,4 +118,117 @@ func Generate(ctx context.Context, in Input) {
 	generateModel(ctx, database, specs, gfile.Join(in.Path, dirPathModel))
 
 	mlog.Print("done!")
+}
+
+// RunTables 执行 gooq-gen tables init|check|diff。
+func RunTables(ctx context.Context, link, action string) {
+	switch action {
+	case "init":
+		tablesInit(ctx, link)
+	case "check":
+		tablesCheck(ctx, link)
+	case "diff":
+		runTablesDiff(ctx, link)
+	default:
+		mlog.Fatalf("usage: gooq-gen tables {init|check|diff}")
+	}
+}
+
+func tablesInit(ctx context.Context, link string) {
+	dir := hackDirPath()
+	if dir == "" {
+		mlog.Fatalf("hack directory not found, run gooq-gen init first")
+	}
+	path := gfile.Join(dir, tablesFileName)
+	if gfile.Exists(path) {
+		mlog.Fatalf("%s already exists", path)
+	}
+	database := openDatabase(link)
+	defer closeDatabase(database)
+	names, err := database.Tables(ctx)
+	if err != nil {
+		mlog.Fatalf("fetching tables failed: %+v", err)
+	}
+	if err = writeInitTablesFile(path, names); err != nil {
+		mlog.Fatalf(`writing "%s" failed: %+v`, path, err)
+	}
+	mlog.Print("generated:", gfile.RealPath(path))
+}
+
+func tablesCheck(ctx context.Context, link string) {
+	cfg, names := loadTablesAgainstDB(ctx, link)
+	report := checkTables(cfg, names)
+	if report.empty() {
+		return
+	}
+	mlog.Print(report.String())
+	mlog.Fatalf("tables check failed")
+}
+
+func runTablesDiff(ctx context.Context, link string) {
+	cfg, names := loadTablesAgainstDB(ctx, link)
+	diff := diffTables(cfg, names)
+	if diff.empty() {
+		mlog.Print("没有差异")
+		return
+	}
+	mlog.Print(diff.String())
+	mlog.Fatalf("tables diff failed")
+}
+
+func loadTablesAgainstDB(ctx context.Context, link string) (tablesConfig, []string) {
+	path := TablesFilePath()
+	if path == "" {
+		if hackDirPath() == "" {
+			mlog.Fatalf("hack directory not found, run gooq-gen init first")
+		}
+		mlog.Fatalf("hack/%s not found, run gooq-gen tables init first", tablesFileName)
+	}
+	cfg, err := loadTablesFile(path)
+	if err != nil {
+		mlog.Fatalf("%+v", err)
+	}
+	database := openDatabase(link)
+	defer closeDatabase(database)
+	names, err := database.Tables(ctx)
+	if err != nil {
+		mlog.Fatalf("fetching tables failed: %+v", err)
+	}
+	return cfg, names
+}
+
+func openDatabase(link string) *db.DB {
+	if link == "" {
+		mlog.Fatalf(`database link is required, use -l/--link or set "gooq.gen.table.link" in hack/gooq.yaml`)
+	}
+	database, err := db.Open(db.Config{Link: link})
+	if err != nil {
+		mlog.Fatalf(`database initialization failed: %+v`, err)
+	}
+	return database
+}
+
+func closeDatabase(database *db.DB) {
+	if err := database.Close(); err != nil {
+		mlog.Fatalf(`closing database failed: %+v`, err)
+	}
+}
+
+func specsForGenerate(tablesFile string, tableNames []string) []tableSpec {
+	if tablesFile == "" {
+		specs := make([]tableSpec, 0, len(tableNames))
+		for _, name := range tableNames {
+			specs = append(specs, tableSpec{Physical: name, Logical: name})
+		}
+		return specs
+	}
+	cfg, err := loadTablesFile(tablesFile)
+	if err != nil {
+		mlog.Fatalf("%+v", err)
+	}
+	if report := checkTables(cfg, tableNames); !report.empty() {
+		mlog.Print(report.String())
+		mlog.Fatalf("tables config check failed")
+	}
+	return specsFromTables(cfg)
 }
