@@ -614,7 +614,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 分组写在 `hack/gooq.tables.yaml`。`single` 是普通表，`groups` 是分表。没有这份文件时，每张物理表各生成一个对象。`gooq-gen tables init` 把库里的表都写进 `single`。`tables check` 打印重复、缺失和多余的表名。`tables diff` 打印库里新增和配置里已不用的表名。这两条命令都不改文件。
 
-一组生成一个逻辑表和 `RegisterXxxSharding`。在 `init` 里注册规则。nil 会 panic，再次注册覆盖。规则挂在 `TableMeta.Sharding` 上。
+一组生成一个逻辑表、`RegisterXxxSharding`，以及包级的 `RegisterSharding`。同一种分片方式调用一次 `RegisterSharding`，它把这个规则赋给所有分片逻辑表。某张表算法不同时，再用 `RegisterXxxSharding` 盖掉。nil 会 panic，再次注册覆盖。规则挂在 `TableMeta.Sharding` 上。
 
 ```go
 // 生成物 table/user.go —— 仅分片表
@@ -627,11 +627,10 @@ func RegisterUserSharding(rule gooq.ShardingRule) {
 
 // 应用侧包（被空白导入，保证 init 先跑）
 type userRule struct {
-    prefix string
     shards int64
 }
 
-func (r userRule) TableName(value any) (string, error) {
+func (r userRule) TableName(table gooq.ShardingTableMeta, value any) (string, error) {
     uid, ok := value.(int64)
     if !ok {
         return "", fmt.Errorf("user shard key must be int64, got %T", value)
@@ -640,10 +639,10 @@ func (r userRule) TableName(value any) (string, error) {
     if n < 0 {
         n += r.shards
     }
-    return fmt.Sprintf("%s%02d", r.prefix, n), nil
+    return fmt.Sprintf("%s_%02d", table.LogicalName, n), nil
 }
 
-func init() { table.RegisterUserSharding(userRule{prefix: "user_", shards: 16}) }
+func init() { table.RegisterSharding(userRule{shards: 16}) }
 
 // ShardBy 只作用于主表（From / Insert / Update / Delete）
 err := dsl.Select(table.User.Id, table.User.Name).From(table.User).
@@ -656,7 +655,7 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
     ShardBy(uid).Value(ctx, &name)
 ```
 
-- `TableName` 返回一个未加引号的表名，例如 `user_03`。gooq 负责加引号。schema 留在 `TableMeta` 上，不要写进返回值。id 确定非负时可以直接 `uid % shards`。不要先取绝对值，否则 `-3` 和 `3` 会落在同一片。
+- `TableName` 的第一个参数是 `ShardingTableMeta`。`LogicalName` 是逻辑表名，`ShardNames` 是生成时库里的物理分表名。返回值是一个未加引号的表名，例如 `user_03`。gooq 负责加引号。schema 留在 `TableMeta` 上，不要写进返回值。id 确定非负时可以直接 `uid % shards`。不要先取绝对值，否则 `-3` 和 `3` 会落在同一片。不要用 `len(ShardNames)` 当除数，列表只是当时存在的表。
 - 查询上的 `ShardBy` 只作用于这条查询的主表。子查询、CTE、`UNION` 的每一支各自设置，不沿用外层的值。同一条查询里的其他分片表调用 `ShardBy`，返回新表对象；`As` 和 `Clone` 会带上这个值。还挂着规则、又没有 `ShardBy` 或 `Physical` 的表，在 `ToSql` 失败。
 - `role.ShardBy(uid)` 不改原来的 `role`。`ON` 和选择列要用返回的新对象上的字段。`role.UserId` 仍绑在原表上，没有这次的分片值。
 - 子查询里引用外层的分片表列时，外层那张表要用表级 `ShardBy`（`u := table.User.ShardBy(uid)`），子查询里也用新对象上的字段。外层只挂查询级 `ShardBy` 会在渲染时报缺值。

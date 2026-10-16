@@ -20,6 +20,11 @@ type {{.TplTableNameCamelCase}}Table struct {
 var {{.TplTableNameCamelCase}}Meta = &{{.TplGooqRef}}TableMeta{
 	TableName: "{{.TplTableName}}",
 	Schema:    "{{.TplTableSchema}}",
+{{- if .TplShardNames}}
+	ShardNames: []string{
+{{.TplShardNames}}
+	},
+{{- end}}
 	Fields: []{{.TplGooqRef}}FieldMeta{
 {{.TplGooqFieldMetas}}
 	},

@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gogf/gf/v2/os/gfile"
@@ -38,6 +39,7 @@ func generateTable(ctx context.Context, database *db.DB, specs []tableSpec, dirP
 	for _, spec := range specs {
 		generateTableSingle(ctx, database, spec, dirPathTable)
 	}
+	generateShardingRegister(specs, dirPathTable)
 }
 
 func generateTableSingle(ctx context.Context, database *db.DB, spec tableSpec, dirPathTable string) {
@@ -51,6 +53,45 @@ func generateTableSingle(ctx context.Context, database *db.DB, spec tableSpec, d
 		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, spec.Logical, err)
 	}
 	writeGenerated(gfile.Join(dirPathTable, fileName+".go"), tableContent)
+}
+
+func generateShardingRegister(specs []tableSpec, dirPathTable string) {
+	path := gfile.Join(dirPathTable, "sharding.go")
+	var names []string
+	for _, spec := range specs {
+		if spec.Sharding {
+			names = append(names, formatFieldName(spec.Logical, FieldNameCaseCamel))
+		}
+	}
+	if len(names) == 0 {
+		if gfile.Exists(path) {
+			_ = gfile.Remove(path)
+		}
+		return
+	}
+	sort.Strings(names)
+	var assigns []string
+	for _, name := range names {
+		assigns = append(assigns, fmt.Sprintf("\t%sMeta.Sharding = rule", name))
+	}
+	gooqRef := "gooq."
+	tplGooqImport := `	"github.com/lanceadd/gooq"`
+	if filepath.Base(dirPathTable) == "gooq" {
+		gooqRef = ""
+		tplGooqImport = ""
+	}
+	tplView.ClearAssigns()
+	tplView.Assigns(gview.Params{
+		"TplPackageName": filepath.Base(dirPathTable),
+		"TplGooqRef":     gooqRef,
+		"TplGooqImport":  tplGooqImport,
+		"TplAssignments": strings.Join(assigns, "\n"),
+	})
+	content, err := tplView.ParseContent(context.Background(), getTemplate(tplFileSharding))
+	if err != nil {
+		mlog.Fatalf("generating sharding register failed: %+v", err)
+	}
+	writeGenerated(path, content)
 }
 
 func generateTableContent(
@@ -105,6 +146,12 @@ func generateTableContent(
 		imports = append(imports, `"github.com/google/uuid"`)
 	}
 
+	var shardLines []string
+	if spec.Sharding {
+		for _, name := range spec.Shards {
+			shardLines = append(shardLines, fmt.Sprintf("\t\t%q,", name))
+		}
+	}
 	tplContent := getTemplate(tplFileTable)
 	tplPackageName := filepath.Base(dirPathTable)
 	tplGooqImport := `	"github.com/lanceadd/gooq"`
@@ -120,6 +167,7 @@ func generateTableContent(
 		"TplTableNameCamelCase": formatFieldName(spec.Logical, FieldNameCaseCamel),
 		"TplTableName":          spec.Logical,
 		"TplTableSchema":        currentSchema(ctx, database),
+		"TplShardNames":         strings.Join(shardLines, "\n"),
 		"TplGooqFields":         strings.Join(fieldsLines, "\n"),
 		"TplGooqFieldMetas":     strings.Join(metaLines, "\n"),
 		"TplGooqFieldAssigns":   strings.Join(assignLines, "\n"),

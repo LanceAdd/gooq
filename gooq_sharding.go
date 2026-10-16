@@ -2,11 +2,18 @@ package gooq
 
 import "fmt"
 
-// ShardingRule 按分片值算出物理表名。
+// ShardingTableMeta 是渲染某张分片表时交给规则的表信息。
+// LogicalName 是逻辑表名，例如 user。ShardNames 是生成时代码里记下的物理分表名。
+type ShardingTableMeta struct {
+	LogicalName string
+	ShardNames  []string
+}
+
+// ShardingRule 按表信息和分片值算出物理表名。
 // 返回值是单个未加引号的表名，例如 user_03。库负责加引号。
 // schema 仍用 TableMeta 上原来的值，不要写进返回值。
 type ShardingRule interface {
-	TableName(value any) (string, error)
+	TableName(table ShardingTableMeta, value any) (string, error)
 }
 
 // ResolveTableName 返回渲染用的表名。表未分片时是 logical 本身。
@@ -33,7 +40,7 @@ func ResolveTableName(rc *RenderContext, table Table, logical string) string {
 		} else {
 			rc.Fail(fmt.Errorf("gooq: table %q is sharded; call ShardBy or Physical", logical))
 		}
-	} else if resolved, err := meta.Sharding.TableName(value); err != nil {
+	} else if resolved, err := meta.Sharding.TableName(ShardingTableMeta{LogicalName: meta.TableName, ShardNames: meta.ShardNames}, value); err != nil {
 		rc.Fail(err)
 	} else if resolved == "" {
 		rc.Fail(fmt.Errorf("gooq: sharding rule for table %q returned an empty name", logical))

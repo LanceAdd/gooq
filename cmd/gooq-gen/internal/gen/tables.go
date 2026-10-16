@@ -150,8 +150,12 @@ func checkTables(cfg tablesConfig, dbTables []string) tablesReport {
 		}
 		var physical int
 		for _, name := range group.Table {
-			if strings.TrimSpace(name) != "" {
+			trimmed := strings.TrimSpace(name)
+			if trimmed != "" {
 				physical++
+				if gname != "" && !strings.Contains(trimmed, gname) {
+					report.Invalid = append(report.Invalid, fmt.Sprintf("%s  不包含组名 %s", trimmed, gname))
+				}
 			}
 			loc := gname
 			if loc == "" {

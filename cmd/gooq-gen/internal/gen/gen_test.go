@@ -218,9 +218,15 @@ func TestGen_Sharding_Sqlite(t *testing.T) {
 		t.Assert(gstr.Contains(content, `func RegisterUserSharding(rule gooq.ShardingRule) {`), true)
 		t.Assert(gstr.Contains(content, `UserMeta.Sharding = rule`), true)
 		t.Assert(gstr.Contains(content, `TableName: "user"`), true)
+		t.Assert(gstr.Contains(content, `ShardNames: []string{`), true)
+		t.Assert(gstr.Contains(content, `"user_00",`), true)
+		t.Assert(gstr.Contains(content, `"user_01",`), true)
 		t.Assert(gstr.Contains(content, "NewShardingSlot"), false)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) Physical(name string) *UserTable {`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) ShardBy(value any) *UserTable {`), true)
+		register := gfile.GetContents(filepath.Join(genPath, "table", "sharding.go"))
+		t.Assert(gstr.Contains(register, `func RegisterSharding(rule gooq.ShardingRule) {`), true)
+		t.Assert(gstr.Contains(register, `UserMeta.Sharding = rule`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) Named(name string) *UserTable {`), false)
 		t.Assert(gstr.Contains(content, `type UserTable struct {`), true)
 
@@ -237,6 +243,7 @@ func TestCheckTables(t *testing.T) {
 			{Name: "user", Table: []string{"user_00", "user_01", "user_01"}},
 			{Name: "user", Table: []string{}},
 			{Name: "role", Table: []string{"role_00"}},
+			{Name: "order", Table: []string{"user_001"}},
 		},
 	}
 	report := checkTables(cfg, []string{"role", "user_00", "user_01", "order_00"})
@@ -248,6 +255,7 @@ func TestCheckTables(t *testing.T) {
 		"role  组名与 single 里的表同名",
 		"user  有两个组都叫这个名字",
 		"user  没有物理表",
+		"user_001  不包含组名 order",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in\n%s", want, text)
@@ -257,7 +265,7 @@ func TestCheckTables(t *testing.T) {
 	if !reflect.DeepEqual(diff.New, []string{"order_00"}) {
 		t.Fatalf("new %v", diff.New)
 	}
-	if !reflect.DeepEqual(diff.Stale, []string{"role_00"}) {
+	if !reflect.DeepEqual(diff.Stale, []string{"role_00", "user_001"}) {
 		t.Fatalf("stale %v", diff.Stale)
 	}
 }

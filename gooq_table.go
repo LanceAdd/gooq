@@ -11,10 +11,11 @@ type FieldMeta struct {
 }
 
 type TableMeta struct {
-	TableName string
-	Schema    string       // 空则不渲染前缀。
-	Sharding  ShardingRule // nil 表示不分片。
-	Fields    []FieldMeta
+	TableName  string
+	Schema     string       // 空则不渲染前缀。
+	Sharding   ShardingRule // nil 表示不分片。
+	ShardNames []string     // 生成时库里的物理分表名。普通表为空。
+	Fields     []FieldMeta
 }
 
 func (m *TableMeta) FieldMetaOf(columnName string) *FieldMeta {

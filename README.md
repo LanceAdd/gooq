@@ -622,7 +622,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 Shard groups live in `hack/gooq.tables.yaml`. `single` lists ordinary tables. `groups` lists sharded tables. Without that file, each physical table is generated as its own object. `gooq-gen tables init` writes the file with every table under `single`. `tables check` reports duplicate, missing, and extra names. `tables diff` reports tables added or removed in the database. Neither command rewrites the file.
 
-A group generates one logical table and `RegisterXxxSharding`. Register the rule in `init`. A nil rule panics. Registering again overwrites. The rule is stored on `TableMeta.Sharding`.
+A group generates one logical table, `RegisterXxxSharding`, and a package-level `RegisterSharding`. One call to `RegisterSharding` assigns that rule to every sharded logical table. Use `RegisterXxxSharding` to replace the rule on a table that shards differently. A nil rule panics. Registering again overwrites. The rule is stored on `TableMeta.Sharding`.
 
 ```go
 // generated table/user.go — sharded tables only
@@ -635,11 +635,10 @@ func RegisterUserSharding(rule gooq.ShardingRule) {
 
 // application package (blank-imported so its init runs first)
 type userRule struct {
-    prefix string
     shards int64
 }
 
-func (r userRule) TableName(value any) (string, error) {
+func (r userRule) TableName(table gooq.ShardingTableMeta, value any) (string, error) {
     uid, ok := value.(int64)
     if !ok {
         return "", fmt.Errorf("user shard key must be int64, got %T", value)
@@ -648,10 +647,10 @@ func (r userRule) TableName(value any) (string, error) {
     if n < 0 {
         n += r.shards
     }
-    return fmt.Sprintf("%s%02d", r.prefix, n), nil
+    return fmt.Sprintf("%s_%02d", table.LogicalName, n), nil
 }
 
-func init() { table.RegisterUserSharding(userRule{prefix: "user_", shards: 16}) }
+func init() { table.RegisterSharding(userRule{shards: 16}) }
 
 // ShardBy applies only to the main table (From / Insert / Update / Delete).
 err := dsl.Select(table.User.Id, table.User.Name).From(table.User).
@@ -664,7 +663,7 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
     ShardBy(uid).Value(ctx, &name)
 ```
 
-- `TableName` returns one unquoted table name, such as `user_03`. gooq quotes it. Leave schema on `TableMeta`; do not put it in the return value. A non-negative id can use `uid % shards` directly. Do not take the absolute value first: `-3` and `3` would land on the same shard.
+- The first argument of `TableName` is `ShardingTableMeta`. `LogicalName` is the logical table name. `ShardNames` lists the physical shard tables that existed when the code was generated. The return value is one unquoted table name, such as `user_03`. gooq quotes it. Leave schema on `TableMeta`; do not put it in the return value. A non-negative id can use `uid % shards` directly. Do not take the absolute value first: `-3` and `3` would land on the same shard. Do not use `len(ShardNames)` as the divisor. The list is only the tables that existed then.
 - `ShardBy` on a query applies only to that query's main table. A subquery, CTE, or each branch of `UNION` sets its own value and does not inherit the outer one. Another sharded table in the query calls `ShardBy` and returns a new table; `As` and `Clone` keep that value. A sharded table with neither `ShardBy` nor `Physical` fails in `ToSql`.
 - `role.ShardBy(uid)` does not change the original `role`. Use fields from the returned object in `ON` and the select list. `role.UserId` is still bound to the original table and does not carry this value.
 - A correlated subquery that references an outer sharded table's column needs that table to carry a table-level `ShardBy` (`u := table.User.ShardBy(uid)`); use fields from the returned object inside the subquery too. A query-level `ShardBy` on the outer query alone fails at render time.

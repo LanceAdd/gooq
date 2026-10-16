@@ -20,13 +20,14 @@ type Input struct {
 }
 
 const (
-	dirPathTable   = "table"
-	tplFileTable   = "table.tmpl"
-	tplFileModel   = "model.tmpl"
-	tplFileRecord  = "record.tmpl"
-	hackDirName    = "hack"
-	tplDirName     = "template"
-	configFileName = "gooq.yaml"
+	dirPathTable    = "table"
+	tplFileTable    = "table.tmpl"
+	tplFileSharding = "sharding.tmpl"
+	tplFileModel    = "model.tmpl"
+	tplFileRecord   = "record.tmpl"
+	hackDirName     = "hack"
+	tplDirName      = "template"
+	configFileName  = "gooq.yaml"
 )
 
 const initConfigContent = `# gooq-gen configuration; CLI options take priority over this file.
@@ -71,6 +72,7 @@ func Init() {
 	for _, f := range []struct{ path, content string }{
 		{gfile.Join(hackDirName, configFileName), initConfigContent},
 		{gfile.Join(hackDirName, tplDirName, tplFileTable), embeddedTemplate(tplFileTable)},
+		{gfile.Join(hackDirName, tplDirName, tplFileSharding), embeddedTemplate(tplFileSharding)},
 		{gfile.Join(hackDirName, tplDirName, tplFileModel), embeddedTemplate(tplFileModel)},
 		{gfile.Join(hackDirName, tplDirName, tplFileRecord), embeddedTemplate(tplFileRecord)},
 	} {

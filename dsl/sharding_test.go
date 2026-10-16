@@ -34,7 +34,7 @@ type shardUserRule struct {
 	shards int64
 }
 
-func (r shardUserRule) TableName(value any) (string, error) {
+func (r shardUserRule) TableName(table gooq.ShardingTableMeta, value any) (string, error) {
 	id, ok := value.(int64)
 	if !ok {
 		return "", fmt.Errorf("shard key must be int64, got %T", value)
@@ -46,7 +46,7 @@ type countingShardRule struct {
 	calls *int
 }
 
-func (r countingShardRule) TableName(value any) (string, error) {
+func (r countingShardRule) TableName(table gooq.ShardingTableMeta, value any) (string, error) {
 	*r.calls++
 	return fmt.Sprintf("shard_user_%02d", value.(int64)%16), nil
 }

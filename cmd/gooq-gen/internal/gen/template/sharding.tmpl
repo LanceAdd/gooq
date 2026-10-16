@@ -1,0 +1,16 @@
+// ==========================================================================
+// Code generated and maintained by gooq-gen. DO NOT EDIT.
+// ==========================================================================
+
+package {{.TplPackageName}}
+
+import (
+{{.TplGooqImport}}
+)
+
+func RegisterSharding(rule {{.TplGooqRef}}ShardingRule) {
+	if rule == nil {
+		panic("gooq: sharding rule is required")
+	}
+{{.TplAssignments}}
+}

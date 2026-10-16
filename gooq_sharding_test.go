@@ -7,12 +7,16 @@ import (
 )
 
 type testShardingRule struct {
-	name string
-	err  error
-	got  any
+	name    string
+	err     error
+	got     any
+	logical string
+	shards  []string
 }
 
-func (r *testShardingRule) TableName(value any) (string, error) {
+func (r *testShardingRule) TableName(table ShardingTableMeta, value any) (string, error) {
+	r.logical = table.LogicalName
+	r.shards = table.ShardNames
 	r.got = value
 	return r.name, r.err
 }
@@ -21,7 +25,7 @@ type countingShardingRule struct {
 	calls *int
 }
 
-func (r countingShardingRule) TableName(value any) (string, error) {
+func (r countingShardingRule) TableName(table ShardingTableMeta, value any) (string, error) {
 	*r.calls++
 	return fmt.Sprintf("user_%02d", value.(int64)%16), nil
 }
@@ -51,6 +55,9 @@ func TestResolveTableName(t *testing.T) {
 	rc.SetMainTable(table)
 	if got := ResolveTableName(rc, table, "user"); got != "user_03" || rc.Err() != nil {
 		t.Fatalf("resolve got %q err %v", got, rc.Err())
+	}
+	if rule.logical != "user" {
+		t.Fatalf("logical %q", rule.logical)
 	}
 
 	boom := fmt.Errorf("rule boom")
