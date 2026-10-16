@@ -3,7 +3,8 @@ package gooq
 import "fmt"
 
 // ShardingTableMeta 是渲染某张分片表时交给规则的表信息。
-// LogicalName 是逻辑表名，例如 user。ShardNames 是生成时代码里记下的物理分表名。
+// LogicalName 是逻辑表名，例如 user。ShardNames 是生成时代码里记下的物理分表名，供规则自己使用。
+// 库不要求 TableName 的返回值落在这份清单里。
 // 同一个 ShardingRule 实例可以注册到多张分片表。实现必须无状态，不要把表名存进规则自己。
 type ShardingTableMeta struct {
 	LogicalName string
@@ -46,8 +47,6 @@ func ResolveTableName(rc *RenderContext, table Table, logical string) string {
 		rc.Fail(err)
 	} else if resolved == "" {
 		rc.Fail(fmt.Errorf("gooq: sharding rule for table %q returned an empty name", logical))
-	} else if err := shardNameAllowed(meta.TableName, resolved, meta.ShardNames); err != nil {
-		rc.Fail(err)
 	} else {
 		name = resolved
 	}
@@ -55,18 +54,6 @@ func ResolveTableName(rc *RenderContext, table Table, logical string) string {
 		rc.cacheShardName(base, name)
 	}
 	return name
-}
-
-func shardNameAllowed(logical, resolved string, names []string) error {
-	if len(names) == 0 {
-		return nil
-	}
-	for _, name := range names {
-		if name == resolved {
-			return nil
-		}
-	}
-	return fmt.Errorf("gooq: sharding rule for table %q returned %q, which is not in ShardNames", logical, resolved)
 }
 
 func shardValueFor(rc *RenderContext, base *TableBase) (any, bool) {

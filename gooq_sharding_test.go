@@ -112,18 +112,6 @@ func TestResolveTableNameOncePerObject(t *testing.T) {
 	}
 }
 
-func TestResolveTableNameRejectsNameOutsideShardList(t *testing.T) {
-	rule := &testShardingRule{name: "user_1"}
-	table := shardedTestTable(rule)
-	table.Meta().ShardNames = []string{"user_00", "user_01"}
-	rc := NewRenderContext(DialectMySQL)
-	rc.SwapQueryShard(true, int64(1))
-	rc.SetMainTable(table)
-	if got := ResolveTableName(rc, table, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "not in ShardNames") {
-		t.Fatalf("got %q err %v", got, rc.Err())
-	}
-}
-
 func TestShardingRuleSharedAcrossTables(t *testing.T) {
 	rule := sharedShardRule{}
 	user := NewTableBase(&TableMeta{TableName: "user", Sharding: rule, ShardNames: []string{"user_00", "user_01"}})
