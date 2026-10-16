@@ -5,7 +5,6 @@ import "fmt"
 // ShardingTableMeta 是渲染某张分片表时交给规则的表信息。
 // LogicalName 是逻辑表名，例如 user。ShardNames 是生成时代码里记下的物理分表名，供规则自己使用。
 // 库不要求 TableName 的返回值落在这份清单里。
-// 同一个 ShardingRule 实例可以注册到多张分片表。实现必须无状态，不要把表名存进规则自己。
 type ShardingTableMeta struct {
 	LogicalName string
 	ShardNames  []string
