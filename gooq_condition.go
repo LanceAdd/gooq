@@ -14,7 +14,6 @@ type Condition interface {
 	Not() Condition
 }
 
-// groupOp 是条件组操作符。
 type groupOp int
 
 const (

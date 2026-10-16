@@ -30,6 +30,23 @@ func validIdent(name string) error {
 	return nil
 }
 
+// QuoteIdent 用已注册的渲染方言给一个普通标识符加引号。
+// 标识符不合法或方言未注册时返回错误。
+func QuoteIdent(dialect gooq.Dialect, name string) (string, error) {
+	return quoteIdent(dialect, name)
+}
+
+func quoteIdent(dialect gooq.Dialect, name string) (string, error) {
+	if err := validIdent(name); err != nil {
+		return "", err
+	}
+	spec := gooq.LookupDialect(dialect)
+	if spec == nil {
+		return "", fmt.Errorf("gooq: dialect %q is not registered", dialect)
+	}
+	return spec.Quote(name), nil
+}
+
 // LocalTypeOf 把数据库类型名映射成 gooq 的本地类型。
 // 先去掉末尾的 unsigned 和 zerofill，再去掉括号里的宽度。
 // 数组类型使用 PostgreSQL 的 udt 名，例如 _int4、_text。

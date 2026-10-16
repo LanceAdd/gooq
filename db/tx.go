@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-
-	"github.com/lanceadd/gooq"
 )
 
 // Propagation 决定 Transaction 如何加入 ctx 里已有的事务。
@@ -300,21 +298,4 @@ func TxFromContext(ctx context.Context, group string) *Tx {
 		return nil
 	}
 	return tx
-}
-
-// QuoteIdent 用已注册的渲染方言给一个普通标识符加引号。
-// 标识符不合法或方言未注册时返回错误。
-func QuoteIdent(dialect gooq.Dialect, name string) (string, error) {
-	return quoteIdent(dialect, name)
-}
-
-func quoteIdent(dialect gooq.Dialect, name string) (string, error) {
-	if err := validIdent(name); err != nil {
-		return "", err
-	}
-	spec := gooq.LookupDialect(dialect)
-	if spec == nil {
-		return "", fmt.Errorf("gooq: dialect %q is not registered", dialect)
-	}
-	return spec.Quote(name), nil
 }

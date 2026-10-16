@@ -1,13 +1,25 @@
-// 本文件提供生成工具函数：GoFmt 格式化生成的 go 源文件并整理 import。
 package gen
 
 import (
 	"fmt"
-
-	"golang.org/x/tools/imports"
+	"path/filepath"
 
 	"github.com/gogf/gf/v2/os/gfile"
+	"golang.org/x/tools/imports"
+
+	"github.com/lanceadd/gooq/cmd/gooq-gen/internal/mlog"
 )
+
+func writeGenerated(path, content string) {
+	path = filepath.FromSlash(path)
+	if err := gfile.PutContents(path, content); err != nil {
+		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
+	}
+	if err := GoFmt(path); err != nil {
+		mlog.Fatalf(`formatting "%s" failed: %v`, path, err)
+	}
+	mlog.Print("generated:", gfile.RealPath(path))
+}
 
 // GoFmt 格式化源文件，并按需增删 import。
 func GoFmt(path string) error {

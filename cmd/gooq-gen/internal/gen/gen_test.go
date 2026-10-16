@@ -114,7 +114,7 @@ func TestGen_Sqlite(t *testing.T) {
 
 		// 全局表对象与元数据（软删标记由列名约定识别，与驱动无关）。
 		t.Assert(gstr.Contains(content, `var User = newUserTable(UserMeta, "")`), true)
-		// 未配置 shardPattern 时不生成任何分片件。
+		// 没有 hack/gooq.tables.yaml 时不生成任何分片件。
 		t.Assert(gstr.Contains(content, "Sharding"), false)
 		t.Assert(gstr.Contains(content, `gooq.TableMeta{`), true)
 		t.Assert(gstr.Contains(content, `TableName: "user"`), true)

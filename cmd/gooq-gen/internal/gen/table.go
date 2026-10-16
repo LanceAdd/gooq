@@ -1,5 +1,4 @@
 // 本文件实现 gooq 类型化表对象的生成：连库取表结构 → 模板渲染 → 写盘。
-// 模板为外部文件（template/table.tmpl）。
 package gen
 
 import (
@@ -47,18 +46,11 @@ func generateTableSingle(ctx context.Context, database *db.DB, spec tableSpec, d
 		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, spec.Physical, err)
 	}
 	fileName := formatFileName(spec.Logical, "")
-	path := filepath.FromSlash(gfile.Join(dirPathTable, fileName+".go"))
 	tableContent, err := generateTableContent(ctx, database, spec, dirPathTable, columns)
 	if err != nil {
 		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, spec.Logical, err)
 	}
-	if err = gfile.PutContents(path, tableContent); err != nil {
-		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
-	}
-	if err = GoFmt(path); err != nil {
-		mlog.Fatalf(`formatting "%s" failed: %v`, path, err)
-	}
-	mlog.Print("generated:", gfile.RealPath(path))
+	writeGenerated(gfile.Join(dirPathTable, fileName+".go"), tableContent)
 }
 
 func generateTableContent(

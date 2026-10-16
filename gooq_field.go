@@ -8,8 +8,8 @@ import (
 type Field[T any] struct {
 	table      *TableBase // 所属表实例（As/Clone 时绑定；nil 时回退 tableName 前缀）。
 	tableName  string     // 渲染前缀表名（无指针绑定时使用）。
-	columnName string     // 列名。
-	alias      string     // 列别名（SELECT 位置渲染为 col AS alias）。
+	columnName string
+	alias      string // 列别名（SELECT 位置渲染为 col AS alias）。
 }
 
 func NewField[T any](tableName, columnName string) Field[T] {

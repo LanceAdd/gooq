@@ -92,7 +92,6 @@ func (rc *RenderContext) ShareLockKeyword() string {
 	return "FOR SHARE"
 }
 
-// Render 渲染表达式节点。
 func (rc *RenderContext) Render(e Expression) string {
 	if e == nil {
 		return ""
@@ -119,7 +118,6 @@ func (rc *RenderContext) SwapQueryShard(has bool, value any) QueryShardState {
 	return prev
 }
 
-// RestoreQueryShard 恢复 SwapQueryShard 之前的分片状态。
 func (rc *RenderContext) RestoreQueryShard(prev QueryShardState) {
 	rc.queryHasShard = prev.has
 	rc.queryShard = prev.value

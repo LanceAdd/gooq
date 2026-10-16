@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/os/gview"
 	"github.com/gogf/gf/v2/text/gstr"
 
@@ -41,17 +40,6 @@ func generateModelSingle(ctx context.Context, database *db.DB, spec tableSpec, d
 	}
 	writeGenerated(filepath.Join(dirPath, fileName+"_model.go"), modelContent)
 	writeGenerated(filepath.Join(dirPath, fileName+"_record.go"), recordContent)
-}
-
-func writeGenerated(path, content string) {
-	path = filepath.FromSlash(path)
-	if err := gfile.PutContents(path, content); err != nil {
-		mlog.Fatalf("writing content to '%s' failed: %v", path, err)
-	}
-	if err := GoFmt(path); err != nil {
-		mlog.Fatalf(`formatting "%s" failed: %v`, path, err)
-	}
-	mlog.Print("generated:", gfile.RealPath(path))
 }
 
 func generateModelContent(ctx context.Context, tableName, dirPath string, columns []db.Column) (string, string, error) {
