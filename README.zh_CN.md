@@ -21,7 +21,7 @@
 ### 1. 生成表对象
 
 ```bash
-cd cmd/gooq-gen && go run . init                                    # 可选：初始化 hack/gooq.yaml + hack/template/{table,model,record}.tmpl
+cd cmd/gooq-gen && go run . init                                    # 可选：初始化 hack/gooq.yaml + hack/template/{table,sharding,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
@@ -655,7 +655,7 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
     ShardBy(uid).Value(ctx, &name)
 ```
 
-- `TableName` 的第一个参数是 `ShardingTableMeta`。`LogicalName` 是逻辑表名，`ShardNames` 是生成时库里的物理分表名。返回值是一个未加引号的表名，例如 `user_03`。gooq 负责加引号。schema 留在 `TableMeta` 上，不要写进返回值。id 确定非负时可以直接 `uid % shards`。不要先取绝对值，否则 `-3` 和 `3` 会落在同一片。不要用 `len(ShardNames)` 当除数，列表只是当时存在的表。
+- `TableName` 的第一个参数是 `ShardingTableMeta`。`LogicalName` 是逻辑表名，`ShardNames` 是生成时库里的物理分表名。`ShardNames` 非空时，返回值必须落在清单里，否则渲染期报错（手写表的清单为空，不校验）。返回值是一个未加引号的表名，例如 `user_03`。gooq 负责加引号。schema 留在 `TableMeta` 上，不要写进返回值。id 确定非负时可以直接 `uid % shards`。不要先取绝对值，否则 `-3` 和 `3` 会落在同一片。不要用 `len(ShardNames)` 当除数，列表只是当时存在的表。
 - 查询上的 `ShardBy` 只作用于这条查询的主表。子查询、CTE、`UNION` 的每一支各自设置，不沿用外层的值。同一条查询里的其他分片表调用 `ShardBy`，返回新表对象；`As` 和 `Clone` 会带上这个值。还挂着规则、又没有 `ShardBy` 或 `Physical` 的表，在 `ToSql` 失败。
 - `role.ShardBy(uid)` 不改原来的 `role`。`ON` 和选择列要用返回的新对象上的字段。`role.UserId` 仍绑在原表上，没有这次的分片值。
 - 子查询里引用外层的分片表列时，外层那张表要用表级 `ShardBy`（`u := table.User.ShardBy(uid)`），子查询里也用新对象上的字段。外层只挂查询级 `ShardBy` 会在渲染时报缺值。
@@ -670,13 +670,13 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
 ```bash
 go install github.com/lanceadd/gooq/cmd/gooq-gen@latest             # 安装已发布版本
 # 或在仓库目录内运行：
-cd cmd/gooq-gen && go run . init                                    # 初始化 hack/gooq.yaml + hack/template/{table,model,record}.tmpl
+cd cmd/gooq-gen && go run . init                                    # 初始化 hack/gooq.yaml + hack/template/{table,sharding,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-- `init` 生成 `hack/gooq.yaml`，以及 `hack/template/table.tmpl`、`model.tmpl`、`record.tmpl`；已存在的文件不覆盖。
+- `init` 生成 `hack/gooq.yaml`，以及 `hack/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl`；已存在的文件不覆盖。
 - 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。
-- 模板：`<hack>/template/table.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
+- 模板：`<hack>/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
 - 分片分组在 `hack/gooq.tables.yaml`，用 `gooq-gen tables init`、`tables check`、`tables diff` 维护。见上面的分片节。
 - 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。

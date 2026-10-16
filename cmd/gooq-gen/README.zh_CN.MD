@@ -7,7 +7,7 @@
 ## 使用
 
 ```bash
-# 可选：初始化 hack/gooq.yaml 与 hack/template/{table,model,record}.tmpl（配置文件与模板定制用）。
+# 可选：初始化 hack/gooq.yaml 与 hack/template/{table,sharding,model,record}.tmpl（配置文件与模板定制用）。
 gooq-gen init
 
 # 通过命令行参数生成。
@@ -35,7 +35,7 @@ gooq-gen
 
 | 命令 / 参数 | 说明 |
 | --- | --- |
-| `gooq-gen init` | 生成 `hack/gooq.yaml` 与 `hack/template/table.tmpl` 供定制；已存在的文件不覆盖 |
+| `gooq-gen init` | 生成 `hack/gooq.yaml` 与 `hack/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl` 供定制；已存在的文件不覆盖 |
 | `-l, --link` | 数据库连接，与 GoFrame 的 ORM 配置一致（或配置 `gooq.gen.table.link`） |
 | `-p, --path` | 输出目录，默认 `internal`（或配置 `gooq.gen.table.path`） |
 | `-d, --debug` | 输出内部调试信息 |
@@ -44,7 +44,7 @@ gooq-gen
 
 ## 模板定制
 
-运行 `gooq-gen init` 生成模板 `hack/template/table.tmpl`。生成时该文件存在则优先使用，否则回退内置模板——修改后重新运行 `gooq-gen` 即可生效，删除该文件即回退内置模板。
+运行 `gooq-gen init` 生成 `hack/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl`。生成时这些文件存在则优先使用，否则回退内置模板——修改后重新运行 `gooq-gen` 即可生效，删除其中一个即回退该文件的内置模板。
 
 ## 产物示例
 

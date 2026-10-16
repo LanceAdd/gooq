@@ -21,7 +21,7 @@ Multiple `Where` calls are combined with AND. Field comparisons return a `Condit
 ### 1. Generate table objects
 
 ```bash
-cd cmd/gooq-gen && go run . init                                    # optional: scaffold hack/gooq.yaml + hack/template/{table,model,record}.tmpl
+cd cmd/gooq-gen && go run . init                                    # optional: scaffold hack/gooq.yaml + hack/template/{table,sharding,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
@@ -663,7 +663,7 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
     ShardBy(uid).Value(ctx, &name)
 ```
 
-- The first argument of `TableName` is `ShardingTableMeta`. `LogicalName` is the logical table name. `ShardNames` lists the physical shard tables that existed when the code was generated. The return value is one unquoted table name, such as `user_03`. gooq quotes it. Leave schema on `TableMeta`; do not put it in the return value. A non-negative id can use `uid % shards` directly. Do not take the absolute value first: `-3` and `3` would land on the same shard. Do not use `len(ShardNames)` as the divisor. The list is only the tables that existed then.
+- The first argument of `TableName` is `ShardingTableMeta`. `LogicalName` is the logical table name. `ShardNames` lists the physical shard tables that existed when the code was generated. When `ShardNames` is not empty, the returned name must be in that list; a render error otherwise (a hand-written table carries no list and skips the check). The return value is one unquoted table name, such as `user_03`. gooq quotes it. Leave schema on `TableMeta`; do not put it in the return value. A non-negative id can use `uid % shards` directly. Do not take the absolute value first: `-3` and `3` would land on the same shard. Do not use `len(ShardNames)` as the divisor. The list is only the tables that existed then.
 - `ShardBy` on a query applies only to that query's main table. A subquery, CTE, or each branch of `UNION` sets its own value and does not inherit the outer one. Another sharded table in the query calls `ShardBy` and returns a new table; `As` and `Clone` keep that value. A sharded table with neither `ShardBy` nor `Physical` fails in `ToSql`.
 - `role.ShardBy(uid)` does not change the original `role`. Use fields from the returned object in `ON` and the select list. `role.UserId` is still bound to the original table and does not carry this value.
 - A correlated subquery that references an outer sharded table's column needs that table to carry a table-level `ShardBy` (`u := table.User.ShardBy(uid)`); use fields from the returned object inside the subquery too. A query-level `ShardBy` on the outer query alone fails at render time.
@@ -678,13 +678,13 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
 ```bash
 go install github.com/lanceadd/gooq/cmd/gooq-gen@latest             # install the released binary
 # or run from a checkout:
-cd cmd/gooq-gen && go run . init                                    # scaffold hack/gooq.yaml + hack/template/{table,model,record}.tmpl
+cd cmd/gooq-gen && go run . init                                    # scaffold hack/gooq.yaml + hack/template/{table,sharding,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-- `init` creates `hack/gooq.yaml` and `hack/template/table.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten.
+- `init` creates `hack/gooq.yaml` and `hack/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten.
 - Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority.
-- Templates: `<hack>/template/table.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
+- Templates: `<hack>/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Shard groups are `hack/gooq.tables.yaml`, maintained with `gooq-gen tables init`, `tables check`, and `tables diff`. See Sharding above.
 - Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.

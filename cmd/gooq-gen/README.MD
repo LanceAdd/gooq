@@ -7,7 +7,7 @@ English | [简体中文](README.zh_CN.MD)
 ## Usage
 
 ```bash
-# Optional: initialize hack/gooq.yaml and hack/template/{table,model,record}.tmpl for customization.
+# Optional: initialize hack/gooq.yaml and hack/template/{table,sharding,model,record}.tmpl for customization.
 gooq-gen init
 
 # Generate via CLI options.
@@ -35,7 +35,7 @@ Built-in drivers `mysql`, `pgsql`, and `sqlite` are imported by `main.go`. Anoth
 
 | Command / Option | Description |
 | --- | --- |
-| `gooq-gen init` | create `hack/gooq.yaml` and `hack/template/table.tmpl` for customization; existing files are never overwritten |
+| `gooq-gen init` | create `hack/gooq.yaml` and `hack/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten |
 | `-l, --link` | database link, same as the ORM configuration of GoFrame (or set `gooq.gen.table.link`) |
 | `-p, --path` | output directory, default `internal` (or set `gooq.gen.table.path`) |
 | `-d, --debug` | show internal detailed debugging information |
@@ -44,7 +44,7 @@ All tables of the database are generated into the fixed `table/` and `model/` su
 
 ## Template customization
 
-Run `gooq-gen init` to create the template `hack/template/table.tmpl`. Generation prefers `<hack>/template/table.tmpl` when present and falls back to the embedded template — edit it and re-run `gooq-gen` to see the effect. Delete it to fall back to the built-in template.
+Run `gooq-gen init` to create `hack/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, and `record.tmpl`. Generation prefers those files when present and falls back to the embedded template — edit one and re-run `gooq-gen` to see the effect. Delete it to fall back to the built-in template.
 
 ## Generated example
 

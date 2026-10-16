@@ -44,6 +44,7 @@ func TestResolveTableNameUnregistered(t *testing.T) {
 func TestResolveTableName(t *testing.T) {
 	rule := &testShardingRule{name: "user_03"}
 	table := shardedTestTable(rule)
+	table.Meta().ShardNames = []string{"user_03", "user_04"}
 	rc := NewRenderContext(DialectMySQL)
 	rc.SetMainTable(table)
 	if got := ResolveTableName(rc, table, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "ShardBy is required") {
@@ -58,6 +59,9 @@ func TestResolveTableName(t *testing.T) {
 	}
 	if rule.logical != "user" {
 		t.Fatalf("logical %q", rule.logical)
+	}
+	if len(rule.shards) != 2 || rule.shards[0] != "user_03" || rule.shards[1] != "user_04" {
+		t.Fatalf("shards %v", rule.shards)
 	}
 
 	boom := fmt.Errorf("rule boom")
@@ -106,6 +110,42 @@ func TestResolveTableNameOncePerObject(t *testing.T) {
 	if rc.Err() == nil || calls != 1 {
 		t.Fatalf("err %v calls %d", rc.Err(), calls)
 	}
+}
+
+func TestResolveTableNameRejectsNameOutsideShardList(t *testing.T) {
+	rule := &testShardingRule{name: "user_1"}
+	table := shardedTestTable(rule)
+	table.Meta().ShardNames = []string{"user_00", "user_01"}
+	rc := NewRenderContext(DialectMySQL)
+	rc.SwapQueryShard(true, int64(1))
+	rc.SetMainTable(table)
+	if got := ResolveTableName(rc, table, "user"); got != "user" || rc.Err() == nil || !strings.Contains(rc.Err().Error(), "not in ShardNames") {
+		t.Fatalf("got %q err %v", got, rc.Err())
+	}
+}
+
+func TestShardingRuleSharedAcrossTables(t *testing.T) {
+	rule := sharedShardRule{}
+	user := NewTableBase(&TableMeta{TableName: "user", Sharding: rule, ShardNames: []string{"user_00", "user_01"}})
+	order := NewTableBase(&TableMeta{TableName: "order", Sharding: rule, ShardNames: []string{"order_00", "order_01"}})
+	userRC := NewRenderContext(DialectMySQL)
+	userRC.SwapQueryShard(true, int64(1))
+	userRC.SetMainTable(user)
+	orderRC := NewRenderContext(DialectMySQL)
+	orderRC.SwapQueryShard(true, int64(1))
+	orderRC.SetMainTable(order)
+	if got := ResolveTableName(userRC, user, "user"); got != "user_01" || userRC.Err() != nil {
+		t.Fatalf("user got %q err %v", got, userRC.Err())
+	}
+	if got := ResolveTableName(orderRC, order, "order"); got != "order_01" || orderRC.Err() != nil {
+		t.Fatalf("order got %q err %v", got, orderRC.Err())
+	}
+}
+
+type sharedShardRule struct{}
+
+func (sharedShardRule) TableName(table ShardingTableMeta, value any) (string, error) {
+	return fmt.Sprintf("%s_%02d", table.LogicalName, value.(int64)%2), nil
 }
 
 func TestResolveTableNameNilShardIsSet(t *testing.T) {
