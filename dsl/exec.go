@@ -21,10 +21,12 @@ type executor interface {
 }
 
 func (b *SelectBuilder) bind(ctx context.Context) (func(), error) {
+	b.stampTenant(ctx)
 	return bindBuilder(ctx, &b.executor, b.route, b.group, b.groupSet)
 }
 
 func (b *DMLBuilder) bind(ctx context.Context) (func(), error) {
+	b.stampTenant(ctx)
 	return bindBuilder(ctx, &b.executor, b.route, b.group, b.groupSet)
 }
 

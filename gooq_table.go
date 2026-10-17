@@ -6,6 +6,7 @@ type FieldMeta struct {
 	Primary       bool
 	AutoIncrement bool
 	SoftDelete    bool
+	Tenant        bool
 	Unique        bool
 	Comment       string
 }
@@ -30,6 +31,18 @@ func (m *TableMeta) FieldMetaOf(columnName string) *FieldMeta {
 func (m *TableMeta) SoftDeleteField() *FieldMeta {
 	for i := range m.Fields {
 		if m.Fields[i].SoftDelete {
+			return &m.Fields[i]
+		}
+	}
+	return nil
+}
+
+func (m *TableMeta) TenantField() *FieldMeta {
+	if m == nil {
+		return nil
+	}
+	for i := range m.Fields {
+		if m.Fields[i].Tenant {
 			return &m.Fields[i]
 		}
 	}

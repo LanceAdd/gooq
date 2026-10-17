@@ -41,6 +41,11 @@ type DMLBuilder struct {
 	selectBuilder   *SelectBuilder  // INSERT ... SELECT 数据源。
 	conditions      []gooq.Expression
 	unscoped        bool
+	untenant        bool
+	tenantIDs       []any
+	hasTenantIDs    bool
+	ctxTenant       any
+	hasCtxTenant    bool
 	upsert          *upsertClause
 	joins           []*joinClause     // UPDATE 多表 JOIN 子句。
 	returning       []gooq.Expression // RETURNING/OUTPUT 返回列。
@@ -160,6 +165,7 @@ func (b *DMLBuilder) Keys(fields ...interface{ ColumnName() string }) *DMLBuilde
 
 func (b *DMLBuilder) Clone() *DMLBuilder {
 	newB := *b
+	newB.tenantIDs = copyTenantIDs(b.tenantIDs)
 	newB.conditions = append([]gooq.Expression(nil), b.conditions...)
 	newB.joins = cloneJoins(b.joins)
 	newB.returning = append([]gooq.Expression(nil), b.returning...)

@@ -42,6 +42,7 @@ func (b *SelectBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 		return "", nil, err
 	}
 	rc := gooq.NewRenderContext(dialect)
+	seedTenant(rc, b.hasCtxTenant, b.ctxTenant)
 	sql := b.renderSelect(rc)
 	if err := rc.Err(); err != nil {
 		return "", nil, err
@@ -130,6 +131,7 @@ func joinKeywordSQL(rc *gooq.RenderContext, keyword string) string {
 func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
 	prev := rc.SwapQueryShard(b.hasShardValue, b.shardingValue)
 	defer rc.RestoreQueryShard(prev)
+	defer bindTenantLayer(rc, b.untenant, b.hasTenantIDs, b.tenantIDs, b.hasCtxTenant, b.ctxTenant)()
 	if base := gooq.TableBaseOf(b.from); base != nil {
 		rc.SetMainTable(base)
 	}
@@ -183,6 +185,9 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
 		if !joinSoftDeleteInWhere(j.joinType) {
 			if soft := b.softDeleteSQL(rc, j.table); soft != "" {
 				ons = append(ons, soft)
+			}
+			if tenant := b.tenantSQL(rc, j.table); tenant != "" {
+				ons = append(ons, tenant)
 			}
 		}
 		if len(ons) > 0 {
@@ -323,12 +328,18 @@ func (b *SelectBuilder) renderWhere(rc *gooq.RenderContext) string {
 	if soft := b.softDeleteSQL(rc, b.from); soft != "" {
 		parts = append(parts, soft)
 	}
+	if tenant := b.tenantSQL(rc, b.from); tenant != "" {
+		parts = append(parts, tenant)
+	}
 	for _, j := range b.joins {
 		if !joinSoftDeleteInWhere(j.joinType) {
 			continue
 		}
 		if soft := b.softDeleteSQL(rc, j.table); soft != "" {
 			parts = append(parts, soft)
+		}
+		if tenant := b.tenantSQL(rc, j.table); tenant != "" {
+			parts = append(parts, tenant)
 		}
 	}
 	return strings.Join(parts, " AND ")

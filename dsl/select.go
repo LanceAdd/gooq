@@ -91,7 +91,12 @@ type SelectBuilder struct {
 	limit         int // 0 表示不限制。
 	offset        int
 	distinct      bool
-	unscoped      bool   // 绕过软删除自动条件。
+	unscoped      bool // 绕过软删除自动条件。
+	untenant      bool // 绕过本层主表和 JOIN 的租户条件。
+	tenantIDs     []any
+	hasTenantIDs  bool
+	ctxTenant     any
+	hasCtxTenant  bool
 	alias         string // 子查询别名（派生表或标量子查询的 AS alias）。
 	cacheOption   *CacheOption
 	pageCacheOpt  *CacheOption // count 与各页 data 同 key 同生命周期。
@@ -170,6 +175,7 @@ func (b *SelectBuilder) Clone() *SelectBuilder {
 			newB.setOps[i].query = newB.setOps[i].query.Clone()
 		}
 	}
+	newB.tenantIDs = copyTenantIDs(b.tenantIDs)
 	newB.ctes = append([]cteClause(nil), b.ctes...)
 	for i := range newB.ctes {
 		if newB.ctes[i].query != nil {

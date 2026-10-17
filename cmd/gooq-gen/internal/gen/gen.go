@@ -37,6 +37,12 @@ gooq:
       # Database link, same format as the ORM configuration of GoFrame.
       # link: "mysql:root:pass@tcp(127.0.0.1:3306)/db"
       path: internal
+    # 只有 tenant.column 有值时才识别租户列。
+    # tenant:
+    #   column: tenant_id
+    #   tables:
+    #     shop_order: org_id
+    #     dict: ""
 `
 
 // tplView 是模板渲染视图（跨表生成复用）。

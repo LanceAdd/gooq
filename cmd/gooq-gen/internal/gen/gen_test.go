@@ -316,7 +316,7 @@ func TestGenerateSpecialTypes(t *testing.T) {
 			{Name: "span", LocalType: gooq.LocalTypeString},
 			{Name: "email", LocalType: gooq.LocalTypeString, Unique: true},
 		}
-		content, err := generateTableContent(context.Background(), database, tableSpec{Physical: "sample", Logical: "sample"}, "table", columns)
+		content, err := generateTableContent(context.Background(), database, tableSpec{Physical: "sample", Logical: "sample"}, "table", columns, tenantSettings{})
 		t.AssertNil(err)
 		t.Assert(gstr.Contains(content, "gooq.Field[string]"), true)
 		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalTypeDecimal`), true)

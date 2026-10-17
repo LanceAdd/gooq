@@ -36,19 +36,23 @@ var reservedFieldNames = map[string]bool{
 }
 
 func generateTable(ctx context.Context, database *db.DB, specs []tableSpec, dirPathTable string) {
+	tenantCfg, err := loadTenantSettings()
+	if err != nil {
+		mlog.Fatalf("%+v", err)
+	}
 	for _, spec := range specs {
-		generateTableSingle(ctx, database, spec, dirPathTable)
+		generateTableSingle(ctx, database, spec, dirPathTable, tenantCfg)
 	}
 	generateShardingRegister(specs, dirPathTable)
 }
 
-func generateTableSingle(ctx context.Context, database *db.DB, spec tableSpec, dirPathTable string) {
+func generateTableSingle(ctx context.Context, database *db.DB, spec tableSpec, dirPathTable string, tenantCfg tenantSettings) {
 	columns, err := database.TableFields(ctx, spec.Physical)
 	if err != nil {
 		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, spec.Physical, err)
 	}
 	fileName := formatFileName(spec.Logical, "")
-	tableContent, err := generateTableContent(ctx, database, spec, dirPathTable, columns)
+	tableContent, err := generateTableContent(ctx, database, spec, dirPathTable, columns, tenantCfg)
 	if err != nil {
 		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, spec.Logical, err)
 	}
@@ -95,7 +99,7 @@ func generateShardingRegister(specs []tableSpec, dirPathTable string) {
 }
 
 func generateTableContent(
-	ctx context.Context, database *db.DB, spec tableSpec, dirPathTable string, columns []db.Column,
+	ctx context.Context, database *db.DB, spec tableSpec, dirPathTable string, columns []db.Column, tenantCfg tenantSettings,
 ) (string, error) {
 	var (
 		fieldsLines []string
@@ -110,6 +114,10 @@ func generateTableContent(
 	if filepath.Base(dirPathTable) == "gooq" {
 		gooqRef = ""
 	}
+	tenantCol, tenantErr := tenantColumn(spec.Logical, columns, tenantCfg)
+	if tenantErr != nil {
+		return "", tenantErr
+	}
 	usedNames := map[string]string{}
 	for _, field := range columns {
 		fieldName := field.Name
@@ -120,6 +128,7 @@ func generateTableContent(
 
 		goType := tableFieldTypes(field, &hasStdTime, &hasUUID)
 		softDelete := isSoftDeleteColumn(fieldName)
+		tenant := tenantCol != nil && tenantCol.Name == field.Name
 		primary := field.Primary
 		autoIncrement := field.AutoIncrement
 		unique := field.Unique
@@ -128,11 +137,12 @@ func generateTableContent(
 			"\t%-20s %sField[%s]", camelName, gooqRef, goType,
 		))
 		metaLines = append(metaLines, fmt.Sprintf(
-			"\t\t{ColumnName: %q, LocalType: %s%s%s%s%s},",
+			"\t\t{ColumnName: %q, LocalType: %s%s%s%s%s%s},",
 			fieldName, localTypeRef(gooqRef, field.LocalType),
 			boolSuffix("Primary", primary),
 			boolSuffix("AutoIncrement", autoIncrement),
 			boolSuffix("SoftDelete", softDelete),
+			boolSuffix("Tenant", tenant),
 			boolSuffix("Unique", unique),
 		))
 		assignLines = append(assignLines, fmt.Sprintf(

@@ -21,6 +21,14 @@ type RenderContext struct {
 	queryShard    any
 	mainTable     *TableBase
 	shardNames    map[*TableBase]string
+	tenantHas     bool
+	tenantIDs     []any
+}
+
+// TenantState 是一层租户值，供子查询覆盖后恢复。
+type TenantState struct {
+	has bool
+	ids []any
 }
 
 // QueryShardState 是一次查询的分片渲染状态，供子查询进出时保存和恢复。
@@ -128,4 +136,37 @@ func (rc *RenderContext) RestoreQueryShard(prev QueryShardState) {
 // SetMainTable 指定当前查询的主表。查询上的 ShardBy 只作用于这张表。
 func (rc *RenderContext) SetMainTable(base *TableBase) {
 	rc.mainTable = base
+}
+
+// SetTenant 放入这次渲染一开始就有的租户值。分片切换不清这个值。
+func (rc *RenderContext) SetTenant(ids []any) {
+	rc.tenantHas = true
+	rc.tenantIDs = append([]any(nil), ids...)
+}
+
+// PushTenant 用这一层的显式租户值盖住外层，返回外层的值。
+func (rc *RenderContext) PushTenant(ids []any) TenantState {
+	prev := TenantState{has: rc.tenantHas, ids: rc.tenantIDs}
+	rc.tenantHas = true
+	rc.tenantIDs = append([]any(nil), ids...)
+	return prev
+}
+
+// PopTenant 恢复 PushTenant 之前的租户值。
+func (rc *RenderContext) PopTenant(prev TenantState) {
+	rc.tenantHas = prev.has
+	rc.tenantIDs = prev.ids
+}
+
+// HasTenant 报告这次渲染上下文里有没有租户值。
+func (rc *RenderContext) HasTenant() bool {
+	return rc.tenantHas
+}
+
+// TenantIDs 返回这次渲染上下文里的租户值。
+func (rc *RenderContext) TenantIDs() ([]any, bool) {
+	if !rc.tenantHas {
+		return nil, false
+	}
+	return rc.tenantIDs, true
 }

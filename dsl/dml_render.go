@@ -14,6 +14,14 @@ func (b *DMLBuilder) installShard(rc *gooq.RenderContext) {
 	rc.SetMainTable(gooq.TableBaseOf(b.table))
 }
 
+func (b *DMLBuilder) installTenant(rc *gooq.RenderContext) {
+	seedTenant(rc, b.hasCtxTenant, b.ctxTenant)
+	if b.untenant || !b.hasTenantIDs {
+		return
+	}
+	rc.PushTenant(b.tenantIDs)
+}
+
 // ToSql 用指定方言渲染 SQL，不传方言时默认 MySQL。
 func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 	if b.err != nil {
@@ -31,6 +39,7 @@ func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 	}
 	rc := gooq.NewRenderContext(dialect)
 	b.installShard(rc)
+	b.installTenant(rc)
 	var (
 		sql  string
 		args []any
@@ -89,6 +98,9 @@ func (b *DMLBuilder) renderInsertFrom(rc *gooq.RenderContext) (string, []any, er
 }
 
 func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error) {
+	if err := b.rejectTenantUpsert(rc); err != nil {
+		return "", nil, err
+	}
 	if len(b.insertRows) == 0 {
 		return "", nil, fmt.Errorf("gooq: insert data is empty")
 	}
@@ -206,6 +218,9 @@ func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error)
 	if len(b.setValues) == 0 {
 		return "", nil, fmt.Errorf("gooq: update data is empty")
 	}
+	if err := b.rejectTenantSets(rc, b.setValues); err != nil {
+		return "", nil, err
+	}
 	spec := rc.Spec()
 	if spec == nil {
 		return "", nil, fmt.Errorf("gooq: dialect %q is not registered", rc.Dialect())
@@ -262,6 +277,10 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 		}
 		rc := gooq.NewRenderContext(dialect)
 		b.installShard(rc)
+		b.installTenant(rc)
+		if err := b.rejectTenantSets(rc, sets); err != nil {
+			return nil, nil, err
+		}
 		var sqlStr string
 		switch b.kind {
 		case dmlDelete:
@@ -355,6 +374,17 @@ func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
 			parts = append(parts, condSQL)
 		}
 	}
+	if tenant := b.tenantSQL(rc, b.table); tenant != "" {
+		parts = append(parts, tenant)
+	}
+	for _, j := range b.joins {
+		if !joinSoftDeleteInWhere(j.joinType) {
+			continue
+		}
+		if tenant := b.tenantSQL(rc, j.table); tenant != "" {
+			parts = append(parts, tenant)
+		}
+	}
 	return strings.Join(parts, " AND ")
 }
 
@@ -392,14 +422,16 @@ func (b *DMLBuilder) joinRenders(rc *gooq.RenderContext) []gooq.JoinRender {
 }
 
 func (b *DMLBuilder) renderJoinCond(rc *gooq.RenderContext, j *joinClause) string {
-	if len(j.on) == 0 {
-		return ""
-	}
 	var ons []string
 	for _, c := range j.on {
 		onSQL := rc.Render(c)
 		if onSQL != "" {
 			ons = append(ons, onSQL)
+		}
+	}
+	if !joinSoftDeleteInWhere(j.joinType) {
+		if tenant := b.tenantSQL(rc, j.table); tenant != "" {
+			ons = append(ons, tenant)
 		}
 	}
 	return strings.Join(ons, " AND ")
