@@ -61,6 +61,6 @@ func TestExt_CustomFunction(t *testing.T) {
 			Where(gooq.Eq(concatPipe(u.Name, gooq.Str("-x")), gooq.Str("a-x"))).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE CONCAT(`user`.`name`, '-x') = 'a-x'")
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (CONCAT(`user`.`name`, '-x') = 'a-x')")
 	})
 }

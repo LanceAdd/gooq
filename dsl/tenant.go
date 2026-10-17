@@ -29,6 +29,7 @@ func TenantFromContext(ctx context.Context) (any, bool) {
 }
 
 func (b *SelectBuilder) Tenant(ids ...any) *SelectBuilder {
+	b.untenant = false
 	b.hasTenantIDs, b.tenantIDs = tenantArgs(ids)
 	return b
 }
@@ -43,6 +44,7 @@ func (b *SelectBuilder) stampTenant(ctx context.Context) {
 }
 
 func (b *DMLBuilder) Tenant(ids ...any) *DMLBuilder {
+	b.untenant = false
 	b.hasTenantIDs, b.tenantIDs = tenantArgs(ids)
 	return b
 }
@@ -79,19 +81,58 @@ func seedTenant(rc *gooq.RenderContext, hasCtx bool, id any) {
 }
 
 // bindTenantLayer 在这一层有显式租户值时盖住外层。UnTenant 不改上下文。
-func bindTenantLayer(rc *gooq.RenderContext, untenant, hasIDs bool, ids []any, hasCtx bool, ctxID any) func() {
-	if untenant {
+// ctx 只由顶层入口放进渲染上下文，子查询不读构建器上记下的值。
+func bindTenantLayer(rc *gooq.RenderContext, untenant, hasIDs bool, ids []any) func() {
+	if untenant || !hasIDs {
 		return func() {}
 	}
-	if hasIDs {
-		prev := rc.PushTenant(ids)
-		return func() { rc.PopTenant(prev) }
-	}
-	if rc.HasTenant() || !hasCtx {
-		return func() {}
-	}
-	prev := rc.PushTenant([]any{ctxID})
+	prev := rc.PushTenant(ids)
 	return func() { rc.PopTenant(prev) }
+}
+
+func tenantMarked(table gooq.Table) bool {
+	return table != nil && table.Meta() != nil && table.Meta().TenantField() != nil
+}
+
+func appendTenantName(names []string, table gooq.Table) []string {
+	if !tenantMarked(table) {
+		return names
+	}
+	name := table.TableName()
+	for _, existing := range names {
+		if existing == name {
+			return names
+		}
+	}
+	return append(names, name)
+}
+
+func checkTenantJoins(rc *gooq.RenderContext, untenant bool, main gooq.Table, joins []*joinClause) {
+	if untenant {
+		return
+	}
+	names := appendTenantName(nil, main)
+	var blocked string
+	for _, j := range joins {
+		names = appendTenantName(names, j.table)
+		if blocked == "" && (j.joinType == joinRight || j.joinType == joinFull) {
+			blocked = joinKeyword[j.joinType]
+		}
+	}
+	if len(names) == 0 || blocked == "" {
+		return
+	}
+	quoted := make([]string, len(names))
+	for i, name := range names {
+		quoted[i] = fmt.Sprintf("%q", name)
+	}
+	rc.Fail(fmt.Errorf(
+		"gooq: %s is not supported in a query that touches tenant table %s; swap to LEFT JOIN or call UnTenant()",
+		blocked, strings.Join(quoted, ", ")))
+}
+
+func parenthesizeSQL(sql string) string {
+	return "(" + sql + ")"
 }
 
 func (b *SelectBuilder) tenantSQL(rc *gooq.RenderContext, table gooq.Table) string {
@@ -176,6 +217,90 @@ func (b *DMLBuilder) rejectTenantSets(rc *gooq.RenderContext, sets []columnValue
 		if err := b.rejectTenantWrite(rc, cv.column, cv.value, cv.null); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (b *DMLBuilder) requireSingleTenant(rc *gooq.RenderContext, field *gooq.FieldMeta) error {
+	ids, ok := rc.TenantIDs()
+	if !ok || len(ids) == 0 {
+		return fmt.Errorf("gooq: tenant value is required for %q.%s", b.table.TableName(), field.ColumnName)
+	}
+	if len(ids) != 1 {
+		return fmt.Errorf("gooq: insert into tenant table %q requires a single tenant value", b.table.TableName())
+	}
+	return nil
+}
+
+func (b *DMLBuilder) rejectTenantInsert(rc *gooq.RenderContext) error {
+	if b.untenant || b.table == nil || b.table.Meta() == nil {
+		return nil
+	}
+	field := b.table.Meta().TenantField()
+	if field == nil {
+		return nil
+	}
+	if err := b.requireSingleTenant(rc, field); err != nil {
+		return err
+	}
+	ids, _ := rc.TenantIDs()
+	for _, row := range b.insertRows {
+		found := false
+		for _, cv := range row {
+			if cv.column != field.ColumnName {
+				continue
+			}
+			found = true
+			if cv.null {
+				return fmt.Errorf("gooq: tenant column %q cannot be NULL", field.ColumnName)
+			}
+			if _, isExpr := cv.value.(gooq.Expression); isExpr {
+				return fmt.Errorf("gooq: tenant column %q must be set to the current tenant value", field.ColumnName)
+			}
+			if err := gooq.CheckTenantValue(field.LocalType, field.ColumnName, cv.value); err != nil {
+				return err
+			}
+			if !reflect.DeepEqual(cv.value, ids[0]) {
+				return fmt.Errorf("gooq: tenant column %q must equal the current tenant value", field.ColumnName)
+			}
+		}
+		if !found {
+			return fmt.Errorf(
+				"gooq: insert into tenant table %q must set tenant column %q; call UnTenant() to opt out",
+				b.table.TableName(), field.ColumnName)
+		}
+	}
+	return nil
+}
+
+func (b *DMLBuilder) rejectTenantInsertFrom(rc *gooq.RenderContext) error {
+	if b.untenant || b.table == nil || b.table.Meta() == nil {
+		return nil
+	}
+	field := b.table.Meta().TenantField()
+	if field == nil {
+		return nil
+	}
+	if err := b.requireSingleTenant(rc, field); err != nil {
+		return err
+	}
+	if b.selectBuilder == nil || len(b.selectBuilder.fields) == 0 {
+		return fmt.Errorf("gooq: insert into tenant table %q requires every select item to be a named column", b.table.TableName())
+	}
+	found := false
+	for _, item := range b.selectBuilder.fields {
+		named, ok := item.(interface{ ColumnName() string })
+		if !ok {
+			return fmt.Errorf("gooq: insert into tenant table %q requires every select item to be a named column", b.table.TableName())
+		}
+		if named.ColumnName() == field.ColumnName {
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf(
+			"gooq: insert into tenant table %q must set tenant column %q; call UnTenant() to opt out",
+			b.table.TableName(), field.ColumnName)
 	}
 	return nil
 }

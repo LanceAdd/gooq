@@ -4,12 +4,16 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gogf/gf/v2/encoding/gyaml"
-	"github.com/gogf/gf/v2/os/gfile"
-
 	"github.com/lanceadd/gooq"
 	"github.com/lanceadd/gooq/db"
 )
+
+// TenantConfig 是 CLI 从 gooq.gen.tenant 读出后传入 Generate 的配置。
+// Column 为空时不识别租户列。Tables 的空字符串表示这张表不标。
+type TenantConfig struct {
+	Column string
+	Tables map[string]any
+}
 
 type tenantSettings struct {
 	active bool
@@ -17,70 +21,23 @@ type tenantSettings struct {
 	tables map[string]string
 }
 
-func loadTenantSettings() (tenantSettings, error) {
-	dir := hackDirPath()
-	if dir == "" {
+func tenantSettingsFrom(cfg TenantConfig) (tenantSettings, error) {
+	if cfg.Column == "" {
 		return tenantSettings{}, nil
 	}
-	path := gfile.Join(dir, configFileName)
-	if !gfile.Exists(path) {
-		return tenantSettings{}, nil
-	}
-	return parseTenantSettings(gfile.GetBytes(path))
-}
-
-func parseTenantSettings(content []byte) (tenantSettings, error) {
-	if len(strings.TrimSpace(string(content))) == 0 {
-		return tenantSettings{}, nil
-	}
-	var doc map[string]any
-	if err := gyaml.DecodeTo(content, &doc); err != nil {
-		return tenantSettings{}, fmt.Errorf("gooq: parse gooq.yaml: %w", err)
-	}
-	genNode, ok := nestedMap(doc, "gooq", "gen")
-	if !ok {
-		return tenantSettings{}, nil
-	}
-	raw, exists := genNode["tenant"]
-	if !exists || raw == nil {
-		return tenantSettings{}, nil
-	}
-	node, ok := raw.(map[string]any)
-	if !ok {
-		return tenantSettings{}, fmt.Errorf("gooq: gooq.gen.tenant must be a map")
-	}
-	column := ""
-	if rawColumn, ok := node["column"]; ok && rawColumn != nil {
-		text, ok := rawColumn.(string)
-		if !ok {
-			return tenantSettings{}, fmt.Errorf("gooq: gooq.gen.tenant.column must be a string")
-		}
-		column = text
-	}
-	if column == "" {
-		return tenantSettings{}, nil
-	}
-	cfg := tenantSettings{active: true, column: column, tables: map[string]string{}}
-	rawTables, ok := node["tables"]
-	if !ok || rawTables == nil {
-		return cfg, nil
-	}
-	tables, ok := rawTables.(map[string]any)
-	if !ok {
-		return tenantSettings{}, fmt.Errorf("gooq: gooq.gen.tenant.tables must be a map")
-	}
-	for name, value := range tables {
+	settings := tenantSettings{active: true, column: cfg.Column, tables: map[string]string{}}
+	for name, value := range cfg.Tables {
 		if value == nil {
-			cfg.tables[name] = ""
+			settings.tables[name] = ""
 			continue
 		}
 		text, ok := value.(string)
 		if !ok {
 			return tenantSettings{}, fmt.Errorf("gooq: tenant column for table %q must be a string", name)
 		}
-		cfg.tables[name] = text
+		settings.tables[name] = text
 	}
-	return cfg, nil
+	return settings, nil
 }
 
 func tenantColumn(logical string, columns []db.Column, cfg tenantSettings) (*db.Column, error) {
@@ -150,20 +107,4 @@ func matchColumns(columns []db.Column, name string) []db.Column {
 
 func foldColumn(name string) string {
 	return strings.ReplaceAll(strings.ToLower(name), "_", "")
-}
-
-func nestedMap(root map[string]any, keys ...string) (map[string]any, bool) {
-	current := root
-	for _, key := range keys {
-		raw, ok := current[key]
-		if !ok || raw == nil {
-			return nil, false
-		}
-		next, ok := raw.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		current = next
-	}
-	return current, true
 }

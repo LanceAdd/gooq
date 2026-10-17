@@ -35,8 +35,8 @@ var reservedFieldNames = map[string]bool{
 	"BoundBase":  true,
 }
 
-func generateTable(ctx context.Context, database *db.DB, specs []tableSpec, dirPathTable string) {
-	tenantCfg, err := loadTenantSettings()
+func generateTable(ctx context.Context, database *db.DB, specs []tableSpec, dirPathTable string, tenant TenantConfig) {
+	tenantCfg, err := tenantSettingsFrom(tenant)
 	if err != nil {
 		mlog.Fatalf("%+v", err)
 	}

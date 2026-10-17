@@ -276,6 +276,7 @@ func (b *SelectBuilder) countBuilderOf() *SelectBuilder {
 	if b.countWrapped() {
 		outer := Select(gooq.Raw("COUNT(*)"))
 		outer.from = b.unbounded().As("t")
+		outer.hasCtxTenant, outer.ctxTenant = b.hasCtxTenant, b.ctxTenant
 		return outer
 	}
 	countBuilder := b.unbounded()
@@ -289,6 +290,7 @@ func (b *SelectBuilder) existsBuilder() *SelectBuilder {
 	if b.countWrapped() {
 		outer := Select(gooq.Raw("1"))
 		outer.from = b.unbounded().As("t")
+		outer.hasCtxTenant, outer.ctxTenant = b.hasCtxTenant, b.ctxTenant
 		return outer
 	}
 	sub := b.unbounded()

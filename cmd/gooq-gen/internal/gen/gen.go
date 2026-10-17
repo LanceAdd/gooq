@@ -17,6 +17,8 @@ type Input struct {
 	Path string
 	// TablesFile 是 hack/gooq.tables.yaml。空表示没有分组文件，每张表生成一个普通对象。
 	TablesFile string
+	// Tenant 由 CLI 从 gooq.gen.tenant 读出。零值不识别租户列。
+	Tenant TenantConfig
 }
 
 const (
@@ -37,7 +39,7 @@ gooq:
       # Database link, same format as the ORM configuration of GoFrame.
       # link: "mysql:root:pass@tcp(127.0.0.1:3306)/db"
       path: internal
-    # 只有 tenant.column 有值时才识别租户列。
+    # Tenant columns are recognized only when tenant.column is set.
     # tenant:
     #   column: tenant_id
     #   tables:
@@ -122,7 +124,7 @@ func Generate(ctx context.Context, in Input) {
 	if err = validateShardSchemas(ctx, database, specs); err != nil {
 		mlog.Fatalf("sharding tables validation failed: %+v", err)
 	}
-	generateTable(ctx, database, specs, gfile.Join(in.Path, dirPathTable))
+	generateTable(ctx, database, specs, gfile.Join(in.Path, dirPathTable), in.Tenant)
 	generateModel(ctx, database, specs, gfile.Join(in.Path, dirPathModel))
 
 	mlog.Print("done!")

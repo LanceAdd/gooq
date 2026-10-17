@@ -2,9 +2,11 @@ package gen
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/text/gstr"
 
@@ -14,23 +16,19 @@ import (
 
 func TestGen_TenantSettings(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		absent, err := parseTenantSettings([]byte("gooq:\n  gen:\n    table:\n      path: internal\n"))
+		absent, err := tenantSettingsFrom(TenantConfig{})
 		t.AssertNil(err)
 		t.Assert(absent.active, false)
 
-		empty, err := parseTenantSettings([]byte("gooq:\n  gen:\n    tenant:\n"))
-		t.AssertNil(err)
-		t.Assert(empty.active, false)
-
-		tablesOnly, err := parseTenantSettings([]byte("gooq:\n  gen:\n    tenant:\n      tables:\n        dict: \"\"\n"))
-		t.AssertNil(err)
-		t.Assert(tablesOnly.active, false)
-
-		emptyColumn, err := parseTenantSettings([]byte("gooq:\n  gen:\n    tenant:\n      column: \"\"\n      tables:\n        dict: \"\"\n"))
+		emptyColumn, err := tenantSettingsFrom(TenantConfig{Tables: map[string]any{"dict": ""}})
 		t.AssertNil(err)
 		t.Assert(emptyColumn.active, false)
 
-		present, err := parseTenantSettings([]byte("gooq:\n  gen:\n    tenant:\n      column: tenant_id\n      tables:\n        dict: \"\"\n"))
+		_, err = tenantSettingsFrom(TenantConfig{Column: "tenant_id", Tables: map[string]any{"dict": 1}})
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "must be a string"), true)
+
+		present, err := tenantSettingsFrom(TenantConfig{Column: "tenant_id", Tables: map[string]any{"dict": ""}})
 		t.AssertNil(err)
 		t.Assert(present.active, true)
 		t.Assert(present.column, "tenant_id")
@@ -48,7 +46,7 @@ func TestGen_TenantSettings(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(disabled == nil, true)
 
-		_, err = tenantColumn("shop_order", columns, tenantSettings{active: true, tables: map[string]string{"shop_order": "org_id"}})
+		_, err = tenantColumn("shop_order", columns, tenantSettings{active: true, column: "tenant_id", tables: map[string]string{"shop_order": "org_id"}})
 		t.AssertNE(err, nil)
 		t.Assert(strings.Contains(err.Error(), "org_id"), true)
 
@@ -73,7 +71,8 @@ func TestGen_TenantFieldGenerated(t *testing.T) {
 			{Name: "tenant_id", LocalType: gooq.LocalTypeInt64},
 			{Name: "name", LocalType: gooq.LocalTypeString},
 		}
-		cfg := tenantSettings{active: true, column: "tenant_id"}
+		cfg, err := tenantSettingsFrom(TenantConfig{Column: "tenant_id"})
+		t.AssertNil(err)
 
 		content, err := generateTableContent(context.Background(), database, tableSpec{Physical: "user", Logical: "user"}, "table", columns, cfg)
 		t.AssertNil(err)
@@ -83,5 +82,34 @@ func TestGen_TenantFieldGenerated(t *testing.T) {
 		disabled, err := generateTableContent(context.Background(), database, tableSpec{Physical: "user", Logical: "user"}, "table", columns, cfg)
 		t.AssertNil(err)
 		t.Assert(gstr.Contains(disabled, "Tenant: true"), false)
+	})
+}
+
+func TestGenerate_TenantIgnoresCwd(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		root := t.TempDir()
+		dbPath := filepath.Join(root, "tenant.db")
+		outDir := filepath.Join(root, "out")
+		t.AssertNil(gfile.Mkdir(outDir))
+		t.AssertNil(gfile.Mkdir(filepath.Join(root, "hack")))
+		t.AssertNil(gfile.PutContents(filepath.Join(root, "hack", "gooq.yaml"), "gooq:\n  gen:\n    tenant:\n      column: tenant_id\n"))
+		database, err := db.Open(db.Config{Link: "sqlite::@file(" + filepath.ToSlash(dbPath) + ")"})
+		t.AssertNil(err)
+		_, err = database.Exec(context.Background(), `CREATE TABLE user (id INTEGER PRIMARY KEY, tenant_id INTEGER NOT NULL, name TEXT)`)
+		t.AssertNil(err)
+		t.AssertNil(database.Close())
+
+		t.Chdir(root)
+		Generate(context.Background(), Input{Link: "sqlite::@file(" + filepath.ToSlash(dbPath) + ")", Path: outDir})
+		plain := gfile.GetContents(filepath.Join(outDir, "table", "user.go"))
+		t.Assert(gstr.Contains(plain, "Tenant: true"), false)
+
+		Generate(context.Background(), Input{
+			Link:   "sqlite::@file(" + filepath.ToSlash(dbPath) + ")",
+			Path:   outDir,
+			Tenant: TenantConfig{Column: "tenant_id"},
+		})
+		marked := gfile.GetContents(filepath.Join(outDir, "table", "user.go"))
+		t.Assert(gstr.Contains(marked, "Tenant: true"), true)
 	})
 }

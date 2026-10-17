@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/gmeta"
@@ -69,12 +70,32 @@ func (c appCmd) Index(ctx context.Context, in genInput) (out *genOutput, err err
 			mlog.Print(`ignore gooq.gen.table.shardPattern; grouping is hack/gooq.tables.yaml`)
 		}
 	}
+	tenant, err := readTenantConfig(ctx)
+	if err != nil {
+		mlog.Fatalf("%+v", err)
+	}
 	gen.Generate(ctx, gen.Input{
 		Link:       in.Link,
 		Path:       in.Path,
 		TablesFile: gen.TablesFilePath(),
+		Tenant:     tenant,
 	})
 	return
+}
+
+func readTenantConfig(ctx context.Context) (gen.TenantConfig, error) {
+	if !g.Cfg().Available(ctx) {
+		return gen.TenantConfig{}, nil
+	}
+	value, err := g.Cfg().Get(ctx, "gooq.gen.tenant")
+	if err != nil || value == nil || value.IsNil() || value.IsEmpty() {
+		return gen.TenantConfig{}, err
+	}
+	var cfg gen.TenantConfig
+	if err = value.Scan(&cfg); err != nil {
+		return gen.TenantConfig{}, fmt.Errorf("gooq: parse gooq.gen.tenant: %w", err)
+	}
+	return cfg, nil
 }
 
 type tablesInput struct {

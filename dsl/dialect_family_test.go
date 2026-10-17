@@ -71,7 +71,7 @@ func TestDsl_GaussDB(t *testing.T) {
 			Returning(testUser.Id).
 			ToSql(gooq.DialectGaussDB)
 		t.AssertNil(err)
-		t.Assert(sql, `UPDATE "user" SET "status" = $1 WHERE "user"."id" = $2 RETURNING "user"."id"`)
+		t.Assert(sql, `UPDATE "user" SET "status" = $1 WHERE ("user"."id" = $2) RETURNING "user"."id"`)
 
 		sql, _, err = Select(testUser.Id).From(testUser).LockInShareMode().Offset(20).ToSql(gooq.DialectGaussDB)
 		t.AssertNil(err)
@@ -141,7 +141,7 @@ func TestDsl_DM(t *testing.T) {
 
 		sql, args, err = Update(testUser).Set(testUser.Status, "vip").InnerJoin(testRole).On(testRole.Id.EqExpr(testUser.Id)).ToSql(gooq.DialectDM)
 		t.AssertNil(err)
-		t.Assert(sql, `UPDATE "USER" SET "STATUS" = ? FROM "ROLE" WHERE "ROLE"."ID" = "USER"."ID"`)
+		t.Assert(sql, `UPDATE "USER" SET "STATUS" = ? FROM "ROLE" WHERE ("ROLE"."ID" = "USER"."ID")`)
 		t.AssertEQ(args, []any{"vip"})
 
 		sql, _, err = Select(testUser.Id).From(testUser).Offset(20).ToSql(gooq.DialectDM)

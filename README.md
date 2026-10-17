@@ -88,7 +88,7 @@ sql, args, err := dsl.Select(User.Id, User.Name).
     Order(User.Id.Desc()).
     Limit(10).
     ToSql(gooq.DialectMySQL)
-// sql:  SELECT `user`.`id`, `user`.`name` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL ORDER BY `user`.`id` DESC LIMIT 10
+// sql:  SELECT `user`.`id`, `user`.`name` FROM `user` WHERE (`user`.`age` > ?) AND `user`.`deleted_at` IS NULL ORDER BY `user`.`id` DESC LIMIT 10
 // args: []any{18}
 ```
 
@@ -205,13 +205,13 @@ dsl.Select(u.Id, r.Name).From(u).
     InnerJoin(r).On(r.Id.EqExpr(ur.RoleId)).
     Where(r.Name.Eq("admin")).
     ToSql(gooq.DialectMySQL)
-// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL AND `r`.`deleted_at` IS NULL
+// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON (`ur`.`user_id` = `u`.`id`) INNER JOIN `role` AS `r` ON (`r`.`id` = `ur`.`role_id`) WHERE (`r`.`name` = ?) AND `u`.`deleted_at` IS NULL AND `r`.`deleted_at` IS NULL
 
 // Self-join: two alias instances of the same table.
 u1 := User.As("u1")
 u2 := User.As("u2")
 dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
-// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL AND `u2`.`deleted_at` IS NULL
+// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON (`u1`.`id` = `u2`.`id`) WHERE `u1`.`deleted_at` IS NULL AND `u2`.`deleted_at` IS NULL
 
 // LATERAL derived tables. SQLite 3.46 does not support LATERAL and returns an error at render time.
 lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
@@ -226,7 +226,7 @@ dsl.Select(u.Id, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1
 sub := dsl.Select(Role.Id).From(Role).Where(Role.Name.Eq("admin"))
 
 dsl.Select(User.Id).From(User).Where(User.Id.InExpr(sub))
-// ... WHERE `user`.`id` IN (SELECT `role`.`id` FROM `role` WHERE `role`.`name` = ? AND `role`.`deleted_at` IS NULL) ...
+// ... WHERE (`user`.`id` IN (SELECT `role`.`id` FROM `role` WHERE (`role`.`name` = ?) AND `role`.`deleted_at` IS NULL)) ...
 
 dsl.Select(User.Id).From(User).Where(gooq.Exists(sub))
 // ... WHERE EXISTS (SELECT ...) ...
@@ -236,7 +236,7 @@ dsl.Select(User.Id).From(User).Where(gooq.NotExists(sub))
 dsl.Select(User.Id).From(
     dsl.Select(User.Id).From(User).Where(User.Age.Gt(18)).As("t"),
 )
-// SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS `t`
+// SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE (`user`.`age` > ?) AND `user`.`deleted_at` IS NULL) AS `t`
 
 // Correlated subqueries: reference the outer alias inside.
 u := User.As("u")
@@ -244,7 +244,7 @@ ur := UserRole.As("ur")
 dsl.Select(u.Id).From(u).Where(gooq.Exists(
     dsl.Select(ur.UserId).From(ur).Where(ur.UserId.EqExpr(u.Id)),
 ))
-// ... WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS `ur` WHERE `ur`.`user_id` = `u`.`id`) ...
+// ... WHERE (EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS `ur` WHERE (`ur`.`user_id` = `u`.`id`))) ...
 ```
 
 ### Grouping & aggregation
@@ -390,7 +390,7 @@ dsl.Insert(User).ValuesOf(
 
 // INSERT ... SELECT.
 dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
-// INSERT INTO `user` (`name`) SELECT `user`.`name` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL
+// INSERT INTO `user` (`name`) SELECT `user`.`name` FROM `user` WHERE (`user`.`age` > ?) AND `user`.`deleted_at` IS NULL
 ```
 
 ### Update
@@ -398,7 +398,7 @@ dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
 ```go
 // Chained Set.
 dsl.Update(User).Set(User.Name, "x").Set(User.Age, 20).Where(User.Id.Eq(1))
-// UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?
+// UPDATE `user` SET `name` = ?, `age` = ? WHERE (`user`.`id` = ?)
 
 // Map full update.
 dsl.Update(User).Data(map[string]any{"age": 1, "name": "x"})
@@ -406,7 +406,7 @@ dsl.Update(User).Data(map[string]any{"age": 1, "name": "x"})
 
 // Expression values render as SQL fragments (field arithmetic, Raw, etc.).
 dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.Id.Eq(1))
-// UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?
+// UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE (`user`.`id` = ?)
 
 // One record row becomes SET. Several rows update by primary key. RowsAffected is aggregated.
 dsl.Update(User).ValuesOf(model.NewUserRecord().SetName("x").SetAge(0)).Where(User.Id.Eq(1))
@@ -431,15 +431,15 @@ dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq
 ```go
 // Soft-delete tables: DELETE auto-rewrites to UPDATE deleted_at.
 dsl.Delete(User).Where(User.Id.Eq(1))
-// UPDATE `user` SET `deleted_at` = ? WHERE `user`.`id` = ?
+// UPDATE `user` SET `deleted_at` = ? WHERE (`user`.`id` = ?)
 
 // Unscoped(): real DELETE.
 dsl.Delete(User).Unscoped().Where(User.Id.Eq(1))
-// DELETE FROM `user` WHERE `user`.`id` = ?
+// DELETE FROM `user` WHERE (`user`.`id` = ?)
 
 // Non-soft-delete tables delete directly.
 dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
-// DELETE FROM `user_role` WHERE `user_role`.`id` = ?
+// DELETE FROM `user_role` WHERE (`user_role`.`id` = ?)
 
 // Batch delete by primary key (soft delete honored).
 dsl.Delete(User).ValuesOf(
@@ -618,6 +618,34 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - Table, column, and function aliases go through `Quote`. `numeric` / `decimal` generate `string`. PostgreSQL arrays generate a slice of the element type.
 - PostgreSQL 16 can run `STRING_AGG(DISTINCT ...)`, `JSON_ARRAYAGG`, and `ANY_VALUE`.
 
+## Multi-tenancy
+
+A tenant column is part of `TableMeta`, like a primary key or a soft-delete column. `gooq-gen` marks it only when `hack/gooq.yaml` sets `gooq.gen.tenant.column`. A missing `tenant` node, or an empty `column`, leaves generation unchanged. `tables` overrides that column for one logical table. An empty string turns the mark off for that table.
+
+```yaml
+gooq:
+  gen:
+    tenant:
+      column: tenant_id
+      tables:
+        shop_order: org_id
+        dict: ""
+```
+
+Column matching ignores case and underscores. Allowed values are `string`, `uuid.UUID`, and the integer widths. `int` and `int64` are not the same type.
+
+The value comes from `dsl.WithTenant(ctx, id)` or from `Tenant(id)` on that builder. `ToSql` does not read the context. Execution records the context value on the builder, then renders it into a new `RenderContext`. A statement that touches a tenant table and has no value returns an error. It does not emit `IS NULL`.
+
+`Tenant(id)` applies to that builder and to queries rendered inside it. A nested builder may call `Tenant(other)` or `UnTenant()`. The later call wins: `UnTenant().Tenant(7)` adds the predicate, and `Tenant(7).UnTenant()` does not. `UnTenant()` is the privileged escape for that builder's main table and joins. Nested queries still see the value the outer render placed in the context.
+
+`LEFT JOIN`, `LEFT JOIN LATERAL`, `INNER JOIN`, `INNER JOIN LATERAL`, and `CROSS JOIN LATERAL` keep their current shape. A `RIGHT JOIN` or `FULL JOIN` in a statement that touches any tenant table returns an error. Rewrite that join as `LEFT JOIN`, or call `UnTenant()`.
+
+`INSERT` into a tenant table must set the tenant column to the single current tenant value. The column is not filled in automatically. `INSERT ... SELECT` must list named columns and include the tenant column. `Select().From(src)` and a `Raw` select item fail before SQL is produced. `UnTenant()` skips these checks. An `UPDATE` cannot set the tenant column to another value. `OnConflictKey` is not rewritten to include the tenant column.
+
+`CacheOption.Name` is the cache key as written. Put the tenant in that name. Without `Name`, the key hashes the SQL and arguments, so different tenants do not share an entry.
+
+Each user `WHERE` and `ON` predicate is parenthesized before a soft-delete or tenant predicate is appended with `AND`.
+
 ## Sharding
 
 Shard groups live in `hack/gooq.tables.yaml`. `single` lists ordinary tables. `groups` lists sharded tables. Without that file, each physical table is generated as its own object. `gooq-gen tables init` writes the file with every table under `single`. `tables check` reports duplicate, missing, and extra names. `tables diff` reports tables added or removed in the database. Neither command rewrites the file.
@@ -683,7 +711,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 ```
 
 - `init` creates `hack/gooq.yaml` and `hack/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten.
-- Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority.
+- Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority. `gooq.gen.tenant` is read by the CLI and passed into generation. See Multi-tenancy above.
 - Templates: `<hack>/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Shard groups are `hack/gooq.tables.yaml`, maintained with `gooq-gen tables init`, `tables check`, and `tables diff`. See Sharding above.

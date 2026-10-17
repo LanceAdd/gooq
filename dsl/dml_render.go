@@ -67,6 +67,9 @@ func (b *DMLBuilder) ToSql(dialects ...gooq.Dialect) (string, []any, error) {
 }
 
 func (b *DMLBuilder) renderInsertFrom(rc *gooq.RenderContext) (string, []any, error) {
+	if err := b.rejectTenantInsertFrom(rc); err != nil {
+		return "", nil, err
+	}
 	// 列清单：优先子查询字段的列名，否则表全列。
 	var columns []string
 	if b.selectBuilder != nil && len(b.selectBuilder.fields) > 0 {
@@ -98,6 +101,9 @@ func (b *DMLBuilder) renderInsertFrom(rc *gooq.RenderContext) (string, []any, er
 }
 
 func (b *DMLBuilder) renderInsert(rc *gooq.RenderContext) (string, []any, error) {
+	if err := b.rejectTenantInsert(rc); err != nil {
+		return "", nil, err
+	}
 	if err := b.rejectTenantUpsert(rc); err != nil {
 		return "", nil, err
 	}
@@ -367,11 +373,12 @@ func (b *DMLBuilder) renderSoftDelete(rc *gooq.RenderContext, softField *gooq.Fi
 }
 
 func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
+	checkTenantJoins(rc, b.untenant, b.table, b.joins)
 	var parts []string
 	for _, c := range b.conditions {
 		condSQL := rc.Render(c)
 		if condSQL != "" {
-			parts = append(parts, condSQL)
+			parts = append(parts, parenthesizeSQL(condSQL))
 		}
 	}
 	if tenant := b.tenantSQL(rc, b.table); tenant != "" {
@@ -426,7 +433,7 @@ func (b *DMLBuilder) renderJoinCond(rc *gooq.RenderContext, j *joinClause) strin
 	for _, c := range j.on {
 		onSQL := rc.Render(c)
 		if onSQL != "" {
-			ons = append(ons, onSQL)
+			ons = append(ons, parenthesizeSQL(onSQL))
 		}
 	}
 	if !joinSoftDeleteInWhere(j.joinType) {

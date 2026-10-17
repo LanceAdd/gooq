@@ -87,7 +87,7 @@ sql, args, err := dsl.Select(User.Id, User.Name).
     Order(User.Id.Desc()).
     Limit(10).
     ToSql(gooq.DialectMySQL)
-// sql:  SELECT `user`.`id`, `user`.`name` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL ORDER BY `user`.`id` DESC LIMIT 10
+// sql:  SELECT `user`.`id`, `user`.`name` FROM `user` WHERE (`user`.`age` > ?) AND `user`.`deleted_at` IS NULL ORDER BY `user`.`id` DESC LIMIT 10
 // args: []any{18}
 ```
 
@@ -203,13 +203,13 @@ dsl.Select(u.Id, r.Name).From(u).
     InnerJoin(r).On(r.Id.EqExpr(ur.RoleId)).
     Where(r.Name.Eq("admin")).
     ToSql(gooq.DialectMySQL)
-// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON `ur`.`user_id` = `u`.`id` INNER JOIN `role` AS `r` ON `r`.`id` = `ur`.`role_id` WHERE `r`.`name` = ? AND `u`.`deleted_at` IS NULL AND `r`.`deleted_at` IS NULL
+// SELECT `u`.`id`, `r`.`name` FROM `user` AS `u` INNER JOIN `user_role` AS `ur` ON (`ur`.`user_id` = `u`.`id`) INNER JOIN `role` AS `r` ON (`r`.`id` = `ur`.`role_id`) WHERE (`r`.`name` = ?) AND `u`.`deleted_at` IS NULL AND `r`.`deleted_at` IS NULL
 
 // 自连接：同一表的两个别名实例。
 u1 := User.As("u1")
 u2 := User.As("u2")
 dsl.Select(u1.Id, u2.Id).From(u1).InnerJoin(u2).On(u1.Id.EqExpr(u2.Id))
-// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON `u1`.`id` = `u2`.`id` WHERE `u1`.`deleted_at` IS NULL AND `u2`.`deleted_at` IS NULL
+// SELECT `u1`.`id`, `u2`.`id` FROM `user` AS `u1` INNER JOIN `user` AS `u2` ON (`u1`.`id` = `u2`.`id`) WHERE `u1`.`deleted_at` IS NULL AND `u2`.`deleted_at` IS NULL
 
 // LATERAL 派生表。SQLite 3.46 不支持 LATERAL，渲染期返回错误。
 lt := dsl.Select(fn.Count(UserRole.UserId).As("cnt")).
@@ -224,7 +224,7 @@ dsl.Select(u.Id, lt.Field("cnt")).From(u).LeftJoinLateral(lt).On(gooq.Raw("1 = 1
 sub := dsl.Select(Role.Id).From(Role).Where(Role.Name.Eq("admin"))
 
 dsl.Select(User.Id).From(User).Where(User.Id.InExpr(sub))
-// ... WHERE `user`.`id` IN (SELECT `role`.`id` FROM `role` WHERE `role`.`name` = ? AND `role`.`deleted_at` IS NULL) ...
+// ... WHERE (`user`.`id` IN (SELECT `role`.`id` FROM `role` WHERE (`role`.`name` = ?) AND `role`.`deleted_at` IS NULL)) ...
 
 dsl.Select(User.Id).From(User).Where(gooq.Exists(sub))
 // ... WHERE EXISTS (SELECT ...) ...
@@ -234,7 +234,7 @@ dsl.Select(User.Id).From(User).Where(gooq.NotExists(sub))
 dsl.Select(User.Id).From(
     dsl.Select(User.Id).From(User).Where(User.Age.Gt(18)).As("t"),
 )
-// SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL) AS `t`
+// SELECT `user`.`id` FROM (SELECT `user`.`id` FROM `user` WHERE (`user`.`age` > ?) AND `user`.`deleted_at` IS NULL) AS `t`
 
 // 相关子查询：子查询内引用外层别名。
 u := User.As("u")
@@ -242,7 +242,7 @@ ur := UserRole.As("ur")
 dsl.Select(u.Id).From(u).Where(gooq.Exists(
     dsl.Select(ur.UserId).From(ur).Where(ur.UserId.EqExpr(u.Id)),
 ))
-// ... WHERE EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS `ur` WHERE `ur`.`user_id` = `u`.`id`) ...
+// ... WHERE (EXISTS (SELECT `ur`.`user_id` FROM `user_role` AS `ur` WHERE (`ur`.`user_id` = `u`.`id`))) ...
 ```
 
 ### 分组聚合
@@ -387,7 +387,7 @@ dsl.Insert(User).ValuesOf(
 
 // INSERT ... SELECT。
 dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
-// INSERT INTO `user` (`name`) SELECT `user`.`name` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL
+// INSERT INTO `user` (`name`) SELECT `user`.`name` FROM `user` WHERE (`user`.`age` > ?) AND `user`.`deleted_at` IS NULL
 ```
 
 ### 更新
@@ -395,7 +395,7 @@ dsl.InsertFrom(User, dsl.Select(User.Name).From(User).Where(User.Age.Gt(18)))
 ```go
 // 链式 Set。
 dsl.Update(User).Set(User.Name, "x").Set(User.Age, 20).Where(User.Id.Eq(1))
-// UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?
+// UPDATE `user` SET `name` = ?, `age` = ? WHERE (`user`.`id` = ?)
 
 // map 全量更新。
 dsl.Update(User).Data(map[string]any{"age": 1, "name": "x"})
@@ -403,7 +403,7 @@ dsl.Update(User).Data(map[string]any{"age": 1, "name": "x"})
 
 // 表达式值渲染为 SQL 片段（字段算术、Raw 等）。
 dsl.Update(User).Set(User.Age, User.Age.Add(1)).Where(User.Id.Eq(1))
-// UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?
+// UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE (`user`.`id` = ?)
 
 // 一行记录变成 SET。多行按主键分别更新，RowsAffected 聚合。
 dsl.Update(User).ValuesOf(model.NewUserRecord().SetName("x").SetAge(0)).Where(User.Id.Eq(1))
@@ -428,15 +428,15 @@ dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq
 ```go
 // 软删表：DELETE 自动转 UPDATE deleted_at。
 dsl.Delete(User).Where(User.Id.Eq(1))
-// UPDATE `user` SET `deleted_at` = ? WHERE `user`.`id` = ?
+// UPDATE `user` SET `deleted_at` = ? WHERE (`user`.`id` = ?)
 
 // Unscoped()：真删除。
 dsl.Delete(User).Unscoped().Where(User.Id.Eq(1))
-// DELETE FROM `user` WHERE `user`.`id` = ?
+// DELETE FROM `user` WHERE (`user`.`id` = ?)
 
 // 非软删表直接 DELETE。
 dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
-// DELETE FROM `user_role` WHERE `user_role`.`id` = ?
+// DELETE FROM `user_role` WHERE (`user_role`.`id` = ?)
 
 // 按主键批量删除（软删同样生效）。
 dsl.Delete(User).ValuesOf(
@@ -610,6 +610,34 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 - 表别名、列别名和函数别名都走 `Quote`。`numeric` / `decimal` 生成 `string`。PostgreSQL 数组按元素类型生成切片。
 - PostgreSQL 16 起可用 `STRING_AGG(DISTINCT ...)`、`JSON_ARRAYAGG` 和 `ANY_VALUE`。
 
+## 多租户
+
+租户列写在 `TableMeta` 里，和主键、软删列一样。`hack/gooq.yaml` 里 `gooq.gen.tenant.column` 有值时，`gooq-gen` 才给列打上 `Tenant`。没有 `tenant` 节点，或 `column` 为空，生成结果不变。`tables` 给一张逻辑表换列名。空字符串表示这张表不标。
+
+```yaml
+gooq:
+  gen:
+    tenant:
+      column: tenant_id
+      tables:
+        shop_order: org_id
+        dict: ""
+```
+
+列名比较忽略大小写和下划线。值可以是 `string`、`uuid.UUID` 和各种整数宽度。`int` 和 `int64` 不是同一种类型。
+
+租户值来自 `dsl.WithTenant(ctx, id)`，或这条构建器上的 `Tenant(id)`。`ToSql` 不读 ctx。执行时先把 ctx 里的值记到构建器上，再放进这次新建的 `RenderContext`。语句碰到租户表却没有值时返回错误，不生成 `IS NULL`。
+
+`Tenant(id)` 作用在这个构建器以及它里面渲染的查询上。内层构建器可以再写 `Tenant(other)` 或 `UnTenant()`。后调用的生效：`UnTenant().Tenant(7)` 会加条件，`Tenant(7).UnTenant()` 不加。`UnTenant()` 是这一层主表和 `JOIN` 的特权口子。嵌在里面的查询仍看见外层放进上下文的值。
+
+`LEFT JOIN`、`LEFT JOIN LATERAL`、`INNER JOIN`、`INNER JOIN LATERAL`、`CROSS JOIN LATERAL` 保持原来的形状。一条语句碰到任意租户表，又写出 `RIGHT JOIN` 或 `FULL JOIN`，渲染直接报错。把这条连接改成 `LEFT JOIN`，或调用 `UnTenant()`。
+
+向租户表 `INSERT` 时必须写入租户列，而且值等于当前这一个租户值。库不自动补列。`INSERT ... SELECT` 必须逐项写出具名列，并且包含租户列。`Select().From(src)` 和 `Raw` 选择项在生成 SQL 前失败。`UnTenant()` 跳过这些检查。`UPDATE` 不能把租户列改成另一个值。`OnConflictKey` 不会自动加上租户列。
+
+`CacheOption.Name` 原样作为缓存键。名字里要自己带上租户。没有 `Name` 时，键是 SQL 和参数的哈希，不同租户不会共用一条缓存。
+
+每一段用户 `WHERE` 和 `ON` 会先加括号，再用 `AND` 接上软删除和租户条件。
+
 ## 分片
 
 分组写在 `hack/gooq.tables.yaml`。`single` 是普通表，`groups` 是分表。没有这份文件时，每张物理表各生成一个对象。`gooq-gen tables init` 把库里的表都写进 `single`。`tables check` 打印重复、缺失和多余的表名。`tables diff` 打印库里新增和配置里已不用的表名。这两条命令都不改文件。
@@ -675,7 +703,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 ```
 
 - `init` 生成 `hack/gooq.yaml`，以及 `hack/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl`；已存在的文件不覆盖。
-- 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。
+- 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。`gooq.gen.tenant` 由 CLI 读出后传给生成。见上面的多租户。
 - 模板：`<hack>/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
 - 分片分组在 `hack/gooq.tables.yaml`，用 `gooq-gen tables init`、`tables check`、`tables diff` 维护。见上面的分片节。

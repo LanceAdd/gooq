@@ -131,7 +131,8 @@ func joinKeywordSQL(rc *gooq.RenderContext, keyword string) string {
 func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
 	prev := rc.SwapQueryShard(b.hasShardValue, b.shardingValue)
 	defer rc.RestoreQueryShard(prev)
-	defer bindTenantLayer(rc, b.untenant, b.hasTenantIDs, b.tenantIDs, b.hasCtxTenant, b.ctxTenant)()
+	defer bindTenantLayer(rc, b.untenant, b.hasTenantIDs, b.tenantIDs)()
+	checkTenantJoins(rc, b.untenant, b.from, b.joins)
 	if base := gooq.TableBaseOf(b.from); base != nil {
 		rc.SetMainTable(base)
 	}
@@ -179,7 +180,7 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
 		for _, c := range j.on {
 			onSQL := rc.Render(c)
 			if onSQL != "" {
-				ons = append(ons, onSQL)
+				ons = append(ons, parenthesizeSQL(onSQL))
 			}
 		}
 		if !joinSoftDeleteInWhere(j.joinType) {
@@ -322,7 +323,7 @@ func (b *SelectBuilder) renderWhere(rc *gooq.RenderContext) string {
 	for _, c := range b.conditions {
 		condSQL := rc.Render(c)
 		if condSQL != "" {
-			parts = append(parts, condSQL)
+			parts = append(parts, parenthesizeSQL(condSQL))
 		}
 	}
 	if soft := b.softDeleteSQL(rc, b.from); soft != "" {

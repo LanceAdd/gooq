@@ -139,7 +139,7 @@ func TestDsl_Insert_From(t *testing.T) {
 		sql, _, err := InsertFrom(testUser, Select(testUser.Name).From(testUser).Where(testUser.Age.Gt(18))).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "INSERT INTO `user` (`name`) SELECT `user`.`name` FROM `user` WHERE `user`.`age` > ? AND `user`.`deleted_at` IS NULL")
+		t.Assert(sql, "INSERT INTO `user` (`name`) SELECT `user`.`name` FROM `user` WHERE (`user`.`age` > ?) AND `user`.`deleted_at` IS NULL")
 	})
 }
 
@@ -151,7 +151,7 @@ func TestDsl_Update_Set(t *testing.T) {
 			Where(testUser.Id.Eq(1)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?")
+		t.Assert(sql, "UPDATE `user` SET `name` = ?, `age` = ? WHERE (`user`.`id` = ?)")
 		t.AssertEQ(args, []any{"x", 20, int64(1)})
 
 		// Set 表达式值：字段算术渲染为 SQL 片段。
@@ -160,7 +160,7 @@ func TestDsl_Update_Set(t *testing.T) {
 			Where(testUser.Id.Eq(1)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE `user`.`id` = ?")
+		t.Assert(sql, "UPDATE `user` SET `age` = (`user`.`age` + ?) WHERE (`user`.`id` = ?)")
 		t.AssertEQ(args, []any{1, int64(1)})
 
 		// Set 表达式值：gooq.Raw 渲染为 SQL 片段。
@@ -169,7 +169,7 @@ func TestDsl_Update_Set(t *testing.T) {
 			Where(testUser.Id.Eq(1)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` SET `age` = age + 1 WHERE `user`.`id` = ?")
+		t.Assert(sql, "UPDATE `user` SET `age` = age + 1 WHERE (`user`.`id` = ?)")
 		t.AssertEQ(args, []any{int64(1)})
 	})
 }
@@ -181,7 +181,7 @@ func TestDsl_Update_ValuesOf_Data(t *testing.T) {
 			Where(testUser.Id.Eq(1)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` SET `name` = ?, `age` = ? WHERE `user`.`id` = ?")
+		t.Assert(sql, "UPDATE `user` SET `name` = ?, `age` = ? WHERE (`user`.`id` = ?)")
 		t.AssertEQ(args, []any{"x", 0, int64(1)})
 
 		sql, args, err = Update(testUser).
@@ -189,7 +189,7 @@ func TestDsl_Update_ValuesOf_Data(t *testing.T) {
 			Where(testUser.Id.Eq(1)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` SET `deleted_at` = NULL WHERE `user`.`id` = ?")
+		t.Assert(sql, "UPDATE `user` SET `deleted_at` = NULL WHERE (`user`.`id` = ?)")
 		t.AssertEQ(args, []any{int64(1)})
 
 		sql, args, err = Update(testUser).Data(map[string]any{"age": 1, "name": "x"}).ToSql(gooq.DialectMySQL)
@@ -211,7 +211,7 @@ func TestDsl_Update_Join(t *testing.T) {
 			InnerJoin(r).On(r.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?")
+		t.Assert(sql, "UPDATE `user` AS `u` INNER JOIN `role` AS `r` ON (`r`.`id` = `u`.`id`) SET `status` = ?")
 
 		sql, args, err = Update(u).
 			Set(u.Status, "vip").
@@ -219,7 +219,7 @@ func TestDsl_Update_Join(t *testing.T) {
 			Where(u.Name.Eq("ann")).
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE "r"."id" = $2 AND "u"."name" = $3`)
+		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE ("r"."id" = $2) AND ("u"."name" = $3)`)
 		t.AssertEQ(args, []any{"vip", int64(7), "ann"})
 
 		sql, _, err = Update(u).
@@ -227,7 +227,7 @@ func TestDsl_Update_Join(t *testing.T) {
 			InnerJoin(r).On(r.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE "r"."id" = "u"."id"`)
+		t.Assert(sql, `UPDATE "user" AS "u" SET "status" = $1 FROM "role" AS "r" WHERE ("r"."id" = "u"."id")`)
 
 		_, _, err = Update(u).
 			Set(u.Status, "vip").
@@ -241,7 +241,7 @@ func TestDsl_Update_Join(t *testing.T) {
 			LeftJoin(r).On(r.Id.EqExpr(u.Id)).
 			ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` AS `u` LEFT JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?")
+		t.Assert(sql, "UPDATE `user` AS `u` LEFT JOIN `role` AS `r` ON (`r`.`id` = `u`.`id`) SET `status` = ?")
 
 		r2 := testRole.As("r2")
 		_, _, err = Update(u).
@@ -287,14 +287,14 @@ func TestDsl_Update_Batch(t *testing.T) {
 		).Where(testUser.Age.Gt(18)).renderBatchDML(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(len(filtered), 2)
-		t.Assert(filtered[0], "UPDATE `user` SET `name` = ? WHERE `id` = ? AND `user`.`age` > ?")
+		t.Assert(filtered[0], "UPDATE `user` SET `name` = ? WHERE `id` = ? AND (`user`.`age` > ?)")
 		t.AssertEQ(filterArgs[0], []any{"a", int64(1), 18})
 
 		one, oneArgs, err := Update(testUser).ValuesOf(
 			assignRow{setCol("id", int64(1)), setCol("name", "a")},
 		).Where(testUser.Age.Gt(18)).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(one, "UPDATE `user` SET `id` = ?, `name` = ? WHERE `user`.`age` > ?")
+		t.Assert(one, "UPDATE `user` SET `id` = ?, `name` = ? WHERE (`user`.`age` > ?)")
 		t.AssertEQ(oneArgs, []any{int64(1), "a", 18})
 
 		_, _, err = Update(testUser).ValuesOf(
@@ -309,7 +309,7 @@ func TestDsl_Update_Batch(t *testing.T) {
 		).Where(testUser.Age.Gt(18)).renderBatchDML(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(len(deleted), 1)
-		t.Assert(strings.Contains(deleted[0], "WHERE `id` = ? AND `user`.`age` > ?"), true)
+		t.Assert(strings.Contains(deleted[0], "WHERE `id` = ? AND (`user`.`age` > ?)"), true)
 
 		_, _, err = b.ToSql(gooq.DialectMySQL)
 		t.AssertNE(err, nil)
@@ -320,7 +320,7 @@ func TestDsl_Delete(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		sql, _, err := Delete(testUser).Where(testUser.Id.Eq(1)).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "UPDATE `user` SET `deleted_at` = ? WHERE `user`.`id` = ?")
+		t.Assert(sql, "UPDATE `user` SET `deleted_at` = ? WHERE (`user`.`id` = ?)")
 
 		_, _, err = Delete(testUser).Columns(testUser.Name).Values("a").ToSql(gooq.DialectMySQL)
 		t.AssertNE(err, nil)
@@ -332,11 +332,11 @@ func TestDsl_Delete(t *testing.T) {
 
 		sql, _, err = Delete(testUser).Unscoped().Where(testUser.Id.Eq(1)).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "DELETE FROM `user` WHERE `user`.`id` = ?")
+		t.Assert(sql, "DELETE FROM `user` WHERE (`user`.`id` = ?)")
 
 		sql, _, err = Delete(testUserRole).Where(testUserRole.Id.Eq(1)).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "DELETE FROM `user_role` WHERE `user_role`.`id` = ?")
+		t.Assert(sql, "DELETE FROM `user_role` WHERE (`user_role`.`id` = ?)")
 
 		sqls, argss, err := Delete(testUser).ValuesOf(
 			assignRow{setCol("id", int64(1))},
@@ -361,15 +361,15 @@ func TestDsl_Delete(t *testing.T) {
 		r := testRole.As("r")
 		sql, _, err = Delete(u).Where(u.Id.Eq(1)).ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `DELETE FROM "user_role" AS "u" WHERE "u"."id" = $1`)
+		t.Assert(sql, `DELETE FROM "user_role" AS "u" WHERE ("u"."id" = $1)`)
 
 		sql, _, err = Delete(u).InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `DELETE FROM "user_role" AS "u" USING "role" AS "r" WHERE "r"."id" = "u"."id"`)
+		t.Assert(sql, `DELETE FROM "user_role" AS "u" USING "role" AS "r" WHERE ("r"."id" = "u"."id")`)
 
 		sql, _, err = Delete(u).InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "DELETE `u` FROM `user_role` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id`")
+		t.Assert(sql, "DELETE `u` FROM `user_role` AS `u` INNER JOIN `role` AS `r` ON (`r`.`id` = `u`.`id`)")
 
 		_, _, err = Delete(testUser.As("u")).LeftJoin(r).On(r.Id.EqExpr(testUser.As("u").Id)).ToSql(gooq.DialectPgsql)
 		t.AssertNE(err, nil)
@@ -578,7 +578,7 @@ func TestDsl_Returning(t *testing.T) {
 			Returning(testUser.Id).
 			ToSql(gooq.DialectPgsql)
 		t.AssertNil(err)
-		t.Assert(sql, `UPDATE "user" SET "status" = $1 WHERE "user"."id" = $2 RETURNING "user"."id"`)
+		t.Assert(sql, `UPDATE "user" SET "status" = $1 WHERE ("user"."id" = $2) RETURNING "user"."id"`)
 
 		sql, _, err = Insert(testUser).Columns(testUser.Name).Values("a").
 			Returning(testUser.Id).
