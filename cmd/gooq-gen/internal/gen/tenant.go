@@ -15,6 +15,27 @@ type TenantConfig struct {
 	Tables map[string]any
 }
 
+// TenantConfigFrom 严格校验 gooq.gen.tenant 节点。
+// gvar.Scan 会把 column 的非字符串值转成字符串，并静默丢掉非 map 的 tables。
+func TenantConfigFrom(node map[string]any) (TenantConfig, error) {
+	var cfg TenantConfig
+	if raw, ok := node["column"]; ok && raw != nil {
+		column, ok := raw.(string)
+		if !ok {
+			return TenantConfig{}, fmt.Errorf("gooq: gooq.gen.tenant.column must be a string")
+		}
+		cfg.Column = column
+	}
+	if raw, ok := node["tables"]; ok && raw != nil {
+		tables, ok := raw.(map[string]any)
+		if !ok {
+			return TenantConfig{}, fmt.Errorf("gooq: gooq.gen.tenant.tables must be a map")
+		}
+		cfg.Tables = tables
+	}
+	return cfg, nil
+}
+
 type tenantSettings struct {
 	active bool
 	column string

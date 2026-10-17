@@ -91,11 +91,11 @@ func readTenantConfig(ctx context.Context) (gen.TenantConfig, error) {
 	if err != nil || value == nil || value.IsNil() || value.IsEmpty() {
 		return gen.TenantConfig{}, err
 	}
-	var cfg gen.TenantConfig
-	if err = value.Scan(&cfg); err != nil {
+	var node map[string]any
+	if err = value.Scan(&node); err != nil {
 		return gen.TenantConfig{}, fmt.Errorf("gooq: parse gooq.gen.tenant: %w", err)
 	}
-	return cfg, nil
+	return gen.TenantConfigFrom(node)
 }
 
 type tablesInput struct {

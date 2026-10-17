@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gogf/gf/v2/container/gvar"
 	"github.com/gogf/gf/v2/os/gfile"
 	"github.com/gogf/gf/v2/test/gtest"
 	"github.com/gogf/gf/v2/text/gstr"
@@ -58,6 +59,33 @@ func TestGen_TenantSettings(t *testing.T) {
 		none, err := tenantColumn("user", columns, tenantSettings{})
 		t.AssertNil(err)
 		t.Assert(none == nil, true)
+	})
+}
+
+func TestGen_TenantConfigFrom(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		cfg, err := TenantConfigFrom(map[string]any{})
+		t.AssertNil(err)
+		t.Assert(cfg.Column, "")
+
+		cfg, err = TenantConfigFrom(map[string]any{"column": "tenant_id", "tables": map[string]any{"dict": ""}})
+		t.AssertNil(err)
+		t.Assert(cfg.Column, "tenant_id")
+		t.Assert(cfg.Tables["dict"], "")
+
+		_, err = TenantConfigFrom(map[string]any{"column": 1})
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "column must be a string"), true)
+
+		_, err = TenantConfigFrom(map[string]any{"column": "tenant_id", "tables": "oops"})
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "tables must be a map"), true)
+
+		var node map[string]any
+		t.AssertNil(gvar.New(map[string]any{"column": 1}).Scan(&node))
+		_, err = TenantConfigFrom(node)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "column must be a string"), true)
 	})
 }
 
