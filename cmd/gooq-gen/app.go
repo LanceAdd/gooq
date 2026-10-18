@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/util/gmeta"
@@ -88,14 +87,10 @@ func readTenantConfig(ctx context.Context) (gen.TenantConfig, error) {
 		return gen.TenantConfig{}, nil
 	}
 	value, err := g.Cfg().Get(ctx, "gooq.gen.tenant")
-	if err != nil || value == nil || value.IsNil() || value.IsEmpty() {
+	if err != nil || value == nil || value.IsNil() {
 		return gen.TenantConfig{}, err
 	}
-	var node map[string]any
-	if err = value.Scan(&node); err != nil {
-		return gen.TenantConfig{}, fmt.Errorf("gooq: parse gooq.gen.tenant: %w", err)
-	}
-	return gen.TenantConfigFrom(node)
+	return gen.ParseTenantConfig(value.Val())
 }
 
 type tablesInput struct {

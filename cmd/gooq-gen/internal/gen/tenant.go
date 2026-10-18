@@ -2,6 +2,7 @@ package gen
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/lanceadd/gooq"
@@ -15,18 +16,50 @@ type TenantConfig struct {
 	Tables map[string]any
 }
 
-// TenantConfigFrom 严格校验 gooq.gen.tenant 节点。
-// gvar.Scan 会把 column 的非字符串值转成字符串，并静默丢掉非 map 的 tables。
-func TenantConfigFrom(node map[string]any) (TenantConfig, error) {
-	var cfg TenantConfig
-	if raw, ok := node["column"]; ok && raw != nil {
-		column, ok := raw.(string)
-		if !ok {
-			return TenantConfig{}, fmt.Errorf("gooq: gooq.gen.tenant.column must be a string")
-		}
-		cfg.Column = column
+// ParseTenantConfig 校验 gooq.gen.tenant 的原始值。
+// nil 表示没配置，租户关闭。字符串、数字和数组不会先扫成 map。
+func ParseTenantConfig(raw any) (TenantConfig, error) {
+	if raw == nil {
+		return TenantConfig{}, nil
 	}
-	if raw, ok := node["tables"]; ok && raw != nil {
+	node, ok := raw.(map[string]any)
+	if !ok {
+		return TenantConfig{}, fmt.Errorf("gooq: gooq.gen.tenant must be a map")
+	}
+	return TenantConfigFrom(node)
+}
+
+// TenantConfigFrom 严格校验已经是 map 的 gooq.gen.tenant 节点。
+// 只接受 column 和 tables。column 必须是非空字符串。
+func TenantConfigFrom(node map[string]any) (TenantConfig, error) {
+	if node == nil {
+		return TenantConfig{}, nil
+	}
+	var unknown []string
+	for key := range node {
+		if key != "column" && key != "tables" {
+			unknown = append(unknown, key)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return TenantConfig{}, fmt.Errorf("gooq: gooq.gen.tenant has unknown field %q", unknown[0])
+	}
+	var cfg TenantConfig
+	raw, ok := node["column"]
+	if !ok || raw == nil {
+		return TenantConfig{}, fmt.Errorf("gooq: gooq.gen.tenant.column is required")
+	}
+	column, ok := raw.(string)
+	if !ok {
+		return TenantConfig{}, fmt.Errorf("gooq: gooq.gen.tenant.column must be a string")
+	}
+	column = strings.TrimSpace(column)
+	if column == "" {
+		return TenantConfig{}, fmt.Errorf("gooq: gooq.gen.tenant.column is required")
+	}
+	cfg.Column = column
+	if raw, ok = node["tables"]; ok && raw != nil {
 		tables, ok := raw.(map[string]any)
 		if !ok {
 			return TenantConfig{}, fmt.Errorf("gooq: gooq.gen.tenant.tables must be a map")

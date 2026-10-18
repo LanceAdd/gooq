@@ -64,11 +64,11 @@ func TestGen_TenantSettings(t *testing.T) {
 
 func TestGen_TenantConfigFrom(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
-		cfg, err := TenantConfigFrom(map[string]any{})
-		t.AssertNil(err)
-		t.Assert(cfg.Column, "")
+		_, err := TenantConfigFrom(map[string]any{})
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "column is required"), true)
 
-		cfg, err = TenantConfigFrom(map[string]any{"column": "tenant_id", "tables": map[string]any{"dict": ""}})
+		cfg, err := TenantConfigFrom(map[string]any{"column": "tenant_id", "tables": map[string]any{"dict": ""}})
 		t.AssertNil(err)
 		t.Assert(cfg.Column, "tenant_id")
 		t.Assert(cfg.Tables["dict"], "")
@@ -86,6 +86,28 @@ func TestGen_TenantConfigFrom(t *testing.T) {
 		_, err = TenantConfigFrom(node)
 		t.AssertNE(err, nil)
 		t.Assert(strings.Contains(err.Error(), "column must be a string"), true)
+
+		cfg, err = ParseTenantConfig(nil)
+		t.AssertNil(err)
+		t.Assert(cfg.Column, "")
+
+		for _, raw := range []any{"oops", 123, []any{"tenant_id"}} {
+			_, err = ParseTenantConfig(raw)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must be a map"), true)
+		}
+
+		_, err = TenantConfigFrom(map[string]any{"colum": "tenant_id"})
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), `unknown field "colum"`), true)
+
+		_, err = TenantConfigFrom(map[string]any{"column": "tenant_id", "table": map[string]any{"dict": "org_id"}})
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), `unknown field "table"`), true)
+
+		_, err = TenantConfigFrom(map[string]any{"column": "  "})
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "column is required"), true)
 	})
 }
 
