@@ -494,6 +494,94 @@ func TestDsl_Tenant_InsertRules(t *testing.T) {
 	})
 }
 
+func tenantNamed(table, column string) (*gooq.TableBase, gooq.Field[int64], gooq.Field[int64]) {
+	meta := &gooq.TableMeta{
+		TableName: table,
+		Fields: []gooq.FieldMeta{
+			{ColumnName: "id", LocalType: gooq.LocalTypeInt64, Primary: true},
+			{ColumnName: column, LocalType: gooq.LocalTypeInt64, Tenant: true},
+		},
+	}
+	base := gooq.NewTableBase(meta)
+	return base, gooq.NewFieldAt[int64](base, "id"), gooq.NewFieldAt[int64](base, column)
+}
+
+func TestDsl_Tenant_JoinTenantSet(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		user, userID, orgID := tenantNamed("user", "org_id")
+		order, orderID, _ := tenantNamed("order", "tenant_id")
+		dialects := []gooq.Dialect{
+			gooq.DialectMySQL, gooq.DialectMariaDB, gooq.DialectTiDB, gooq.DialectOceanBase,
+			gooq.DialectSQLite, gooq.DialectDM, gooq.DialectPgsql, gooq.DialectGaussDB,
+		}
+		for _, dialect := range dialects {
+			_, _, err := Update(user).Set(order.Field("tenant_id"), int64(9)).
+				LeftJoin(order).On(orderID.EqExpr(userID)).
+				Where(userID.Eq(int64(1))).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+			_, _, err = Update(user).Set(order.Field("tenant_id"), int64(9)).
+				InnerJoin(order).On(orderID.EqExpr(userID)).
+				Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must equal"), true)
+		}
+
+		sql, args, err := Update(user).Set(order.Field("tenant_id"), int64(7)).
+			LeftJoin(order).On(orderID.EqExpr(userID)).
+			Where(userID.Eq(int64(1))).Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "UPDATE `user` LEFT JOIN `order` ON (`order`.`id` = `user`.`id`) AND `order`.`tenant_id` = ? SET `tenant_id` = ? WHERE (`user`.`id` = ?) AND `user`.`org_id` = ?")
+		t.AssertEQ(args, []any{int64(7), int64(7), int64(1), int64(7)})
+
+		_, _, err = Update(user).Set(order.Field("tenant_id"), int64(7)).
+			InnerJoin(order).On(orderID.EqExpr(userID)).
+			Tenant(int64(7)).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		_, _, err = Update(user).Set(order.Field("tenant_id"), int64(7)).
+			InnerJoin(order).On(orderID.EqExpr(userID)).
+			Tenant(int64(7)).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+
+		dict := plainTable("dict")
+		_, _, err = Update(dict).Set(order.Field("tenant_id"), int64(9)).
+			LeftJoin(order).On(orderID.EqExpr(gooq.NewFieldAt[int64](dict, "id"))).
+			Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+		_, _, err = Update(user).Data(map[string]any{"tenant_id": int64(9)}).
+			LeftJoin(order).On(orderID.EqExpr(userID)).
+			Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+		_, _, err = Update(user).ValuesOf(assignRow{setCol("tenant_id", int64(9))}).
+			LeftJoin(order).On(orderID.EqExpr(userID)).
+			Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+		sql, _, err = Update(user).
+			Set(orgID, int64(7)).
+			Set(order.Field("tenant_id"), int64(7)).
+			InnerJoin(order).On(orderID.EqExpr(userID)).
+			Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, "`org_id` = ?"), true)
+		t.Assert(strings.Contains(sql, "`tenant_id` = ?"), true)
+
+		_, _, err = Update(user).
+			Set(order.Field("tenant_id"), int64(7)).
+			Set(order.Field("TENANT_ID"), int64(7)).
+			LeftJoin(order).On(orderID.EqExpr(userID)).
+			Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "more than once"), true)
+	})
+}
+
 func tenantSoftTable(name string) (*gooq.TableBase, gooq.Field[int64]) {
 	meta := &gooq.TableMeta{
 		TableName: name,

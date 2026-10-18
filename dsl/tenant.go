@@ -180,16 +180,14 @@ func tenantPredicate(rc *gooq.RenderContext, table gooq.Table) string {
 }
 
 func (b *DMLBuilder) rejectTenantWrite(rc *gooq.RenderContext, column string, value any, isNull bool) error {
-	if b.untenant || b.table == nil || b.table.Meta() == nil {
+	matches := b.matchingTenantFields(rc, column)
+	if len(matches) == 0 {
 		return nil
 	}
-	field := b.table.Meta().TenantField()
-	if field == nil || !sameColumn(rc, field.ColumnName, column) {
-		return nil
-	}
+	field := matches[0].field
 	ids, ok := rc.TenantIDs()
 	if !ok || len(ids) == 0 {
-		return fmt.Errorf("gooq: tenant value is required for %q.%s", b.table.TableName(), field.ColumnName)
+		return fmt.Errorf("gooq: tenant value is required for %q.%s", matches[0].tableName, field.ColumnName)
 	}
 	if len(ids) != 1 {
 		return fmt.Errorf("gooq: tenant column %q cannot be set from multiple tenant values", field.ColumnName)
@@ -200,11 +198,13 @@ func (b *DMLBuilder) rejectTenantWrite(rc *gooq.RenderContext, column string, va
 	if _, isExpr := value.(gooq.Expression); isExpr {
 		return fmt.Errorf("gooq: tenant column %q must be set to the current tenant value", field.ColumnName)
 	}
-	if err := gooq.CheckTenantValue(field.LocalType, field.ColumnName, ids[0]); err != nil {
-		return err
-	}
-	if err := gooq.CheckTenantValue(field.LocalType, field.ColumnName, value); err != nil {
-		return err
+	for _, match := range matches {
+		if err := gooq.CheckTenantValue(match.field.LocalType, match.field.ColumnName, ids[0]); err != nil {
+			return err
+		}
+		if err := gooq.CheckTenantValue(match.field.LocalType, match.field.ColumnName, value); err != nil {
+			return err
+		}
 	}
 	if !reflect.DeepEqual(value, ids[0]) {
 		return fmt.Errorf("gooq: tenant column %q must equal the current tenant value", field.ColumnName)
@@ -213,13 +213,10 @@ func (b *DMLBuilder) rejectTenantWrite(rc *gooq.RenderContext, column string, va
 }
 
 func (b *DMLBuilder) rejectTenantSets(rc *gooq.RenderContext, sets []columnValue) error {
-	seenTenant := false
+	seen := map[string]struct{}{}
 	for _, cv := range sets {
-		if b.tenantColumn(rc, cv.column) {
-			if seenTenant {
-				return errTenantColumnRepeated(b.table)
-			}
-			seenTenant = true
+		if column, ok := b.repeatedTenantColumn(rc, seen, cv.column); ok {
+			return errTenantColumnRepeated(column)
 		}
 		if err := b.rejectTenantWrite(rc, cv.column, cv.value, cv.null); err != nil {
 			return err
@@ -258,7 +255,7 @@ func (b *DMLBuilder) rejectTenantInsert(rc *gooq.RenderContext) error {
 				continue
 			}
 			if found {
-				return errTenantColumnRepeated(b.table)
+				return errTenantColumnRepeated(field.ColumnName)
 			}
 			found = true
 			if cv.null {
@@ -307,7 +304,7 @@ func (b *DMLBuilder) rejectTenantInsertFrom(rc *gooq.RenderContext) error {
 			continue
 		}
 		if found {
-			return errTenantColumnRepeated(b.table)
+			return errTenantColumnRepeated(field.ColumnName)
 		}
 		found = true
 	}
@@ -323,13 +320,10 @@ func (b *DMLBuilder) rejectTenantUpsert(rc *gooq.RenderContext) error {
 	if b.upsert == nil || b.upsert.doNothing {
 		return nil
 	}
-	seenTenant := false
+	seen := map[string]struct{}{}
 	for column, value := range b.upsert.updateMap {
-		if b.tenantColumn(rc, column) {
-			if seenTenant {
-				return errTenantColumnRepeated(b.table)
-			}
-			seenTenant = true
+		if repeated, ok := b.repeatedTenantColumn(rc, seen, column); ok {
+			return errTenantColumnRepeated(repeated)
 		}
 		if err := b.rejectTenantWrite(rc, column, value, false); err != nil {
 			return err
@@ -356,18 +350,65 @@ func sameColumn(rc *gooq.RenderContext, metaName, column string) bool {
 	return ok && folder.FoldIdent() && strings.EqualFold(metaName, column)
 }
 
-func (b *DMLBuilder) tenantColumn(rc *gooq.RenderContext, column string) bool {
-	if b.untenant || b.table == nil || b.table.Meta() == nil {
-		return false
-	}
-	field := b.table.Meta().TenantField()
-	return field != nil && sameColumn(rc, field.ColumnName, column)
+type tenantFieldRef struct {
+	tableName string
+	field     *gooq.FieldMeta
 }
 
-func errTenantColumnRepeated(table gooq.Table) error {
-	name := ""
-	if table != nil && table.Meta() != nil && table.Meta().TenantField() != nil {
-		name = table.Meta().TenantField().ColumnName
+// matchingTenantFields 返回这条语句里列名对得上的租户列。
+// 主表和带 Meta 的 JOIN 表都算。派生表没有租户元数据，不参与。
+func (b *DMLBuilder) matchingTenantFields(rc *gooq.RenderContext, column string) []tenantFieldRef {
+	if b.untenant {
+		return nil
 	}
-	return fmt.Errorf("gooq: tenant column %q is assigned more than once", name)
+	var matched []tenantFieldRef
+	for _, table := range b.statementTables() {
+		meta := table.Meta()
+		if meta == nil {
+			continue
+		}
+		field := meta.TenantField()
+		if field == nil || !sameColumn(rc, field.ColumnName, column) {
+			continue
+		}
+		matched = append(matched, tenantFieldRef{tableName: table.TableName(), field: field})
+	}
+	return matched
+}
+
+func (b *DMLBuilder) statementTables() []gooq.Table {
+	var tables []gooq.Table
+	if b.table != nil {
+		tables = append(tables, b.table)
+	}
+	for _, join := range b.joins {
+		if join != nil && join.table != nil {
+			tables = append(tables, join.table)
+		}
+	}
+	return tables
+}
+
+// repeatedTenantColumn 按列名记录已经赋值的租户列。
+// 折叠方言把 tenant_id 和 TENANT_ID 当成同一列。不同列名互不影响。
+func (b *DMLBuilder) repeatedTenantColumn(rc *gooq.RenderContext, seen map[string]struct{}, column string) (string, bool) {
+	matches := b.matchingTenantFields(rc, column)
+	if len(matches) == 0 {
+		return "", false
+	}
+	key := column
+	if rc != nil && rc.Spec() != nil {
+		if folder, ok := rc.Spec().(foldIdent); ok && folder.FoldIdent() {
+			key = strings.ToLower(column)
+		}
+	}
+	if _, ok := seen[key]; ok {
+		return matches[0].field.ColumnName, true
+	}
+	seen[key] = struct{}{}
+	return "", false
+}
+
+func errTenantColumnRepeated(column string) error {
+	return fmt.Errorf("gooq: tenant column %q is assigned more than once", column)
 }
