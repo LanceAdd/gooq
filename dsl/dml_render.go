@@ -227,24 +227,59 @@ func (b *DMLBuilder) renderUpdate(rc *gooq.RenderContext) (string, []any, error)
 	if err := b.rejectTenantSets(rc, b.setValues); err != nil {
 		return "", nil, err
 	}
+	return b.renderUpdateStatement(rc, func() string { return b.renderSets(rc) })
+}
+
+// updateJoinsBeforeSet 表示带 JOIN 的 UPDATE 把连接写在 SET 前面。
+// MySQL 家族实现它。位置参数要排成 JOIN、SET、WHERE。
+type updateJoinsBeforeSet interface {
+	UpdateJoinsBeforeSet() bool
+}
+
+func joinsBeforeSet(spec gooq.DialectSpec) bool {
+	order, ok := spec.(updateJoinsBeforeSet)
+	return ok && order.UpdateJoinsBeforeSet()
+}
+
+func copyArgs(args []any) []any {
+	return append([]any(nil), args...)
+}
+
+// renderUpdateStatement 按 SET、JOIN、WHERE 收集参数。
+// MySQL 家族的 SQL 把 JOIN 写在 SET 前面，参数在 RETURNING 之前改成同样的顺序。
+// 每段参数单独拷贝。它们来自同一条参数切片，直接拼接会被后续 append 盖掉。
+func (b *DMLBuilder) renderUpdateStatement(rc *gooq.RenderContext, renderSets func() string) (string, []any, error) {
 	spec := rc.Spec()
 	if spec == nil {
 		return "", nil, fmt.Errorf("gooq: dialect %q is not registered", rc.Dialect())
 	}
 	target := renderTableName(rc, b.table)
-	sets := b.renderSets(rc)
+	setMark := len(rc.Args())
+	sets := renderSets()
+	setArgs := copyArgs(rc.Args()[setMark:])
+	joinMark := len(rc.Args())
 	joins := b.joinRenders(rc)
+	joinArgs := copyArgs(rc.Args()[joinMark:])
+	whereMark := len(rc.Args())
 	where := b.renderWhere(rc)
+	whereArgs := copyArgs(rc.Args()[whereMark:])
 	sqlStr, err := spec.RenderUpdate(rc, target, sets, where, joins)
 	if err != nil {
 		return "", nil, err
 	}
-	if returning, err := b.renderReturning(rc); err != nil {
-		return "", nil, err
-	} else if returning != "" {
-		sqlStr += returning
+	if len(joins) > 0 && joinsBeforeSet(spec) {
+		ordered := make([]any, 0, len(rc.Args()))
+		ordered = append(ordered, rc.Args()[:setMark]...)
+		ordered = append(ordered, joinArgs...)
+		ordered = append(ordered, setArgs...)
+		ordered = append(ordered, whereArgs...)
+		rc.SetArgs(ordered)
 	}
-	return sqlStr, rc.Args(), nil
+	returning, err := b.renderReturning(rc)
+	if err != nil {
+		return "", nil, err
+	}
+	return sqlStr + returning, rc.Args(), nil
 }
 
 func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, error) {
@@ -356,20 +391,9 @@ func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error)
 // renderSoftDelete 把软删 DELETE 改写成 UPDATE deleted_at = now()。
 // 赋值在局部构造，渲染期间不写 setValues，也不追加 IS NULL 守卫。
 func (b *DMLBuilder) renderSoftDelete(rc *gooq.RenderContext, softField *gooq.FieldMeta) (string, []any, error) {
-	spec := rc.Spec()
-	if spec == nil {
-		return "", nil, fmt.Errorf("gooq: dialect %q is not registered", rc.Dialect())
-	}
-	sets := renderSetValue(rc, columnValue{column: softField.ColumnName, value: time.Now()})
-	sqlStr, err := spec.RenderUpdate(rc, renderTableName(rc, b.table), sets, b.renderWhere(rc), b.joinRenders(rc))
-	if err != nil {
-		return "", nil, err
-	}
-	returning, err := b.renderReturning(rc)
-	if err != nil {
-		return "", nil, err
-	}
-	return sqlStr + returning, rc.Args(), nil
+	return b.renderUpdateStatement(rc, func() string {
+		return renderSetValue(rc, columnValue{column: softField.ColumnName, value: time.Now()})
+	})
 }
 
 func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {

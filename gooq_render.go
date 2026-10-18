@@ -59,6 +59,12 @@ func (rc *RenderContext) Args() []any {
 	return rc.args
 }
 
+// SetArgs 替换已经累积的参数，不改下一个占位符编号。
+// 位置参数要排成和 SQL 里问号相同的顺序。RETURNING 继续往后追加。
+func (rc *RenderContext) SetArgs(args []any) {
+	rc.args = args
+}
+
 // Err 返回渲染期间记录的第一个错误。
 func (rc *RenderContext) Err() error {
 	return rc.err

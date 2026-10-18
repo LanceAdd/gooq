@@ -116,6 +116,11 @@ func (MySQLDialect) RenderRound(field, decimals string) string {
 	return fmt.Sprintf("ROUND(%s, %s)", field, decimals)
 }
 
+// UpdateJoinsBeforeSet 为 true：带 JOIN 的 UPDATE 把连接写在 SET 前面。
+// 调用方据此把位置参数排成 JOIN、SET、WHERE。
+// 自定义方言如果写出同样的语句形状，也要实现这个方法。编号占位符不要实现。
+func (MySQLDialect) UpdateJoinsBeforeSet() bool { return true }
+
 func (MySQLDialect) RenderUpdate(_ *RenderContext, target, sets, where string, joins []JoinRender) (string, error) {
 	if len(joins) == 0 {
 		return renderUpdateBase(target, sets, where), nil

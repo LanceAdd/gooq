@@ -120,6 +120,9 @@ type DialectSpec interface {
 	// MySQL 有连接时把 JOIN 写在 SET 前面，并保留连接类型。
 	// PostgreSQL、SQLite 和达梦在全部为内连接时使用 FROM，并把各连接的 ON 并入 WHERE，调用方条件放在最后。
 	// PostgreSQL、GaussDB、SQLite 和达梦出现外连接时返回错误。
+	// 带 JOIN 且 JOIN 写在 SET 前面时，方言要实现 UpdateJoinsBeforeSet。
+	// 位置参数按 SQL 里问号的顺序绑定，调用方会把参数排成 JOIN、SET、WHERE。
+	// 编号占位符不要实现这个方法，编号在 AddArg 时已经写进 SQL。
 	RenderUpdate(rc *RenderContext, target, sets, where string, joins []JoinRender) (string, error)
 	// JoinKeyword 改写连接关键字。大多数方言原样返回。
 	JoinKeyword(keyword string) string
