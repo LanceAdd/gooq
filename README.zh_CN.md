@@ -612,7 +612,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 ## 多租户
 
-租户列写在 `TableMeta` 里，和主键、软删列一样。`hack/gooq.yaml` 里 `gooq.gen.tenant.column` 有值时，`gooq-gen` 才给列打上 `Tenant`。没有 `tenant` 节点，或 `column` 为空，生成结果不变。`tables` 给一张逻辑表换列名。空字符串表示这张表不标。
+租户列写在 `TableMeta` 里，和主键、软删列一样。`hack/gooq.yaml` 里 `gooq.gen.tenant.column` 有值时，`gooq-gen` 才给列打上 `Tenant`。没有 `tenant` 节点或节点为 null 时，生成结果不变；节点存在时必须是 map，`column` 必填且不能为空，未知字段会报错。`tables` 给一张逻辑表换列名。空字符串表示这张表不标。
 
 ```yaml
 gooq:

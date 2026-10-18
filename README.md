@@ -620,7 +620,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 
 ## Multi-tenancy
 
-A tenant column is part of `TableMeta`, like a primary key or a soft-delete column. `gooq-gen` marks it only when `hack/gooq.yaml` sets `gooq.gen.tenant.column`. A missing `tenant` node, or an empty `column`, leaves generation unchanged. `tables` overrides that column for one logical table. An empty string turns the mark off for that table.
+A tenant column is part of `TableMeta`, like a primary key or a soft-delete column. `gooq-gen` marks it only when `hack/gooq.yaml` sets `gooq.gen.tenant.column`. A missing or null `tenant` node leaves generation unchanged. Otherwise the node must be a map with a non-empty `column`; unknown fields are rejected. `tables` overrides that column for one logical table. An empty string turns the mark off for that table.
 
 ```yaml
 gooq:
