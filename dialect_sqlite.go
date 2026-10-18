@@ -62,6 +62,9 @@ func (SQLiteDialect) Quote(ident string) string {
 	return `"` + strings.ReplaceAll(ident, `"`, `""`) + `"`
 }
 
+// FoldIdent 为 true：SQLite 的 ASCII 列名不区分大小写。
+func (SQLiteDialect) FoldIdent() bool { return true }
+
 func (SQLiteDialect) Placeholder(int) string { return "?" }
 
 func (SQLiteDialect) CastType(localType LocalType) string {

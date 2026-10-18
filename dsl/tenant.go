@@ -184,7 +184,7 @@ func (b *DMLBuilder) rejectTenantWrite(rc *gooq.RenderContext, column string, va
 		return nil
 	}
 	field := b.table.Meta().TenantField()
-	if field == nil || field.ColumnName != column {
+	if field == nil || !sameColumn(rc, field.ColumnName, column) {
 		return nil
 	}
 	ids, ok := rc.TenantIDs()
@@ -213,7 +213,14 @@ func (b *DMLBuilder) rejectTenantWrite(rc *gooq.RenderContext, column string, va
 }
 
 func (b *DMLBuilder) rejectTenantSets(rc *gooq.RenderContext, sets []columnValue) error {
+	seenTenant := false
 	for _, cv := range sets {
+		if b.tenantColumn(rc, cv.column) {
+			if seenTenant {
+				return errTenantColumnRepeated(b.table)
+			}
+			seenTenant = true
+		}
 		if err := b.rejectTenantWrite(rc, cv.column, cv.value, cv.null); err != nil {
 			return err
 		}
@@ -247,8 +254,11 @@ func (b *DMLBuilder) rejectTenantInsert(rc *gooq.RenderContext) error {
 	for _, row := range b.insertRows {
 		found := false
 		for _, cv := range row {
-			if cv.column != field.ColumnName {
+			if !sameColumn(rc, field.ColumnName, cv.column) {
 				continue
+			}
+			if found {
+				return errTenantColumnRepeated(b.table)
 			}
 			found = true
 			if cv.null {
@@ -293,9 +303,13 @@ func (b *DMLBuilder) rejectTenantInsertFrom(rc *gooq.RenderContext) error {
 		if !ok {
 			return fmt.Errorf("gooq: insert into tenant table %q requires every select item to be a named column", b.table.TableName())
 		}
-		if named.ColumnName() == field.ColumnName {
-			found = true
+		if !sameColumn(rc, field.ColumnName, named.ColumnName()) {
+			continue
 		}
+		if found {
+			return errTenantColumnRepeated(b.table)
+		}
+		found = true
 	}
 	if !found {
 		return fmt.Errorf(
@@ -309,10 +323,51 @@ func (b *DMLBuilder) rejectTenantUpsert(rc *gooq.RenderContext) error {
 	if b.upsert == nil || b.upsert.doNothing {
 		return nil
 	}
+	seenTenant := false
 	for column, value := range b.upsert.updateMap {
+		if b.tenantColumn(rc, column) {
+			if seenTenant {
+				return errTenantColumnRepeated(b.table)
+			}
+			seenTenant = true
+		}
 		if err := b.rejectTenantWrite(rc, column, value, false); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// foldIdent 表示这个方言把大小写不同的标识符当成同一列。
+// 没实现的方言按精确字符串比较。PostgreSQL 和 GaussDB 的双引号标识符区分大小写。
+// 自定义方言如果会折叠标识符，要实现 FoldIdent。
+type foldIdent interface {
+	FoldIdent() bool
+}
+
+func sameColumn(rc *gooq.RenderContext, metaName, column string) bool {
+	if metaName == column {
+		return true
+	}
+	if rc == nil || rc.Spec() == nil {
+		return false
+	}
+	folder, ok := rc.Spec().(foldIdent)
+	return ok && folder.FoldIdent() && strings.EqualFold(metaName, column)
+}
+
+func (b *DMLBuilder) tenantColumn(rc *gooq.RenderContext, column string) bool {
+	if b.untenant || b.table == nil || b.table.Meta() == nil {
+		return false
+	}
+	field := b.table.Meta().TenantField()
+	return field != nil && sameColumn(rc, field.ColumnName, column)
+}
+
+func errTenantColumnRepeated(table gooq.Table) error {
+	name := ""
+	if table != nil && table.Meta() != nil && table.Meta().TenantField() != nil {
+		name = table.Meta().TenantField().ColumnName
+	}
+	return fmt.Errorf("gooq: tenant column %q is assigned more than once", name)
 }

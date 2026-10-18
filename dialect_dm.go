@@ -46,6 +46,9 @@ func (DMDialect) Quote(ident string) string {
 	return `"` + strings.ToUpper(strings.ReplaceAll(ident, `"`, `""`)) + `"`
 }
 
+// FoldIdent 为 true：Quote 会把标识符折成大写，大小写不同的写法是同一列。
+func (DMDialect) FoldIdent() bool { return true }
+
 func (DMDialect) Placeholder(int) string { return "?" }
 
 func (DMDialect) CastType(localType LocalType) string {

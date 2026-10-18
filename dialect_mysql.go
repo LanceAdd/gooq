@@ -34,6 +34,11 @@ func (MySQLDialect) Quote(ident string) string {
 	return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
 }
 
+// FoldIdent 为 true：列名比较忽略大小写。
+// MySQL 家族的列名不区分大小写，反引号也不改变这一点。
+// 自定义方言如果同样折叠标识符，也要实现这个方法。
+func (MySQLDialect) FoldIdent() bool { return true }
+
 func (MySQLDialect) Placeholder(int) string { return "?" }
 
 func (MySQLDialect) CastType(localType LocalType) string {

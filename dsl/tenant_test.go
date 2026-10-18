@@ -599,3 +599,112 @@ func TestDsl_Tenant_JoinUpdateArgs(t *testing.T) {
 		}
 	})
 }
+
+func TestDsl_Tenant_ColumnCase(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		user, id, name := tenantTable("user", gooq.LocalTypeInt64)
+		alias := user.Field("TENANT_ID")
+		folding := []gooq.Dialect{
+			gooq.DialectMySQL, gooq.DialectMariaDB, gooq.DialectTiDB, gooq.DialectOceanBase,
+			gooq.DialectSQLite, gooq.DialectDM,
+		}
+		for _, dialect := range folding {
+			_, _, err := Update(user).Set(alias, int64(9)).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+			_, _, err = Update(user).Data(map[string]any{"TENANT_ID": int64(9)}).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+			_, _, err = Update(user).ValuesOf(assignRow{setCol("TENANT_ID", int64(9))}).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+			_, _, err = Update(user).ValuesOf(assignRow{nullCol("TENANT_ID")}).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "cannot be set to NULL"), true)
+
+			_, _, err = Update(user).Set(alias, name).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must be set to the current tenant value"), true)
+
+			_, _, err = Insert(user).Columns(name, user.Field("tenant_id")).Values("a", int64(7)).
+				OnConflictKey(id).DoUpdate(alias, int64(9)).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+			_, _, err = Insert(user).Columns(alias).Values(int64(9)).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+			_, _, err = Insert(user).Columns(user.Field("tenant_id"), alias).Values(int64(7), int64(7)).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "more than once"), true)
+		}
+
+		sql, args, err := Insert(user).Columns(alias).Values(int64(7)).Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "INSERT INTO `user` (`TENANT_ID`) VALUES (?)")
+		t.AssertEQ(args, []any{int64(7)})
+
+		sql, _, err = Insert(user).Columns(alias).Values(int64(7)).Tenant(int64(7)).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("TENANT_ID") VALUES (?)`)
+
+		sql, _, err = Insert(user).Columns(alias).Values(int64(7)).Tenant(int64(7)).ToSql(gooq.DialectDM)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "USER" ("TENANT_ID") VALUES (?)`)
+
+		sql, args, err = Insert(user).Columns(id, name, user.Field("tenant_id")).Values(int64(1), "a", int64(7)).
+			OnConflictKey(id).DoUpdate(alias, int64(7)).Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, "ON DUPLICATE KEY UPDATE `TENANT_ID` = ?"), true)
+		t.AssertEQ(args, []any{int64(1), "a", int64(7), int64(7)})
+
+		_, _, err = Insert(user).Columns(id, name, user.Field("tenant_id")).Values(int64(1), "a", int64(7)).
+			OnConflictKey(id).DoUpdate(alias, int64(7)).Tenant(int64(7)).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		_, _, err = Insert(user).Columns(id, name, user.Field("tenant_id")).Values(int64(1), "a", int64(7)).
+			OnConflictKey(id).DoUpdate(alias, int64(7)).Tenant(int64(7)).ToSql(gooq.DialectDM)
+		t.AssertNil(err)
+
+		_, _, err = Update(user).Data(map[string]any{"tenant_id": int64(7), "TENANT_ID": int64(7)}).Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "more than once"), true)
+
+		_, _, err = Update(user).Keys(id).ValuesOf(
+			assignRow{setCol("id", int64(1)), setCol("TENANT_ID", int64(9))},
+			assignRow{setCol("id", int64(2)), setCol("TENANT_ID", int64(9))},
+		).Tenant(int64(7)).renderBatchDML(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "must equal"), true)
+
+		sub := Select(alias, name).From(user)
+		sql, _, err = InsertFrom(user, sub).Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, "`TENANT_ID`"), true)
+
+		sub = Select(user.Field("tenant_id"), alias).From(user)
+		_, _, err = InsertFrom(user, sub).Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "more than once"), true)
+
+		for _, dialect := range []gooq.Dialect{gooq.DialectPgsql, gooq.DialectGaussDB} {
+			sql, args, err = Update(user).Set(alias, int64(9)).Where(id.Eq(int64(1))).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNil(err)
+			t.Assert(strings.Contains(sql, `"TENANT_ID"`), true)
+			t.AssertEQ(args, []any{int64(9), int64(1), int64(7)})
+
+			_, _, err = Insert(user).Columns(alias).Values(int64(7)).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(strings.Contains(err.Error(), "must set tenant column"), true)
+
+			sql, args, err = Insert(user).Columns(user.Field("tenant_id"), alias).Values(int64(7), int64(9)).Tenant(int64(7)).ToSql(dialect)
+			t.AssertNil(err)
+			t.Assert(strings.Contains(sql, `"tenant_id"`), true)
+			t.Assert(strings.Contains(sql, `"TENANT_ID"`), true)
+			t.AssertEQ(args, []any{int64(7), int64(9)})
+		}
+	})
+}
