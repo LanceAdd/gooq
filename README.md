@@ -12,20 +12,23 @@ English | [简体中文](README.zh_CN.md)
 
 All rendered output shown below comes from test assertions — copy-paste friendly.
 
-## Behavior change
-
-Multiple `Where` calls are combined with AND. Field comparisons return a `Condition`, which chains `.And`, `.Or`, and `.Not` left-associatively. A list of expressions uses `gooq.AND`, `gooq.OR`, and `gooq.NOT`. `WhereOr` has been removed.
-
 ## Quick Start
+
+Requires Go 1.24 or newer. Add the module with:
+
+```bash
+go get github.com/lanceadd/gooq@latest
+```
 
 ### 1. Generate table objects
 
 ```bash
-cd cmd/gooq-gen && go run . init                                    # optional: scaffold hack/gooq.yaml + hack/template/{table,sharding,model,record}.tmpl
-cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
+go install github.com/lanceadd/gooq/cmd/gooq-gen@latest
+gooq-gen init                                       # optional: scaffold hack/gooq.yaml + templates
+gooq-gen -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-Generates typed gooq table objects (`table/`) and `model/` for all tables in one shot. Each table produces `user_model.go` (`UserModel`) and `user_record.go` (`UserRecord`). `gooq-gen` can also read `hack/gooq.yaml` under the `gooq.gen.table` node instead of CLI options.
+Generates typed gooq table objects (`table/`) and `model/` for all tables in one shot, or for the groups listed in `hack/gooq.tables.yaml` when that file exists. Each table produces `user_model.go` (`UserModel`) and `user_record.go` (`UserRecord`). `gooq-gen` can also read `hack/gooq.yaml` under the `gooq.gen.table` node instead of CLI options. See the gooq-gen section below for configuration, sharding groups, and tenant settings.
 
 ### 2. Hand-write a table object (or use the generated one)
 
@@ -192,6 +195,8 @@ q2 := base.Clone().Where(User.Status.Eq("vip")) // independent
 
 // A string passed to Fields is spliced as Raw SQL and is not quoted as an identifier.
 ```
+
+`In` and `NotIn` with an empty slice add no condition; they do not render `0=1`. Guard empty input at the call site when the query must return no rows.
 
 ### JOINs
 
@@ -422,7 +427,7 @@ dsl.Update(User).ValuesOf(
 ).Exec(ctx)
 // UPDATE `user` SET `name` = ? WHERE `id` = ?  ×2
 
-// Multi-table update (MySQL JOIN / PG+SQLite FROM).
+// Multi-table update (MySQL JOIN / PostgreSQL, SQLite, and Dameng FROM).
 u := User.As("u"); r := Role.As("r")
 dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq.DialectMySQL)
 // UPDATE `user` AS `u` INNER JOIN `role` AS `r` ON `r`.`id` = `u`.`id` SET `status` = ?
@@ -431,6 +436,8 @@ dsl.Update(u).Set(u.Status, "vip").InnerJoin(r).On(r.Id.EqExpr(u.Id)).ToSql(gooq
 // Any LEFT / RIGHT / FULL join makes PostgreSQL, GaussDB, SQLite, and Dameng return an error at render time.
 // MySQL keeps the outer join and writes it before SET.
 ```
+
+`UPDATE` does not add the soft-delete predicate, including for joined tables. Add `Where(User.DeletedAt.IsNull())` explicitly when already-deleted rows must be skipped.
 
 ### Delete
 
@@ -479,7 +486,7 @@ dsl.Insert(User).Columns(User.Name).Values("a").
     OnConflictKey(User.Id).DoNothing().ToSql(gooq.DialectPgsql)
 // INSERT INTO "user" ("name") VALUES ($1) ON CONFLICT ("id") DO NOTHING
 
-// Returning: PG / SQLite（error on MySQL）.
+// Returning: PostgreSQL, GaussDB, and SQLite; MySQL and Dameng return an error.
 dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).
     Returning(User.Id).ToSql(gooq.DialectPgsql)
 // UPDATE "user" SET "status" = $1 WHERE "user"."id" = $2 RETURNING "user"."id"
@@ -659,6 +666,21 @@ A sharded table keeps its tenant mark through `Physical()`; call `UnTenant()` fo
 
 Shard groups live in `hack/gooq.tables.yaml`. `single` lists ordinary tables. `groups` lists sharded tables. Without that file, each physical table is generated as its own object. `gooq-gen tables init` writes the file with every table under `single`. `tables check` reports duplicate, missing, and extra names. `tables diff` reports tables added or removed in the database. Neither command rewrites the file.
 
+```yaml
+# hack/gooq.tables.yaml
+single:
+  - "dict"
+  - "user"
+
+groups:
+  - name: "order"
+    table:
+      - "order_00"
+      - "order_01"
+```
+
+The first table in a group supplies the schema used for generation; every table in the group must match it. `name` is the logical table name, so the example generates `table/order.go` and `table/sharding.go`. `gooq-gen tables init` only fills `single` and leaves `groups: []` for you to edit.
+
 A group generates one logical table, `RegisterXxxSharding`, and a package-level `RegisterSharding`. One call to `RegisterSharding` assigns that rule to every sharded logical table. Use `RegisterXxxSharding` to replace the rule on a table that shards differently. A nil rule panics. Registering again overwrites. The rule is stored on `TableMeta.Sharding`.
 
 ```go
@@ -717,15 +739,44 @@ go install github.com/lanceadd/gooq/cmd/gooq-gen@latest             # install th
 # or run from a checkout:
 cd cmd/gooq-gen && go run . init                                    # scaffold hack/gooq.yaml + hack/template/{table,sharding,model,record}.tmpl
 cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
+cd cmd/gooq-gen && go run . -l "sqlite::@file(./test.db)"            # SQLite example
 ```
 
+`gooq-gen` searches for a `hack` directory from the current directory upward and uses `hack/gooq.yaml` when found. CLI flags take priority over the file.
+
+```yaml
+gooq:
+  gen:
+    table:
+      link: "mysql:root:pass@tcp(127.0.0.1:3306)/db"
+      path: internal
+    tenant:
+      column: tenant_id
+      tables:
+        shop_order: org_id
+        dict: ""
+```
+
+### Workflow
+
+1. Run `gooq-gen init` once to scaffold `hack/gooq.yaml` and the templates.
+2. Fill `gooq.gen.table.link` (and `path` if needed) in `hack/gooq.yaml`, or pass `-l` / `-p` on each run; CLI flags take priority.
+3. If the schema has sharded tables, run `gooq-gen tables init` once, then edit `groups` in `hack/gooq.tables.yaml`. Once that file exists it must list every physical table; generation fails when a table is missing or extra.
+4. After a schema change, run `gooq-gen tables diff` to see added/removed tables, update `hack/gooq.tables.yaml`, then run `gooq-gen tables check`.
+5. Run `gooq-gen` (or `gooq-gen -l ... -p ...`) to regenerate `table/` and `model/`.
+6. Customize templates under `hack/template/` instead of editing generated files; templates are never overwritten.
+
+Regeneration overwrites the generated files of current tables. Files for tables removed from the database or `hack/gooq.tables.yaml` are not deleted; remove them yourself. `table/sharding.go` is removed automatically when no sharded groups remain. Write the tenant config before generating when it is used.
+
 - `init` creates `hack/gooq.yaml` and `hack/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten.
+- `-d/--debug` turns on debug logging.
+- `-p internal` (the default) writes `internal/table/` and `internal/model/`. The package name is the directory base (`table`, `model`). `table/sharding.go` is generated only when `hack/gooq.tables.yaml` defines sharded groups.
 - Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority. `gooq.gen.tenant` is read by the CLI and passed into generation. See Multi-tenancy above.
 - Templates: `<hack>/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
-- Shard groups are `hack/gooq.tables.yaml`, maintained with `gooq-gen tables init`, `tables check`, and `tables diff`. See Sharding above.
+- Shard groups are `hack/gooq.tables.yaml`, maintained with `gooq-gen tables init`, `tables check`, and `tables diff`: `init` creates the file with all current tables under `single` and refuses to overwrite an existing file; `check` reports duplicate/missing/extra names; `diff` reports added/removed tables. `check` and `diff` never rewrite the file. See Sharding above.
 - Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
-- Metadata derivation: primary key (`PRI`), auto-increment, soft delete (column-name convention), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
+- Metadata derivation: primary key (`PRI`), auto-increment, soft delete (columns folding to `deletedat` or `deleteat`, such as `deleted_at` / `delete_at`), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
 - Built-in connection drivers live in `drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/oceanbase`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/dm`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses. Link prefixes are `mysql`, `mariadb`, `tidb`, `oceanbase`, `pgsql`/`postgres`, `gaussdb`, `dm`, and `sqlite`.
 
 ## Testing
