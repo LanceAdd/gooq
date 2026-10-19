@@ -5,7 +5,7 @@ go 1.24
 require (
 	github.com/gogf/gf/v2 v2.10.2
 	github.com/google/uuid v1.6.0
-	github.com/lanceadd/gooq v0.1.5
+	github.com/lanceadd/gooq v0.1.6
 	golang.org/x/tools v0.26.0
 )
 
