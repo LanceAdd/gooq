@@ -187,7 +187,7 @@ func (t *Tx) Rollback() error {
 
 // SavePoint 在事务内建立具名保存点。名字按方言加引号。
 func (t *Tx) SavePoint(ctx context.Context, name string) error {
-	quoted, err := quoteIdent(t.dialect, name)
+	quoted, err := QuoteIdent(t.dialect, name)
 	if err != nil {
 		return err
 	}
@@ -197,7 +197,7 @@ func (t *Tx) SavePoint(ctx context.Context, name string) error {
 
 // RollbackTo 回滚到具名保存点。名字按方言加引号。
 func (t *Tx) RollbackTo(ctx context.Context, name string) error {
-	quoted, err := quoteIdent(t.dialect, name)
+	quoted, err := QuoteIdent(t.dialect, name)
 	if err != nil {
 		return err
 	}

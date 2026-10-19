@@ -54,7 +54,7 @@ func (b *SelectBuilder) Row(ctx context.Context) (db.Record, error) {
 		return nil, err
 	}
 	if b.pageCacheOpt != nil {
-		return nil, errPageCache()
+		return nil, errPageCache
 	}
 	if b.cacheOption != nil {
 		if adapter := GetCacheAdapter(); adapter != nil {
@@ -112,7 +112,7 @@ func (b *SelectBuilder) Rows(ctx context.Context) (db.Result, error) {
 		return nil, err
 	}
 	if b.pageCacheOpt != nil {
-		return nil, errPageCache()
+		return nil, errPageCache
 	}
 	if b.cacheOption != nil {
 		if adapter := GetCacheAdapter(); adapter != nil {

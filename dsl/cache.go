@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -117,9 +118,7 @@ func (o CacheOption) valid() bool {
 	return o.Duration > 0 || o.Name != ""
 }
 
-func errPageCache() error {
-	return fmt.Errorf("gooq: PageCache only works with RowsAndCount, StructsAndCount, or ColumnAndCount")
-}
+var errPageCache = errors.New("gooq: PageCache only works with RowsAndCount, StructsAndCount, or ColumnAndCount")
 
 const (
 	queryCacheKeyPrefix     = "gooq:query:"

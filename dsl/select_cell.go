@@ -11,7 +11,7 @@ import (
 // queryWithCache 执行单元格查询。Count 和 Exists 走这里。PageCache 不服务单值查询。
 func (b *SelectBuilder) queryWithCache(ctx context.Context, sql string, args []any, dest any, kind string) error {
 	if b.pageCacheOpt != nil {
-		return errPageCache()
+		return errPageCache
 	}
 	if err := db.CheckValue(dest); err != nil {
 		return err
@@ -86,7 +86,7 @@ func (b *SelectBuilder) readCell(
 	}
 	defer restore()
 	if b.pageCacheOpt != nil {
-		return errPageCache()
+		return errPageCache
 	}
 	dialect := b.dialect()
 	sql, args, err := prepare(dialect)

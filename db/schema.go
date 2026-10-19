@@ -33,10 +33,6 @@ func validIdent(name string) error {
 // QuoteIdent 用已注册的渲染方言给一个普通标识符加引号。
 // 标识符不合法或方言未注册时返回错误。
 func QuoteIdent(dialect gooq.Dialect, name string) (string, error) {
-	return quoteIdent(dialect, name)
-}
-
-func quoteIdent(dialect gooq.Dialect, name string) (string, error) {
 	if err := validIdent(name); err != nil {
 		return "", err
 	}

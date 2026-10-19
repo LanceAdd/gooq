@@ -166,11 +166,6 @@ func (rc *RenderContext) PopTenant(prev TenantState) {
 	rc.tenantIDs = prev.ids
 }
 
-// HasTenant 报告这次渲染上下文里有没有租户值。
-func (rc *RenderContext) HasTenant() bool {
-	return rc.tenantHas
-}
-
 // TenantIDs 返回这次渲染上下文里的租户值。
 func (rc *RenderContext) TenantIDs() ([]any, bool) {
 	if !rc.tenantHas {
