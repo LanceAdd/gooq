@@ -17,11 +17,6 @@ import (
 
 const dirPathModel = "model"
 
-var reservedModelNames = map[string]bool{
-	"Assignments": true,
-	"ToModel":     true,
-}
-
 func generateModel(ctx context.Context, database *db.DB, specs []tableSpec, dirPath string) {
 	for _, spec := range specs {
 		generateModelSingle(ctx, database, spec, dirPath)
@@ -58,12 +53,24 @@ func generateModelContent(ctx context.Context, tableName, dirPath string, column
 		toModel      []string
 		fromModel    []string
 	)
+	var named []namedField
 	usedNames := map[string]string{}
 	for _, field := range columns {
-		camel, nameErr := modelFieldName(field.Name, usedNames)
+		camel, nameErr := goFieldName(field.Name, nil, usedNames)
 		if nameErr != nil {
 			return "", "", nameErr
 		}
+		nullable := field.Nullable && !field.Primary
+		named = append(named, namedField{Column: field.Name, Name: camel, Nullable: nullable})
+	}
+	conflicts := recordConflicts(named)
+	for _, field := range named {
+		if decl, ok := conflicts[field.Name]; ok {
+			return "", "", fmt.Errorf("gooq: column %q conflicts with %s", field.Column, decl)
+		}
+	}
+	for _, field := range columns {
+		camel := formatFieldName(field.Name, FieldNameCaseCamel)
 		nullable := field.Nullable && !field.Primary
 		fieldType, setType := modelFieldTypes(field, nullable, &hasStdTime, &hasUUID)
 		fields = append(fields, fmt.Sprintf("\t%s %s `json:%q orm:%q`", camel, fieldType, modelJSONName(field.Name), field.Name))
@@ -120,10 +127,6 @@ func renderTemplate(ctx context.Context, name string, params gview.Params) (stri
 	tplView.ClearAssigns()
 	tplView.Assigns(params)
 	return tplView.ParseContent(ctx, getTemplate(name))
-}
-
-func modelFieldName(column string, used map[string]string) (string, error) {
-	return goFieldName(column, reservedModelNames, used)
 }
 
 func modelJSONName(column string) string {

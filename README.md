@@ -130,7 +130,7 @@ dsl.Select(User.Id).From(User).Distinct()                                   // S
 // Paging
 dsl.Select(User.Id).From(User).Limit(10)              // ... LIMIT 10
 dsl.Select(User.Id).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
-dsl.Select(User.Id).From(User).Offset(20)             // MySQL: LIMIT 18446744073709551615 OFFSET 20; PG/SQLite: OFFSET 20
+dsl.Select(User.Id).From(User).Offset(20)             // MySQL: LIMIT 18446744073709551615 OFFSET 20; PG: OFFSET 20; SQLite: LIMIT -1 OFFSET 20
 dsl.Select(User.Id).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（1-based pages）
 
 // Ordering: direction is part of the expression (Field.Asc()/Desc(), gooq.OrderAscExpr/DescExpr)
@@ -196,7 +196,7 @@ q2 := base.Clone().Where(User.Status.Eq("vip")) // independent
 // A string passed to Fields is spliced as Raw SQL and is not quoted as an identifier.
 ```
 
-`In` and `NotIn` with an empty slice add no condition; they do not render `0=1`. Guard empty input at the call site when the query must return no rows.
+`In` and `NotIn` render no condition when the value list length is 0. A nil slice, an empty slice, and no arguments are the same, and `WHERE` drops that empty condition. The library does not rewrite it to `(1 = 0)` or `(1 = 1)`, and it does not return an error. When the statement must match no rows, the caller skips execution at length 0.
 
 ### JOINs
 
@@ -454,11 +454,8 @@ dsl.Delete(User).Unscoped().Where(User.Id.Eq(1))
 dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 // DELETE FROM `user_role` WHERE (`user_role`.`id` = ?)
 
-// Batch delete by primary key (soft delete honored).
-dsl.Delete(User).ValuesOf(
-    model.NewUserRecord().SetId(1),
-    model.NewUserRecord().SetId(2),
-).Exec(ctx)
+// Batch delete by primary key. ValuesOf is not used on Delete.
+dsl.Delete(User).Where(User.Id.In(1, 2)).Exec(ctx)
 ```
 
 ### Upsert & Returning
@@ -546,7 +543,12 @@ name := db.Get(row, User.Name)  // string
 // SetDebug logs SQL, SetDryRun skips execution, Prepare prepares a statement,
 // and Schema switches the MySQL database or PostgreSQL search_path.
 // Reads use a slave when the group has one; writes and BEGIN use a master.
-// Master() and Slave() force the pool. A transaction is taken from ctx.
+// Master() and Slave() force the pool. A transaction is taken from ctx and joins only the pool that started it.
+// Another registered group, another Open, and a Schema that opened its own pool do not use that transaction and do not fail because it is present.
+// Master, Slave, WithRoute, and a Schema that keeps the shared pool still join.
+// Concurrent requests may share one DB; each transaction lives in its own ctx.
+// Do not hand a transactional ctx or Tx to another request, and do not run one Tx concurrently.
+// dsl Tx(tx) runs that statement on the given connection; otherwise it still joins from ctx.
 ```
 
 ```yaml
@@ -679,7 +681,7 @@ groups:
       - "order_01"
 ```
 
-The first table in a group supplies the schema used for generation; every table in the group must match it. `name` is the logical table name, so the example generates `table/order.go` and `table/sharding.go`. `gooq-gen tables init` only fills `single` and leaves `groups: []` for you to edit.
+The first table in a group supplies the schema used for generation; every table in the group must match it. `name` is the logical table name, so the example generates `table/order.go` and `table/gooq_sharding.go`. `gooq-gen tables init` only fills `single` and leaves `groups: []` for you to edit.
 
 A group generates one logical table, `RegisterXxxSharding`, and a package-level `RegisterSharding`. One call to `RegisterSharding` assigns that rule to every sharded logical table. Use `RegisterXxxSharding` to replace the rule on a table that shards differently. A nil rule panics. Registering again overwrites. The rule is stored on `TableMeta.Sharding`.
 
@@ -766,17 +768,17 @@ gooq:
 5. Run `gooq-gen` (or `gooq-gen -l ... -p ...`) to regenerate `table/` and `model/`.
 6. Customize templates under `hack/template/` instead of editing generated files; templates are never overwritten.
 
-Regeneration overwrites the generated files of current tables. Files for tables removed from the database or `hack/gooq.tables.yaml` are not deleted; remove them yourself. `table/sharding.go` is removed automatically when no sharded groups remain. Write the tenant config before generating when it is used.
+Regeneration overwrites the generated files of current tables. Files for tables removed from the database or `hack/gooq.tables.yaml` are not deleted; remove them yourself. `table/gooq_sharding.go` is removed automatically when no sharded groups remain. Write the tenant config before generating when it is used.
 
 - `init` creates `hack/gooq.yaml` and `hack/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten.
 - `-d/--debug` turns on debug logging.
-- `-p internal` (the default) writes `internal/table/` and `internal/model/`. The package name is the directory base (`table`, `model`). `table/sharding.go` is generated only when `hack/gooq.tables.yaml` defines sharded groups.
+- `-p internal` (the default) writes `internal/table/` and `internal/model/`. The package name is the directory base (`table`, `model`). `table/gooq_sharding.go` is generated only when `hack/gooq.tables.yaml` defines sharded groups.
 - Config file: reads `hack/gooq.yaml` under the `gooq.gen.table` node; CLI options take priority. `gooq.gen.tenant` is read by the CLI and passed into generation. See Multi-tenancy above.
 - Templates: `<hack>/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Shard groups are `hack/gooq.tables.yaml`, maintained with `gooq-gen tables init`, `tables check`, and `tables diff`: `init` creates the file with all current tables under `single` and refuses to overwrite an existing file; `check` reports duplicate/missing/extra names; `diff` reports added/removed tables. `check` and `diff` never rewrite the file. See Sharding above.
 - Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
-- Metadata derivation: primary key (`PRI`), auto-increment, soft delete (columns folding to `deletedat` or `deleteat`, such as `deleted_at` / `delete_at`), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); columns colliding with table-base methods get a `Field` suffix (`meta` → `MetaField`).
+- Metadata derivation: primary key (`PRI`), auto-increment, soft delete (columns folding to `deletedat` or `deleteat`, such as `deleted_at` / `delete_at`), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); a column whose name collides with a generated field or method fails generation and reports the column and the conflicting declaration.
 - Built-in connection drivers live in `drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/oceanbase`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/dm`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses. Link prefixes are `mysql`, `mariadb`, `tidb`, `oceanbase`, `pgsql`/`postgres`, `gaussdb`, `dm`, and `sqlite`.
 
 ## Testing

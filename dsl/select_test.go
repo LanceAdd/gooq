@@ -49,7 +49,7 @@ func TestDsl_Select_Basic(t *testing.T) {
 
 		sql, _, err = Select(testUser.Id).From(testUser).Offset(20).ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
-		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL OFFSET 20`)
+		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL LIMIT -1 OFFSET 20`)
 
 		sql, _, err = Select(testUser.Id).From(testUser).Page(2, 10).ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)

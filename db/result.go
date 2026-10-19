@@ -17,7 +17,7 @@ type Record map[string]any
 type Result []Record
 
 // Get 从一行里读一个带类型的列。
-// 缺列、NULL 和转换失败都返回零值；需要错误时用 Value。
+// 缺列、NULL 和转换失败都返回零值，包括 Value 会返回的错误。
 func Get[T any](record Record, field gooq.Field[T]) T {
 	value, err := Value[T](record, field)
 	if err != nil {

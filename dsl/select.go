@@ -106,7 +106,8 @@ type SelectBuilder struct {
 	setOps        []setOpClause
 	ctes          []cteClause
 	recursive     bool     // CTE 递归（WITH RECURSIVE）。
-	executor      executor // 测试注入的执行器；正式执行由 DB(name) 和 ctx 中的事务决定。
+	executor      executor // 测试注入的执行器；正式执行由 DB(name)、显式事务和 ctx 中的事务决定。
+	explicitTx    *db.Tx   // Tx(tx) 指定的连接。nil 表示仍从 ctx 查找。
 	group         string   // DB(name) 指定的配置组；空字符串表示默认组。
 	groupSet      bool     // 是否显式指定了非默认配置组。
 	route         db.Route
@@ -523,5 +524,29 @@ func (c *cteTable) Field(column string) gooq.Field[any] {
 func (b *SelectBuilder) DB(name string) *SelectBuilder {
 	b.group = name
 	b.groupSet = name != ""
+	b.noteExplicitTxGroup()
 	return b
+}
+
+// Tx 指定这条语句使用的事务连接。nil 不生效，也不清掉已经设置的事务。
+func (b *SelectBuilder) Tx(tx *db.Tx) *SelectBuilder {
+	if tx == nil {
+		return b
+	}
+	if tx.DB() == nil {
+		b.buildErr = fmt.Errorf("gooq: Tx has no database")
+		return b
+	}
+	b.explicitTx = tx
+	b.noteExplicitTxGroup()
+	return b
+}
+
+func (b *SelectBuilder) noteExplicitTxGroup() {
+	if b.explicitTx == nil || b.explicitTx.DB() == nil || !b.groupSet {
+		return
+	}
+	if b.group != b.explicitTx.DB().Group() {
+		b.buildErr = fmt.Errorf("gooq: Tx group %q does not match DB %q", b.explicitTx.DB().Group(), b.group)
+	}
 }

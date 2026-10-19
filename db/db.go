@@ -62,9 +62,13 @@ type node struct {
 	maxIdleFor time.Duration
 }
 
+// txScope 标识一个连接池。类型有非零大小，两次分配不会共用地址。
+type txScope struct{ _ byte }
+
 // DB 是一组共用同一方言的主库和从库连接池。
 type DB struct {
 	group   string
+	scope   *txScope
 	masters []node
 	slaves  []node
 	route   Route
@@ -106,7 +110,7 @@ func openGroup(group string, configs []Config) (*DB, error) {
 	if len(configs) == 0 {
 		return nil, fmt.Errorf("gooq: empty database configuration for group %q", group)
 	}
-	database := &DB{group: group}
+	database := &DB{group: group, scope: &txScope{}}
 	for _, cfg := range configs {
 		opened, drv, err := openNode(cfg)
 		if err != nil {
@@ -395,7 +399,7 @@ func (t *Tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, e
 }
 
 func (d *DB) executor(ctx context.Context, write bool) (Queryer, error) {
-	if tx := TxFromContext(ctx, d.group); tx != nil {
+	if tx := d.TxFromContext(ctx); tx != nil {
 		return tx.sql, nil
 	}
 	if write {

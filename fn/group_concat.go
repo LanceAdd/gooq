@@ -44,10 +44,10 @@ func GroupConcat(options GroupConcatOptions) *FuncExpr {
 			return ""
 		}
 		var orderSQL string
-		if len(options.OrderBy) > 0 {
+		if order, ok := renderer.(groupConcatOrderRenderer); ok && order.GroupConcatOrder() && len(options.OrderBy) > 0 {
 			parts := make([]string, 0, len(options.OrderBy))
-			for _, o := range options.OrderBy {
-				parts = append(parts, rc.Render(o))
+			for _, item := range options.OrderBy {
+				parts = append(parts, rc.Render(item))
 			}
 			orderSQL = strings.Join(parts, ", ")
 		}

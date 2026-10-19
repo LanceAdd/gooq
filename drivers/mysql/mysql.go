@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 
@@ -31,7 +32,10 @@ func (mysqlDriver) SQLDriver() string { return "mysql" }
 func (mysqlDriver) Underlying() driver.Driver { return &mysqldriver.MySQLDriver{} }
 
 func (mysqlDriver) DSN(link db.ParsedLink) (string, error) {
-	endpoint := mysqlEndpoint(link)
+	endpoint, err := mysqlEndpoint(link)
+	if err != nil {
+		return "", err
+	}
 	dsn := fmt.Sprintf("%s:%s@%s/%s?parseTime=true", link.User, link.Pass, endpoint, link.Name)
 	if link.Extra == "" {
 		return dsn, nil
@@ -46,21 +50,44 @@ func (mysqlDriver) DSN(link db.ParsedLink) (string, error) {
 	return fmt.Sprintf("%s:%s@%s/%s?%s", link.User, link.Pass, endpoint, link.Name, extra.Encode()), nil
 }
 
-func mysqlEndpoint(link db.ParsedLink) string {
-	if link.Port == "" {
-		return fmt.Sprintf("%s(%s)", link.Protocol, link.Host)
+func mysqlEndpoint(link db.ParsedLink) (string, error) {
+	switch link.Protocol {
+	case "unix":
+		if link.Port != "" {
+			return "", fmt.Errorf("gooq: mysql unix link must not include a port")
+		}
+		return "unix(" + link.Host + ")", nil
+	case "tcp", "tcp4", "tcp6":
+		host := link.Host
+		if link.Port != "" {
+			host = net.JoinHostPort(link.Host, link.Port)
+		}
+		return fmt.Sprintf("%s(%s)", link.Protocol, host), nil
+	default:
+		if link.Port == "" {
+			return fmt.Sprintf("%s(%s)", link.Protocol, link.Host), nil
+		}
+		return fmt.Sprintf("%s(%s:%s)", link.Protocol, link.Host, link.Port), nil
 	}
-	return fmt.Sprintf("%s(%s:%s)", link.Protocol, link.Host, link.Port)
 }
 
 func (mysqlDriver) ApplySession(dsn string, cfg db.Config) string {
-	if cfg.Charset != "" && !strings.Contains(dsn, "charset=") {
-		dsn += "&charset=" + cfg.Charset
+	base, raw, _ := strings.Cut(dsn, "?")
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return dsn
 	}
-	if cfg.Timezone != "" && !strings.Contains(dsn, "loc=") {
-		dsn += "&loc=" + cfg.Timezone
+	if cfg.Charset != "" && !values.Has("charset") {
+		values.Set("charset", cfg.Charset)
 	}
-	return dsn
+	if cfg.Timezone != "" && !values.Has("loc") {
+		values.Set("loc", cfg.Timezone)
+	}
+	encoded := values.Encode()
+	if encoded == "" {
+		return base
+	}
+	return base + "?" + encoded
 }
 
 func (mysqlDriver) Tables(ctx context.Context, query db.Queryer) ([]string, error) {

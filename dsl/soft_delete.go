@@ -2,6 +2,7 @@ package dsl
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/lanceadd/gooq"
 )
@@ -28,6 +29,20 @@ func (b *SelectBuilder) softReferenced(table *gooq.TableBase, column string) boo
 	return false
 }
 
+func softDeleteValue(localType gooq.LocalType) (any, bool) {
+	switch localType {
+	case gooq.LocalTypeDate, gooq.LocalTypeTime, gooq.LocalTypeDatetime:
+		return time.Now(), true
+	case gooq.LocalTypeInt, gooq.LocalTypeUint, gooq.LocalTypeInt32, gooq.LocalTypeUint32,
+		gooq.LocalTypeInt64, gooq.LocalTypeUint64, gooq.LocalTypeBigInt:
+		return 1, true
+	case gooq.LocalTypeBool:
+		return true, true
+	default:
+		return nil, false
+	}
+}
+
 // softDeleteSQL 渲染一张实表的软删谓词。派生表、已显式接管的表返回空字符串。
 // 不支持的列类型记入渲染错误，不生成 SQL。
 func (b *SelectBuilder) softDeleteSQL(rc *gooq.RenderContext, table gooq.Table) string {
@@ -47,8 +62,10 @@ func (b *SelectBuilder) softDeleteSQL(rc *gooq.RenderContext, table gooq.Table) 
 	case gooq.LocalTypeDate, gooq.LocalTypeTime, gooq.LocalTypeDatetime:
 		return column + " IS NULL"
 	case gooq.LocalTypeInt, gooq.LocalTypeUint, gooq.LocalTypeInt32, gooq.LocalTypeUint32,
-		gooq.LocalTypeInt64, gooq.LocalTypeUint64, gooq.LocalTypeBigInt, gooq.LocalTypeBool:
+		gooq.LocalTypeInt64, gooq.LocalTypeUint64, gooq.LocalTypeBigInt:
 		return column + " = 0"
+	case gooq.LocalTypeBool:
+		return column + " = false"
 	default:
 		rc.Fail(fmt.Errorf("gooq: soft delete column %q has unsupported type %q", meta.ColumnName, meta.LocalType))
 		return ""

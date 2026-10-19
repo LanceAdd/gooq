@@ -32,6 +32,14 @@ func formatFieldName(fieldName string, nameCase FieldNameCase) string {
 	}
 }
 
+func generatedTableFile(logical string) (string, error) {
+	fileName := formatFileName(logical, "")
+	if fileName == "gooq_sharding" {
+		return "", fmt.Errorf("gooq: logical table %q generates file gooq_sharding.go", logical)
+	}
+	return fileName, nil
+}
+
 func formatFileName(fileName, nameCase string) string {
 	if nameCase == "" {
 		nameCase = string(gstr.Snake)
@@ -52,19 +60,54 @@ func normalizeNameForCaseConvert(name string) string {
 	return name
 }
 
-func goFieldName(column string, reserved map[string]bool, used map[string]string) (string, error) {
+func goFieldName(column string, conflicts map[string]string, used map[string]string) (string, error) {
 	name := formatFieldName(column, FieldNameCaseCamel)
-	if reserved[name] {
-		name += "Field"
-	}
 	if !validGoIdent(name) {
 		return "", fmt.Errorf("gooq: column %q produces invalid Go name %q", column, name)
+	}
+	if decl, ok := conflicts[name]; ok {
+		return "", fmt.Errorf("gooq: column %q conflicts with %s", column, decl)
 	}
 	if prev, ok := used[name]; ok {
 		return "", fmt.Errorf("gooq: columns %q and %q both generate field %s", prev, column, name)
 	}
 	used[name] = column
 	return name, nil
+}
+
+func tableConflicts(sharding bool) map[string]string {
+	names := []string{
+		"As", "Clone", "TableName", "AliasName", "Meta", "AllColumns", "AllFields",
+		"Field", "SetShard", "CopyShard", "TableBase", "BoundBase",
+	}
+	if sharding {
+		names = append(names, "Physical", "ShardBy")
+	}
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		out[name] = name
+	}
+	return out
+}
+
+func recordConflicts(fields []namedField) map[string]string {
+	out := map[string]string{
+		"Assignments": "Assignments",
+		"ToModel":     "ToModel",
+	}
+	for _, field := range fields {
+		out["Set"+field.Name] = "Set" + field.Name
+		if field.Nullable {
+			out["Set"+field.Name+"Null"] = "Set" + field.Name + "Null"
+		}
+	}
+	return out
+}
+
+type namedField struct {
+	Column   string
+	Name     string
+	Nullable bool
 }
 
 func isSoftDeleteColumn(name string) bool {

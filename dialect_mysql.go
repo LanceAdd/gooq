@@ -180,6 +180,12 @@ func (MySQLDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
 	return sqlStr + ")", nil
 }
 
+// GroupConcatOrder 表示 GROUP_CONCAT 可以带 ORDER BY。
+func (MySQLDialect) GroupConcatOrder() bool { return true }
+
+// RenderNow 渲染会话时区的日期时间。
+func (MySQLDialect) RenderNow() string { return "NOW()" }
+
 func (MySQLDialect) RenderMedian(fieldSQL string) string {
 	return fmt.Sprintf("MEDIAN(%s)", fieldSQL)
 }

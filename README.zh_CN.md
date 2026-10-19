@@ -129,7 +129,7 @@ dsl.Select(User.Id).From(User).Distinct()                                   // S
 // 分页
 dsl.Select(User.Id).From(User).Limit(10)              // ... LIMIT 10
 dsl.Select(User.Id).From(User).Offset(20).Limit(10)   // ... LIMIT 10 OFFSET 20
-dsl.Select(User.Id).From(User).Offset(20)             // MySQL: LIMIT 18446744073709551615 OFFSET 20；PG/SQLite: OFFSET 20
+dsl.Select(User.Id).From(User).Offset(20)             // MySQL: LIMIT 18446744073709551615 OFFSET 20；PG: OFFSET 20；SQLite: LIMIT -1 OFFSET 20
 dsl.Select(User.Id).From(User).Page(2, 10)            // ... LIMIT 10 OFFSET 10（页码从 1 起）
 
 // 排序：方向属于表达式本身（Field.Asc()/Desc()、gooq.OrderAscExpr/DescExpr）
@@ -194,7 +194,7 @@ q2 := base.Clone().Where(User.Status.Eq("vip")) // 互不干扰
 // Fields 的字符串参数按 Raw 拼进 SQL，不做标识符转义。列对象走字段渲染。
 ```
 
-`In`、`NotIn` 传空切片时不会生成条件，也不会生成 `0=1`；需要“空结果”语义时，由调用点显式守卫。
+`In` 和 `NotIn` 的值列表长度为 0 时不生成条件。`nil`、空切片和不传参数一样，`WHERE` 丢掉这段空条件。库不改成 `(1 = 0)`、`(1 = 1)`，也不报错。要限制行数时，调用方在长度为 0 时不要执行这条语句。
 
 ### JOIN
 
@@ -451,11 +451,8 @@ dsl.Delete(User).Unscoped().Where(User.Id.Eq(1))
 dsl.Delete(UserRole).Where(UserRole.Id.Eq(1))
 // DELETE FROM `user_role` WHERE (`user_role`.`id` = ?)
 
-// 按主键批量删除（软删同样生效）。
-dsl.Delete(User).ValuesOf(
-    model.NewUserRecord().SetId(1),
-    model.NewUserRecord().SetId(2),
-).Exec(ctx)
+// 按主键批量删除。ValuesOf 不用于 Delete。
+dsl.Delete(User).Where(User.Id.In(1, 2)).Exec(ctx)
 ```
 
 ### Upsert 与 Returning
@@ -542,7 +539,12 @@ name := db.Get(row, User.Name)  // string
 // SetDebug 打印 SQL，SetDryRun 跳过执行，Prepare 预处理语句，
 // Schema 切换 MySQL 库名或 PostgreSQL search_path。
 // 组内有从库时读走从库，写和 BEGIN 走主库。Master() / Slave() 强制指定。
-// 事务从 ctx 读取。
+// 事务从 ctx 读取，只加入开启它的连接池。
+// 别的已注册组、另一次 Open、以及 Schema 另开的池都不使用该事务，也不因此失败。
+// 共用池的 Master、Slave、WithRoute 和会话语句为空的 Schema 仍加入。
+// 多个请求可以共用同一个 DB，事务在各自的 ctx 里。
+// 不要把带事务的 ctx 或 Tx 交给另一个请求，也不要让同一个 Tx 并发执行。
+// dsl 的 Tx(tx) 让这一条语句走传入的连接；不调用时仍从 ctx 加入。
 ```
 
 ```yaml
@@ -671,7 +673,7 @@ groups:
       - "order_01"
 ```
 
-组里的第一张表提供生成用的 schema，组内所有表都必须和它一致。`name` 是逻辑表名，所以这个示例会生成 `table/order.go` 和 `table/sharding.go`。`gooq-gen tables init` 只填 `single`，`groups` 保持 `[]`，分组由调用方自己编辑。
+组里的第一张表提供生成用的 schema，组内所有表都必须和它一致。`name` 是逻辑表名，所以这个示例会生成 `table/order.go` 和 `table/gooq_sharding.go`。`gooq-gen tables init` 只填 `single`，`groups` 保持 `[]`，分组由调用方自己编辑。
 
 一组生成一个逻辑表、`RegisterXxxSharding`，以及包级的 `RegisterSharding`。同一种分片方式调用一次 `RegisterSharding`，它把这个规则赋给所有分片逻辑表。某张表算法不同时，再用 `RegisterXxxSharding` 盖掉。nil 会 panic，再次注册覆盖。规则挂在 `TableMeta.Sharding` 上。
 
@@ -758,17 +760,17 @@ gooq:
 5. 执行 `gooq-gen`（或 `gooq-gen -l ... -p ...`）重新生成 `table/` 和 `model/`。
 6. 定制模板写在 `hack/template/`，不要手改生成文件；模板不会被覆盖。
 
-重新生成会覆盖当前表的生成文件。库里或 `hack/gooq.tables.yaml` 里已删除的表，旧文件不会自动删除，需要手工清理。没有分片组时 `table/sharding.go` 会自动删除。使用租户时，先生成配置再运行。
+重新生成会覆盖当前表的生成文件。库里或 `hack/gooq.tables.yaml` 里已删除的表，旧文件不会自动删除，需要手工清理。没有分片组时 `table/gooq_sharding.go` 会自动删除。使用租户时，先生成配置再运行。
 
 - `init` 生成 `hack/gooq.yaml`，以及 `hack/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl`；已存在的文件不覆盖。
 - `-d/--debug` 打开调试日志。
-- `-p internal`（默认值）会生成 `internal/table/` 和 `internal/model/`；包名取目录名（`table`、`model`）。只有 `hack/gooq.tables.yaml` 配置了分片组时才生成 `table/sharding.go`。
+- `-p internal`（默认值）会生成 `internal/table/` 和 `internal/model/`；包名取目录名（`table`、`model`）。只有 `hack/gooq.tables.yaml` 配置了分片组时才生成 `table/gooq_sharding.go`。
 - 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。`gooq.gen.tenant` 由 CLI 读出后传给生成。见上面的多租户。
 - 模板：`<hack>/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
 - 分片分组在 `hack/gooq.tables.yaml`，用 `gooq-gen tables init`、`tables check`、`tables diff` 维护：`init` 创建文件，把当前所有表写进 `single`，文件已存在时拒绝覆盖；`check` 报告重复、缺失和多余的表名；`diff` 报告新增和已删除的表。`check` 和 `diff` 不改文件。见上面的分片节。
 - 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
-- 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名折叠后为 `deletedat` 或 `deleteat`，例如 `deleted_at` / `delete_at`）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与表基方法同名的列加 `Field` 后缀（`meta` → `MetaField`）。
+- 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名折叠后为 `deletedat` 或 `deleteat`，例如 `deleted_at` / `delete_at`）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与即将生成的字段或方法同名时，生成失败并写出原列名和冲突声明。
 - 内置连接驱动在 `drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。链接前缀分别是 `mysql`、`mariadb`、`tidb`、`oceanbase`、`pgsql`/`postgres`、`gaussdb`、`dm`、`sqlite`。
 
 ## 测试

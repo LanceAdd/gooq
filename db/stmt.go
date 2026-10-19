@@ -14,12 +14,12 @@ type Stmt struct {
 }
 
 // Prepare 预编译语句。master 为 true 时使用主库。
-// ctx 里已有同一组的事务时，改在该事务上预编译。否则走读库。
+// ctx 里已有同一连接池的事务时，改在该事务上预编译。否则走读库。
 func (d *DB) Prepare(ctx context.Context, query string, master ...bool) (*Stmt, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if tx := TxFromContext(ctx, d.group); tx != nil {
+	if tx := d.TxFromContext(ctx); tx != nil {
 		return tx.Prepare(ctx, query)
 	}
 	useMaster := len(master) > 0 && master[0]

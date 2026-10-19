@@ -67,6 +67,15 @@ func TestAssignCell(t *testing.T) {
 	if err = Assign(&n, int64(7)); err != nil || n != 7 {
 		t.Fatalf("int %d err=%v", n, err)
 	}
+	id := gooq.NewField[int]("item", "id")
+	n, err = Value(Record{"id": "not-a-number"}, id)
+	if err != nil || n != 0 {
+		t.Fatalf("invalid int = %d, %v", n, err)
+	}
+	var narrow int8
+	if err = Assign(&narrow, int64(128)); err != nil || narrow != -128 {
+		t.Fatalf("overflow int8 = %d, %v", narrow, err)
+	}
 	var textPtr *string
 	if err = Assign(&textPtr, nil); err != nil || textPtr != nil {
 		t.Fatalf("nil string pointer %v err=%v", textPtr, err)

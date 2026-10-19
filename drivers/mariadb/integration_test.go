@@ -306,16 +306,11 @@ func TestMariaDBLive(t *testing.T) {
 			t.Fatalf("names after batch update = %#v", names)
 		}
 
-		// 批量删除（软删表的 deleted_at 在 batch 表上未标记，这里按主键硬删）。
-		result, err = dsl.Delete(batch).ValuesOf(
+		_, err = dsl.Delete(batch).ValuesOf(
 			liveRow{{Column: "id", Value: 1}},
 		).Exec(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		affected, err = result.RowsAffected()
-		if err != nil || affected != 1 {
-			t.Fatalf("batch delete affected = %d, %v", affected, err)
+		if err == nil || !strings.Contains(err.Error(), "ValuesOf is only supported on Insert and Update") {
+			t.Fatalf("batch delete ValuesOf err = %v", err)
 		}
 	})
 

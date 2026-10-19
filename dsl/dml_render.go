@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/lanceadd/gooq"
 )
@@ -278,6 +277,36 @@ func (b *DMLBuilder) renderUpdateStatement(rc *gooq.RenderContext, renderSets fu
 	return sqlStr + returning, rc.Args(), nil
 }
 
+func (b *DMLBuilder) validateBatchUpdateKeys(keys []string) error {
+	for index, row := range b.batchUpdateRows {
+		present := make(map[string]columnValue, len(keys))
+		for _, cv := range row {
+			if slices.Contains(keys, cv.column) {
+				present[cv.column] = cv
+			}
+		}
+		record := index + 1
+		if len(present) == 0 {
+			return fmt.Errorf("gooq: batch update record %d has no key columns", record)
+		}
+		var missing []string
+		for _, key := range keys {
+			cv, ok := present[key]
+			if !ok {
+				missing = append(missing, key)
+				continue
+			}
+			if cv.null {
+				return fmt.Errorf("gooq: batch update record %d key %s is NULL", record, key)
+			}
+		}
+		if len(missing) > 0 {
+			return fmt.Errorf("gooq: batch update record %d missing key columns: %s", record, strings.Join(missing, ", "))
+		}
+	}
+	return nil
+}
+
 func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, error) {
 	if len(b.joins) > 0 {
 		return nil, nil, fmt.Errorf("gooq: batch delete/update does not support JOIN")
@@ -291,7 +320,10 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 		}
 	}
 	if len(keys) == 0 {
-		return nil, nil, fmt.Errorf("gooq: batch delete/update requires primary key or Keys(...)")
+		return nil, nil, fmt.Errorf("gooq: batch update requires primary key or Keys(...)")
+	}
+	if err := b.validateBatchUpdateKeys(keys); err != nil {
+		return nil, nil, err
 	}
 	var (
 		sqls  []string
@@ -309,7 +341,7 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 				sets = append(sets, cv)
 			}
 		}
-		if len(where) == 0 || (b.kind == dmlUpdate && len(sets) == 0) {
+		if b.kind == dmlUpdate && len(sets) == 0 {
 			continue
 		}
 		rc := gooq.NewRenderContext(dialect)
@@ -326,11 +358,15 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 				softField = b.table.Meta().SoftDeleteField()
 			}
 			if softField != nil && !b.unscoped {
+				value, ok := softDeleteValue(softField.LocalType)
+				if !ok {
+					return nil, nil, fmt.Errorf("gooq: soft delete column %q has unsupported type %q", softField.ColumnName, softField.LocalType)
+				}
 				sqlStr = fmt.Sprintf(
 					"UPDATE %s SET %s = %s",
 					tableNameSQL(rc, b.table),
 					rc.Quote(softField.ColumnName),
-					rc.AddArg(time.Now()),
+					rc.AddArg(value),
 				)
 			} else {
 				sqlStr = "DELETE FROM " + tableNameSQL(rc, b.table)
@@ -344,10 +380,6 @@ func (b *DMLBuilder) renderBatchDML(dialect gooq.Dialect) ([]string, [][]any, er
 		}
 		whereParts := make([]string, len(where))
 		for i, cv := range where {
-			if cv.null {
-				whereParts[i] = rc.Quote(cv.column) + " IS NULL"
-				continue
-			}
 			whereParts[i] = fmt.Sprintf("%s = %s", rc.Quote(cv.column), rc.AddArg(cv.value))
 		}
 		if extra := b.renderWhere(rc); extra != "" {
@@ -387,8 +419,12 @@ func (b *DMLBuilder) renderDelete(rc *gooq.RenderContext) (string, []any, error)
 // renderSoftDelete 把软删 DELETE 改写成 UPDATE deleted_at = now()。
 // 赋值在局部构造，渲染期间不写 setValues，也不追加 IS NULL 守卫。
 func (b *DMLBuilder) renderSoftDelete(rc *gooq.RenderContext, softField *gooq.FieldMeta) (string, []any, error) {
+	value, ok := softDeleteValue(softField.LocalType)
+	if !ok {
+		return "", nil, fmt.Errorf("gooq: soft delete column %q has unsupported type %q", softField.ColumnName, softField.LocalType)
+	}
 	return b.renderUpdateStatement(rc, func() string {
-		return renderSetValue(rc, columnValue{column: softField.ColumnName, value: time.Now()})
+		return renderSetValue(rc, columnValue{column: softField.ColumnName, value: value})
 	})
 }
 

@@ -306,16 +306,11 @@ func TestMySQL8Live(t *testing.T) {
 			t.Fatalf("names after batch update = %#v", names)
 		}
 
-		// 批量删除（软删表的 deleted_at 在 batch 表上未标记，这里按主键硬删）。
-		result, err = dsl.Delete(batch).ValuesOf(
+		_, err = dsl.Delete(batch).ValuesOf(
 			liveRow{{Column: "id", Value: 1}},
 		).Exec(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		affected, err = result.RowsAffected()
-		if err != nil || affected != 1 {
-			t.Fatalf("batch delete affected = %d, %v", affected, err)
+		if err == nil || !strings.Contains(err.Error(), "ValuesOf is only supported on Insert and Update") {
+			t.Fatalf("batch delete ValuesOf err = %v", err)
 		}
 	})
 
@@ -677,6 +672,46 @@ func TestMySQL8Live(t *testing.T) {
 			if _, err = view.GetValue(ctx, sqlText, args...); err != nil {
 				t.Fatalf("%s: %v", sqlText, err)
 			}
+		}
+	})
+
+	t.Run("schema pool", func(t *testing.T) {
+		if _, err = database.Exec(ctx, `CREATE TABLE events (id INT PRIMARY KEY)`); err != nil {
+			t.Fatal(err)
+		}
+		otherName := "gooq_it_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+		if _, err = database.Exec(ctx, "CREATE DATABASE `"+otherName+"`"); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = database.Exec(context.Background(), "DROP DATABASE `"+otherName+"`")
+		})
+		other, err := database.Schema(otherName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = other.Close() })
+		if _, err = other.Exec(ctx, `CREATE TABLE events (id INT PRIMARY KEY)`); err != nil {
+			t.Fatal(err)
+		}
+		err = database.Transaction(ctx, func(txctx context.Context, tx *db.Tx) error {
+			if _, err = other.Exec(txctx, `INSERT INTO events(id) VALUES (1)`); err != nil {
+				return err
+			}
+			return errors.New("rollback original")
+		})
+		if err == nil || err.Error() != "rollback original" {
+			t.Fatal(err)
+		}
+		var original, moved int64
+		if err = database.Value(ctx, &original, `SELECT COUNT(*) FROM events`); err != nil {
+			t.Fatal(err)
+		}
+		if err = other.Value(ctx, &moved, `SELECT COUNT(*) FROM events`); err != nil {
+			t.Fatal(err)
+		}
+		if original != 0 || moved != 1 {
+			t.Fatalf("original=%d schema=%d", original, moved)
 		}
 	})
 }

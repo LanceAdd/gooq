@@ -103,9 +103,17 @@ func (b *SelectBuilder) readCell(
 	return run(ctx, b.executor, sql, args, dest)
 }
 
+func executorInTx(exec executor) bool {
+	_, ok := exec.(*db.Tx)
+	return ok
+}
+
 func (b *SelectBuilder) cellWithCache(
 	ctx context.Context, adapter CacheAdapter, sql string, args []any, dest any, kind string, run func() error,
 ) error {
+	if executorInTx(b.executor) {
+		return run()
+	}
 	key, err := b.cacheKey(kind, sql, args)
 	if err != nil {
 		return err

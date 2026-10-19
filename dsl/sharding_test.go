@@ -273,9 +273,9 @@ func TestShardingBatchDMLRequiresShardBy(t *testing.T) {
 	if len(sqls) != 2 || !strings.Contains(sqls[0], `UPDATE "shard_user_03"`) {
 		t.Fatalf("sqls %v", sqls)
 	}
-	sqls, _, err = Delete(u).Keys(u.Id).ValuesOf(assignRow{setCol("id", int64(1))}).renderBatchDML(gooq.DialectPgsql)
-	if err == nil || !strings.Contains(err.Error(), "ShardBy is required") || sqls != nil {
-		t.Fatalf("delete err %v sqls %v", err, sqls)
+	_, _, err = Delete(u).Keys(u.Id).ValuesOf(assignRow{setCol("id", int64(1))}).ToSql(gooq.DialectPgsql)
+	if err == nil || !strings.Contains(err.Error(), "ValuesOf is only supported on Insert and Update") {
+		t.Fatalf("delete err %v", err)
 	}
 }
 

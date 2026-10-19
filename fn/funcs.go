@@ -145,7 +145,13 @@ func IfNull(a, b gooq.Expression) *FuncExpr {
 }
 
 func Now() *FuncExpr {
-	return New("NOW")
+	return New("NOW").RenderWith(func(rc *gooq.RenderContext, _ []string) string {
+		renderer, ok := dialectSupport[nowRenderer](rc, "Now")
+		if !ok {
+			return ""
+		}
+		return renderer.RenderNow()
+	})
 }
 
 func CurDate() *FuncExpr {

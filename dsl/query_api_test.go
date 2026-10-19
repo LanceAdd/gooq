@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -359,6 +360,123 @@ func (c *byteCache) HSet(_ context.Context, key, field string, value []byte, _ t
 }
 
 func (c *byteCache) HDel(context.Context, string, ...string) error { return nil }
+
+func TestTransactionDoesNotTouchSharedCache(t *testing.T) {
+	ctx := context.Background()
+	group := "cache-tx"
+	path := filepath.Join(t.TempDir(), "cache-tx.db")
+	err := db.SetConfig(group, db.Config{Link: "sqlite::@file(" + filepath.ToSlash(path) + ")"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.RemoveConfig(group) })
+	database, err := db.Instance(group)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = database.Exec(ctx, `CREATE TABLE user (id INTEGER PRIMARY KEY, name TEXT, age INTEGER, status TEXT, created_at TEXT, deleted_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = database.Exec(ctx, `INSERT INTO user(id, name) VALUES (1, 'ann')`); err != nil {
+		t.Fatal(err)
+	}
+	cache := &byteCache{}
+	previousAdapter := GetCacheAdapter()
+	previousHash := GetHashCacheAdapter()
+	SetCacheAdapter(cache)
+	SetHashCacheAdapter(cache)
+	t.Cleanup(func() {
+		SetCacheAdapter(previousAdapter)
+		SetHashCacheAdapter(previousHash)
+	})
+	option := CacheOption{Duration: time.Minute}
+	base := func() *SelectBuilder {
+		return Select(testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).DB(group)
+	}
+	var name string
+	if err = base().Cache(option).Value(ctx, &name); err != nil || name != "ann" {
+		t.Fatalf("warm value %q %v", name, err)
+	}
+	if n, err := base().Cache(option).Count(ctx); err != nil || n != 1 {
+		t.Fatalf("warm count %d %v", n, err)
+	}
+	if ok, err := base().Cache(option).Exists(ctx); err != nil || !ok {
+		t.Fatalf("warm exists %v %v", ok, err)
+	}
+	if row, err := Select(testUser.Id, testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).DB(group).Cache(option).Row(ctx); err != nil || row["name"] != "ann" {
+		t.Fatalf("warm row %#v %v", row, err)
+	}
+	if rows, err := base().Cache(option).Rows(ctx); err != nil || len(rows) != 1 {
+		t.Fatalf("warm rows %#v %v", rows, err)
+	}
+	var names []string
+	if err = base().Cache(option).Column(ctx, &names); err != nil || len(names) != 1 || names[0] != "ann" {
+		t.Fatalf("warm column %#v %v", names, err)
+	}
+	if _, count, err := base().Page(1, 10).PageCache(option).RowsAndCount(ctx); err != nil || count != 1 {
+		t.Fatalf("warm page %d %v", count, err)
+	}
+	names = nil
+	if count, err := base().Page(1, 10).PageCache(option).ColumnAndCount(ctx, &names); err != nil || count != 1 || names[0] != "ann" {
+		t.Fatalf("warm column page %#v %d %v", names, count, err)
+	}
+	before := cache.snapshot()
+	err = database.Transaction(ctx, func(txctx context.Context, tx *db.Tx) error {
+		if _, err = database.Exec(txctx, `UPDATE user SET name = 'bob' WHERE id = 1`); err != nil {
+			return err
+		}
+		name = ""
+		if err = base().Cache(option).Value(txctx, &name); err != nil || name != "bob" {
+			return fmt.Errorf("tx value %q %v", name, err)
+		}
+		if n, err := base().Cache(option).Count(txctx); err != nil || n != 1 {
+			return fmt.Errorf("tx count %d %v", n, err)
+		}
+		if ok, err := base().Cache(option).Exists(txctx); err != nil || !ok {
+			return fmt.Errorf("tx exists %v %v", ok, err)
+		}
+		if row, err := Select(testUser.Id, testUser.Name).From(testUser).Where(testUser.Id.Eq(1)).DB(group).Cache(option).Row(txctx); err != nil || row["name"] != "bob" {
+			return fmt.Errorf("tx row %#v %v", row, err)
+		}
+		if rows, err := base().Cache(option).Rows(txctx); err != nil || len(rows) != 1 || rows[0]["name"] != "bob" {
+			return fmt.Errorf("tx rows %#v %v", rows, err)
+		}
+		names = nil
+		if err = base().Cache(option).Column(txctx, &names); err != nil || names[0] != "bob" {
+			return fmt.Errorf("tx column %#v %v", names, err)
+		}
+		if rows, count, err := base().Page(1, 10).PageCache(option).RowsAndCount(txctx); err != nil || count != 1 || rows[0]["name"] != "bob" {
+			return fmt.Errorf("tx page %#v %d %v", rows, count, err)
+		}
+		names = nil
+		if _, err := base().Page(1, 10).PageCache(option).ColumnAndCount(txctx, &names); err != nil || names[0] != "bob" {
+			return fmt.Errorf("tx column page %#v %v", names, err)
+		}
+		var models []struct {
+			Name string `orm:"name"`
+		}
+		if count, err := base().Page(1, 10).PageCache(option).StructsAndCount(txctx, &models); err != nil || count != 1 || models[0].Name != "bob" {
+			return fmt.Errorf("tx structs %#v %v", models, err)
+		}
+		return errors.New("rollback")
+	})
+	if err == nil || err.Error() != "rollback" {
+		t.Fatal(err)
+	}
+	if cache.snapshot() != before {
+		t.Fatalf("transaction changed cache\nbefore %s\nafter %s", before, cache.snapshot())
+	}
+	name = ""
+	if err = base().Cache(option).Value(ctx, &name); err != nil || name != "ann" {
+		t.Fatalf("after rollback %q %v", name, err)
+	}
+}
+
+func (c *byteCache) snapshot() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return fmt.Sprintf("%q %q", c.str, c.hash)
+}
 
 func TestCacheCodecUsedByQuery(t *testing.T) {
 	ctx := context.Background()

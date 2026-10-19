@@ -80,6 +80,9 @@ func (SQLiteDialect) RenderExists(_ *RenderContext, subSQL string) string {
 func (SQLiteDialect) Returning() string { return "RETURNING" }
 
 func (SQLiteDialect) RenderLimit(rc *RenderContext, limit, offset int) string {
+	if limit <= 0 && offset > 0 {
+		return fmt.Sprintf(" LIMIT -1 OFFSET %d", offset)
+	}
 	return renderLimitOffset(rc, limit, offset)
 }
 
@@ -159,6 +162,9 @@ func (SQLiteDialect) RenderDateFormat(fieldSQL, format string) (string, error) {
 
 // RenderGroupConcat 渲染 GROUP_CONCAT。SQLite 不支持函数内 ORDER BY，调用方传入的排序被忽略。
 // DISTINCT 只能有一个参数。未给分隔符时渲染单参数；给了分隔符则在渲染期报错。
+// RenderNow 渲染 UTC 的 YYYY-MM-DD HH:MM:SS 文本。没有时区，也不是 MySQL 的会话时间。
+func (SQLiteDialect) RenderNow() string { return "CURRENT_TIMESTAMP" }
+
 func (SQLiteDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
 	if in.Distinct && in.Separator != "" {
 		return "", fmt.Errorf("gooq: GROUP_CONCAT DISTINCT with a separator is not supported by dialect %s", DialectSQLite)
@@ -173,6 +179,4 @@ func (SQLiteDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
 	return fmt.Sprintf("GROUP_CONCAT(%s, %s)", in.FieldSQL, quoteLiteralStandard(separator)), nil
 }
 
-func (SQLiteDialect) RenderMedian(fieldSQL string) string {
-	return fmt.Sprintf("MEDIAN(%s)", fieldSQL)
-}
+

@@ -20,21 +20,6 @@ import (
 //go:embed template/*
 var gooqTemplateFS embed.FS
 
-var reservedFieldNames = map[string]bool{
-	"TableName":  true,
-	"AliasName":  true,
-	"Meta":       true,
-	"AllColumns": true,
-	"AllFields":  true,
-	"Field":      true,
-	"As":         true,
-	"Clone":      true,
-	"Physical":   true,
-	"ShardBy":    true,
-	"TableBase":  true,
-	"BoundBase":  true,
-}
-
 func generateTable(ctx context.Context, database *db.DB, specs []tableSpec, dirPathTable string, tenant TenantConfig) {
 	tenantCfg, err := tenantSettingsFrom(tenant)
 	if err != nil {
@@ -51,7 +36,10 @@ func generateTableSingle(ctx context.Context, database *db.DB, spec tableSpec, d
 	if err != nil {
 		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, spec.Physical, err)
 	}
-	fileName := formatFileName(spec.Logical, "")
+	fileName, err := generatedTableFile(spec.Logical)
+	if err != nil {
+		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, spec.Logical, err)
+	}
 	tableContent, err := generateTableContent(ctx, database, spec, dirPathTable, columns, tenantCfg)
 	if err != nil {
 		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, spec.Logical, err)
@@ -60,7 +48,7 @@ func generateTableSingle(ctx context.Context, database *db.DB, spec tableSpec, d
 }
 
 func generateShardingRegister(specs []tableSpec, dirPathTable string) {
-	path := gfile.Join(dirPathTable, "sharding.go")
+	path := gfile.Join(dirPathTable, "gooq_sharding.go")
 	var names []string
 	for _, spec := range specs {
 		if spec.Sharding {
@@ -121,7 +109,7 @@ func generateTableContent(
 	usedNames := map[string]string{}
 	for _, field := range columns {
 		fieldName := field.Name
-		camelName, nameErr := goFieldName(fieldName, reservedFieldNames, usedNames)
+		camelName, nameErr := goFieldName(fieldName, tableConflicts(spec.Sharding), usedNames)
 		if nameErr != nil {
 			return "", nameErr
 		}

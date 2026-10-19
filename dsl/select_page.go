@@ -90,6 +90,14 @@ func (b *SelectBuilder) resolveCompositeCount(
 }
 
 func (b *SelectBuilder) rowsAndCountWithCache(ctx context.Context, dialect gooq.Dialect) (db.Result, int64, error) {
+	if executorInTx(b.executor) {
+		count, err := b.countValue(ctx, dialect)
+		if err != nil || count == 0 {
+			return nil, count, err
+		}
+		rows, err := b.rowsValue(ctx, dialect)
+		return rows, count, err
+	}
 	dataField, countField := b.cacheFieldNames()
 	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect, "rows")
 	if err != nil {
@@ -165,6 +173,20 @@ func (b *SelectBuilder) ColumnAndCount(ctx context.Context, dest any) (int64, er
 }
 
 func (b *SelectBuilder) columnAndCountWithCache(ctx context.Context, dialect gooq.Dialect, dest any) (int64, error) {
+	if executorInTx(b.executor) {
+		count, err := b.countValue(ctx, dialect)
+		if err != nil || count == 0 {
+			return count, err
+		}
+		sql, args, err := b.ToSql(dialect)
+		if err != nil {
+			return 0, err
+		}
+		if err = execColumnExact(ctx, b.executor, sql, args, dest); err != nil {
+			return 0, err
+		}
+		return count, nil
+	}
 	dataField, countField := b.cacheFieldNames()
 	adapter, key, fields, err := b.compositeCacheBegin(ctx, dialect, "column")
 	if err != nil {

@@ -21,16 +21,16 @@ type executor interface {
 
 func (b *SelectBuilder) bind(ctx context.Context) (func(), error) {
 	b.stampTenant(ctx)
-	return bindBuilder(ctx, &b.executor, b.route, b.group, b.groupSet)
+	return bindBuilder(ctx, &b.executor, b.route, b.group, b.groupSet, b.explicitTx)
 }
 
 func (b *DMLBuilder) bind(ctx context.Context) (func(), error) {
 	b.stampTenant(ctx)
-	return bindBuilder(ctx, &b.executor, b.route, b.group, b.groupSet)
+	return bindBuilder(ctx, &b.executor, b.route, b.group, b.groupSet, b.explicitTx)
 }
 
-func bindBuilder(ctx context.Context, slot *executor, route db.Route, group string, groupSet bool) (func(), error) {
-	stored, active, err := resolveExecutor(ctx, *slot, route, group, groupSet)
+func bindBuilder(ctx context.Context, slot *executor, route db.Route, group string, groupSet bool, explicit *db.Tx) (func(), error) {
+	stored, active, err := resolveExecutor(ctx, *slot, route, group, groupSet, explicit)
 	if err != nil {
 		return nil, err
 	}
@@ -38,11 +38,14 @@ func bindBuilder(ctx context.Context, slot *executor, route db.Route, group stri
 	return func() { *slot = stored }, nil
 }
 
-func resolveExecutor(ctx context.Context, current executor, route db.Route, group string, groupSet bool) (stored executor, active executor, err error) {
+func resolveExecutor(ctx context.Context, current executor, route db.Route, group string, groupSet bool, explicit *db.Tx) (stored executor, active executor, err error) {
 	switch current.(type) {
 	case nil, *db.DB, *db.Tx:
 	default:
 		return current, current, nil
+	}
+	if explicit != nil {
+		return explicit.DB(), explicit, nil
 	}
 	var database *db.DB
 	if groupSet {
@@ -53,7 +56,7 @@ func resolveExecutor(ctx context.Context, current executor, route db.Route, grou
 	if err != nil {
 		return nil, nil, err
 	}
-	if tx := db.TxFromContext(ctx, database.Group()); tx != nil {
+	if tx := database.TxFromContext(ctx); tx != nil {
 		return database, tx, nil
 	}
 	return database, database.WithRoute(route), nil

@@ -119,6 +119,10 @@ func (b *SelectBuilder) renderGroupExt(rc *gooq.RenderContext) string {
 }
 
 func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
+	if b.buildErr != nil {
+		rc.Fail(b.buildErr)
+		return ""
+	}
 	prev := rc.SwapQueryShard(b.hasShardValue, b.shardingValue)
 	defer rc.RestoreQueryShard(prev)
 	defer bindTenantLayer(rc, b.untenant, b.hasTenantIDs, b.tenantIDs)()

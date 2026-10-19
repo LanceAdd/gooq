@@ -49,7 +49,8 @@ type DMLBuilder struct {
 	upsert          *upsertClause
 	joins           []*joinClause     // UPDATE 多表 JOIN 子句。
 	returning       []gooq.Expression // RETURNING/OUTPUT 返回列。
-	executor        executor          // 测试注入的执行器；正式执行由 DB(name) 和 ctx 中的事务决定。
+	executor        executor          // 测试注入的执行器；正式执行由 DB(name)、显式事务和 ctx 中的事务决定。
+	explicitTx      *db.Tx            // Tx(tx) 指定的连接。nil 表示仍从 ctx 查找。
 	group           string            // DB(name) 指定的配置组；空字符串表示默认组。
 	groupSet        bool              // 是否显式指定了非默认配置组。
 	route           db.Route          // 主从路由（默认写主库）。
@@ -106,22 +107,28 @@ func (b *DMLBuilder) Values(values ...any) *DMLBuilder {
 }
 
 // ValuesOf 写入由 model.NewXxxRecord 的 setter 标记的列。
-// Insert 接受一行或多行；一行 Update 渲染成 SET；多行 Update/Delete
-// 按主键拆成逐行语句，由 Exec 执行。
+// 只允许 Insert 和 Update。一行 Update 渲染成 SET；多行 Update 按主键拆成逐行语句，由 Exec 执行。
 func (b *DMLBuilder) ValuesOf(rows ...gooq.ValueSource) *DMLBuilder {
+	if b.err != nil {
+		return b
+	}
+	if b.kind != dmlInsert && b.kind != dmlUpdate {
+		b.err = fmt.Errorf("gooq: ValuesOf is only supported on Insert and Update")
+		return b
+	}
 	parsed := assignmentsToRows(rows)
 	if len(parsed) == 0 {
 		return b
 	}
-	if b.kind != dmlUpdate && b.kind != dmlDelete {
+	if b.kind != dmlUpdate {
 		b.insertRows = append(b.insertRows, parsed...)
 		return b
 	}
-	if b.kind == dmlUpdate && len(b.batchUpdateRows) == 0 && len(parsed) == 1 {
+	if len(b.batchUpdateRows) == 0 && len(parsed) == 1 {
 		b.setValues = append(b.setValues, parsed[0]...)
 		return b
 	}
-	if b.kind == dmlUpdate && len(b.setValues) > 0 {
+	if len(b.setValues) > 0 {
 		b.batchUpdateRows = append(b.batchUpdateRows, b.setValues)
 		b.setValues = nil
 	}
@@ -317,5 +324,29 @@ func (b *DMLBuilder) ShardBy(value any) *DMLBuilder {
 func (b *DMLBuilder) DB(name string) *DMLBuilder {
 	b.group = name
 	b.groupSet = name != ""
+	b.noteExplicitTxGroup()
 	return b
+}
+
+// Tx 指定这条语句使用的事务连接。nil 不生效，也不清掉已经设置的事务。
+func (b *DMLBuilder) Tx(tx *db.Tx) *DMLBuilder {
+	if tx == nil {
+		return b
+	}
+	if tx.DB() == nil {
+		b.err = fmt.Errorf("gooq: Tx has no database")
+		return b
+	}
+	b.explicitTx = tx
+	b.noteExplicitTxGroup()
+	return b
+}
+
+func (b *DMLBuilder) noteExplicitTxGroup() {
+	if b.explicitTx == nil || b.explicitTx.DB() == nil || !b.groupSet {
+		return
+	}
+	if b.group != b.explicitTx.DB().Group() {
+		b.err = fmt.Errorf("gooq: Tx group %q does not match DB %q", b.explicitTx.DB().Group(), b.group)
+	}
 }

@@ -80,6 +80,18 @@ func RemoveConfig(group string) error {
 	return nil
 }
 
+// openedInstance 返回已经打开的配置组。空组名表示当前默认组。
+// 组还没打开时返回 nil，不触发打开。
+func openedInstance(group string) *DB {
+	if group == "" {
+		group = defaultGroup.Val()
+	}
+	groupMu.Lock()
+	database := groupInstances.Get(group)
+	groupMu.Unlock()
+	return database
+}
+
 // Instance 返回配置组对应的共享数据库。
 // 不传名字时返回默认组。同一组只创建一次；SetConfig 和 RemoveConfig 会清掉已创建的实例。
 func Instance(name ...string) (*DB, error) {

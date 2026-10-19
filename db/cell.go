@@ -19,7 +19,9 @@ var (
 
 // Assign 把一个驱动值写进非空指针。
 // NULL 写零值，指针目标写成 nil。
-// time.Time 按日期时间解析；sql.Scanner（包括 sql.Null*）直接收驱动值。
+// time.Time 解析失败返回错误。sql.Scanner（包括 sql.Null*）返回 Scan 的错误。
+// 不能赋给接口的值返回错误。
+// 其余类型走 gconv.Scan：非法文本得到零值，超出目标宽度的整数被截断，这两种都不返回错误。
 // 行结构体不是单元格，用 Record.Struct。
 func Assign(pointer any, src any) error {
 	rv := reflect.ValueOf(pointer)
@@ -33,7 +35,8 @@ func Assign(pointer any, src any) error {
 }
 
 // Value 从一行里读一个带类型的列。
-// 缺列和 NULL 返回零值；转换失败返回错误。
+// 缺列和 NULL 返回零值。转换失败是否返回错误与 Assign 相同。
+// gconv 覆盖的类型失败时返回零值和 nil，例如整数列读到 "not-a-number" 得到 0, nil。
 func Value[T any](record Record, field gooq.Field[T]) (T, error) {
 	var zero T
 	if record == nil {
@@ -50,7 +53,7 @@ func Value[T any](record Record, field gooq.Field[T]) (T, error) {
 	return out, nil
 }
 
-// ColumnOf 按结果顺序读出每一行的同一列。
+// ColumnOf 按结果顺序读出每一行的同一列。转换规则与 Value 相同。
 func ColumnOf[T any](result Result, field gooq.Field[T]) ([]T, error) {
 	out := make([]T, 0, len(result))
 	for _, row := range result {

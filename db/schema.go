@@ -34,6 +34,7 @@ func (d *DB) Schema(name string) (*DB, error) {
 	copied := *d
 	copied.schema = name
 	copied.shared = false
+	copied.scope = &txScope{}
 	copied.masters = nil
 	copied.slaves = nil
 	for _, item := range d.masters {

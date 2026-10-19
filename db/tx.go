@@ -33,9 +33,9 @@ type TxOptions struct {
 	ReadOnly    bool
 }
 
-type txCtxKey struct {
-	group string
-}
+type txTableKey struct{}
+
+type txTable map[*txScope]*Tx
 
 // Begin 在主库连接上开启事务。
 func (d *DB) Begin(ctx context.Context) (*Tx, error) {
@@ -63,7 +63,7 @@ func (d *DB) BeginTx(ctx context.Context, opts TxOptions) (*Tx, error) {
 }
 
 // Transaction 在事务里执行 fn。fn 返回 nil 时提交，返回错误或 panic 时回滚。
-// 默认传播行为是 nested。fn 收到的 context 携带这个事务，同一组上的后续查询会加入它。
+// 默认传播行为是 nested。fn 收到的 context 携带这个事务，同一连接池上的后续查询会加入它。
 func (d *DB) Transaction(ctx context.Context, fn func(ctx context.Context, tx *Tx) error) error {
 	return d.TransactionWithOptions(ctx, TxOptions{}, fn)
 }
@@ -76,7 +76,7 @@ func (d *DB) TransactionWithOptions(ctx context.Context, opts TxOptions, fn func
 	if opts.Propagation == "" {
 		opts.Propagation = PropagationNested
 	}
-	current := TxFromContext(ctx, d.group)
+	current := d.TxFromContext(ctx)
 	switch opts.Propagation {
 	case PropagationRequired:
 		if current != nil {
@@ -94,9 +94,9 @@ func (d *DB) TransactionWithOptions(ctx context.Context, opts TxOptions, fn func
 		}
 		return fn(ctx, current)
 	case PropagationRequiresNew:
-		return d.runNew(WithoutTx(ctx, d.group), opts, fn)
+		return d.runNew(d.WithoutTx(ctx), opts, fn)
 	case PropagationNotSupported:
-		return fn(WithoutTx(ctx, d.group), nil)
+		return fn(d.WithoutTx(ctx), nil)
 	case PropagationNever:
 		if current != nil {
 			return fmt.Errorf("gooq: propagation never cannot run inside a transaction")
@@ -269,31 +269,86 @@ func finishTx(tx *Tx, err error) error {
 	return tx.Commit()
 }
 
-// WithTx 按数据库组把 tx 放进 ctx。tx 或它的数据库为空时原样返回 ctx。
-func WithTx(ctx context.Context, tx *Tx) context.Context {
-	if tx == nil || tx.db == nil {
-		return ctx
+func txTableFrom(ctx context.Context) txTable {
+	if ctx == nil {
+		return nil
 	}
+	table, _ := ctx.Value(txTableKey{}).(txTable)
+	return table
+}
+
+func cloneTxTable(src txTable) txTable {
+	dst := make(txTable, len(src)+1)
+	for scope, tx := range src {
+		dst[scope] = tx
+	}
+	return dst
+}
+
+func withScopeTx(ctx context.Context, scope *txScope, tx *Tx) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, txCtxKey{group: tx.db.group}, tx)
+	table := cloneTxTable(txTableFrom(ctx))
+	if tx == nil {
+		delete(table, scope)
+	} else {
+		table[scope] = tx
+	}
+	return context.WithValue(ctx, txTableKey{}, table)
 }
 
-// WithoutTx 从 ctx 里清掉该组的事务。
+// WithTx 按 tx 所属连接池的 scope 把事务放进子 ctx。tx 或它的库为空时原样返回 ctx。
+func WithTx(ctx context.Context, tx *Tx) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if tx == nil || tx.db == nil || tx.db.scope == nil {
+		return ctx
+	}
+	return withScopeTx(ctx, tx.db.scope, tx)
+}
+
+// WithoutTx 清掉已注册组对应 scope 的事务。空组名表示当前默认组。
+// 组还没有打开的实例时原样返回 ctx。
 func WithoutTx(ctx context.Context, group string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return context.WithValue(ctx, txCtxKey{group: group}, (*Tx)(nil))
+	database := openedInstance(group)
+	if database == nil {
+		return ctx
+	}
+	return database.WithoutTx(ctx)
 }
 
-// TxFromContext 返回该组上仍打开的事务。没有、已关闭或底层事务为空时返回 nil。
-func TxFromContext(ctx context.Context, group string) *Tx {
+// WithoutTx 从子 ctx 的快照里删除这个连接池的事务。其他连接池保留。
+func (d *DB) WithoutTx(ctx context.Context) context.Context {
 	if ctx == nil {
+		ctx = context.Background()
+	}
+	if d == nil || d.scope == nil {
+		return ctx
+	}
+	return withScopeTx(ctx, d.scope, nil)
+}
+
+// TxFromContext 返回该组连接池上仍打开的事务。
+// 空组名表示当前默认组。组还没有打开的实例、事务已关闭或底层事务为空时返回 nil。
+func TxFromContext(ctx context.Context, group string) *Tx {
+	database := openedInstance(group)
+	if database == nil {
 		return nil
 	}
-	tx, _ := ctx.Value(txCtxKey{group: group}).(*Tx)
+	return database.TxFromContext(ctx)
+}
+
+// TxFromContext 返回这个连接池上仍打开的事务。没有、已关闭或底层事务为空时返回 nil。
+func (d *DB) TxFromContext(ctx context.Context) *Tx {
+	if d == nil || d.scope == nil || ctx == nil {
+		return nil
+	}
+	tx := txTableFrom(ctx)[d.scope]
 	if tx == nil || tx.IsClosed() || tx.sql == nil {
 		return nil
 	}

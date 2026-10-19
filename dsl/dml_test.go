@@ -304,15 +304,49 @@ func TestDsl_Update_Batch(t *testing.T) {
 		t.AssertNE(err, nil)
 		t.Assert(strings.Contains(err.Error(), "does not support JOIN"), true)
 
-		deleted, _, err := Delete(testUser).ValuesOf(
+		_, _, err = Delete(testUser).ValuesOf(
 			assignRow{setCol("id", int64(1))},
-		).Where(testUser.Age.Gt(18)).renderBatchDML(gooq.DialectMySQL)
-		t.AssertNil(err)
-		t.Assert(len(deleted), 1)
-		t.Assert(strings.Contains(deleted[0], "WHERE `id` = ? AND (`user`.`age` > ?)"), true)
+		).ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "ValuesOf is only supported on Insert and Update"), true)
 
 		_, _, err = b.ToSql(gooq.DialectMySQL)
 		t.AssertNE(err, nil)
+
+		pair := gooq.NewTableBase(&gooq.TableMeta{
+			TableName: "pair",
+			Fields: []gooq.FieldMeta{
+				{ColumnName: "a", LocalType: gooq.LocalTypeInt64, Primary: true},
+				{ColumnName: "b", LocalType: gooq.LocalTypeInt64, Primary: true},
+				{ColumnName: "name", LocalType: gooq.LocalTypeString},
+			},
+		})
+		_, _, err = Update(pair).ValuesOf(
+			assignRow{setCol("a", int64(1)), setCol("name", "ok")},
+			assignRow{setCol("a", int64(1)), setCol("b", int64(2)), setCol("name", "later")},
+		).renderBatchDML(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "record 1"), true)
+		t.Assert(strings.Contains(err.Error(), "b"), true)
+
+		_, _, err = Update(pair).ValuesOf(
+			assignRow{nullCol("a"), nullCol("b"), setCol("name", "x")},
+			assignRow{setCol("a", int64(1)), setCol("b", int64(2)), setCol("name", "y")},
+		).renderBatchDML(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "NULL"), true)
+
+		sqls, _, err = Update(pair).ValuesOf(
+			assignRow{setCol("a", int64(1)), setCol("b", int64(2))},
+			assignRow{setCol("a", int64(3)), setCol("b", int64(4)), setCol("name", "kept")},
+		).renderBatchDML(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(len(sqls), 1)
+		t.Assert(sqls[0], "UPDATE `pair` SET `name` = ? WHERE `a` = ? AND `b` = ?")
+
+		one, _, err = Update(testUser).ValuesOf(assignRow{setCol("id", int64(1))}).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(one, "UPDATE `user` SET `id` = ?")
 	})
 }
 
@@ -338,24 +372,16 @@ func TestDsl_Delete(t *testing.T) {
 		t.AssertNil(err)
 		t.Assert(sql, "DELETE FROM `user_role` WHERE (`user_role`.`id` = ?)")
 
-		sqls, argss, err := Delete(testUser).ValuesOf(
-			assignRow{setCol("id", int64(1))},
-			assignRow{setCol("id", int64(2))},
-		).renderBatchDML(gooq.DialectMySQL)
-		t.AssertNil(err)
-		t.Assert(len(sqls), 2)
-		t.Assert(sqls[0], "UPDATE `user` SET `deleted_at` = ? WHERE `id` = ?")
-		t.Assert(len(argss[0]), 2)
-		t.AssertEQ(argss[0][1], int64(1))
+		_, _, err = Delete(testUser).ValuesOf().ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "ValuesOf is only supported on Insert and Update"), true)
 
-		sqls, argss, err = Delete(Cte("x")).
+		_, _, err = Delete(Cte("x")).
 			Keys(testUser.Id).
 			ValuesOf(assignRow{setCol("id", int64(1))}).
-			renderBatchDML(gooq.DialectMySQL)
-		t.AssertNil(err)
-		t.Assert(len(sqls), 1)
-		t.Assert(sqls[0], "DELETE FROM `x` WHERE `id` = ?")
-		t.AssertEQ(argss[0], []any{int64(1)})
+			ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "ValuesOf is only supported on Insert and Update"), true)
 
 		u := testUserRole.As("u")
 		r := testRole.As("r")

@@ -234,6 +234,12 @@ func (DMDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
 	return sqlStr, nil
 }
 
+// GroupConcatOrder 表示 LISTAGG / WM_CONCAT 可以带 ORDER BY。
+func (DMDialect) GroupConcatOrder() bool { return true }
+
+// RenderNow 渲染数据库服务器的本地时间。
+func (DMDialect) RenderNow() string { return "SYSDATE" }
+
 func (DMDialect) RenderMedian(fieldSQL string) string {
 	return fmt.Sprintf("MEDIAN(%s)", fieldSQL)
 }

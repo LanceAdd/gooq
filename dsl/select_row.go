@@ -11,6 +11,13 @@ import (
 func (b *SelectBuilder) rowWithCache(
 	ctx context.Context, adapter CacheAdapter, dialect gooq.Dialect, sql string, args []any,
 ) (db.Record, error) {
+	if executorInTx(b.executor) {
+		record, err := b.executor.GetOne(ctx, sql, args...)
+		if err != nil || record == nil {
+			return record, err
+		}
+		return record, nil
+	}
 	key, err := b.cacheKey("row", sql, args)
 	if err != nil {
 		return nil, err
@@ -75,6 +82,9 @@ func (b *SelectBuilder) Row(ctx context.Context) (db.Record, error) {
 func (b *SelectBuilder) rowsWithCache(
 	ctx context.Context, adapter CacheAdapter, dialect gooq.Dialect, sql string, args []any,
 ) (db.Result, error) {
+	if executorInTx(b.executor) {
+		return b.rowsValue(ctx, dialect)
+	}
 	key, err := b.cacheKey("rows", sql, args)
 	if err != nil {
 		return nil, err

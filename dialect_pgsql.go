@@ -187,6 +187,12 @@ func sameAggregateOrder(field, order string) bool {
 	return order != ""
 }
 
+// GroupConcatOrder 表示 STRING_AGG 可以带 ORDER BY。
+func (PostgresDialect) GroupConcatOrder() bool { return true }
+
+// RenderNow 渲染事务开始时的带时区时间。GaussDB 嵌入同一方法。
+func (PostgresDialect) RenderNow() string { return "NOW()" }
+
 func (PostgresDialect) RenderMedian(fieldSQL string) string {
 	return fmt.Sprintf("PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY %s)", fieldSQL)
 }

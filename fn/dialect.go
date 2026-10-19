@@ -16,6 +16,14 @@ type groupConcatRenderer interface {
 	RenderGroupConcat(in gooq.GroupConcatInput) (string, error)
 }
 
+type groupConcatOrderRenderer interface {
+	GroupConcatOrder() bool
+}
+
+type nowRenderer interface {
+	RenderNow() string
+}
+
 type medianRenderer interface {
 	RenderMedian(fieldSQL string) string
 }

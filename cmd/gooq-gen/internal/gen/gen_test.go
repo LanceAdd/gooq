@@ -224,7 +224,7 @@ func TestGen_Sharding_Sqlite(t *testing.T) {
 		t.Assert(gstr.Contains(content, "NewShardingSlot"), false)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) Physical(name string) *UserTable {`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) ShardBy(value any) *UserTable {`), true)
-		register := gfile.GetContents(filepath.Join(genPath, "table", "sharding.go"))
+		register := gfile.GetContents(filepath.Join(genPath, "table", "gooq_sharding.go"))
 		t.Assert(gstr.Contains(register, `func RegisterSharding(rule gooq.ShardingRule) {`), true)
 		t.Assert(gstr.Contains(register, `UserMeta.Sharding = rule`), true)
 		t.Assert(gstr.Contains(content, `func (t *UserTable) Named(name string) *UserTable {`), false)
@@ -384,14 +384,33 @@ func TestInit(t *testing.T) {
 
 func TestFieldNames(t *testing.T) {
 	used := map[string]string{}
-	name, err := goFieldName("bound_base", reservedFieldNames, used)
-	if err != nil || name != "BoundBaseField" {
-		t.Fatalf("bound_base name=%s err=%v", name, err)
+	_, err := goFieldName("bound_base", tableConflicts(false), used)
+	if err == nil || !strings.Contains(err.Error(), "bound_base") || !strings.Contains(err.Error(), "BoundBase") {
+		t.Fatalf("bound_base err=%v", err)
+	}
+	if _, err = goFieldName("meta", tableConflicts(false), map[string]string{}); err == nil || !strings.Contains(err.Error(), "Meta") {
+		t.Fatalf("meta err=%v", err)
+	}
+	if _, err = goFieldName("set_shard", tableConflicts(false), map[string]string{}); err == nil || !strings.Contains(err.Error(), "SetShard") {
+		t.Fatalf("set_shard err=%v", err)
+	}
+	physical, err := goFieldName("physical", tableConflicts(false), map[string]string{})
+	if err != nil || physical != "Physical" {
+		t.Fatalf("physical name=%s err=%v", physical, err)
+	}
+	if _, err = goFieldName("physical", tableConflicts(true), map[string]string{}); err == nil {
+		t.Fatal("sharded table accepted Physical")
+	}
+	if _, err = generatedTableFile("gooq_sharding"); err == nil || !strings.Contains(err.Error(), "gooq_sharding") {
+		t.Fatalf("file err=%v", err)
+	}
+	if fileName, err := generatedTableFile("sharding"); err != nil || fileName != "sharding" {
+		t.Fatalf("sharding file=%s err=%v", fileName, err)
 	}
 	if !isSoftDeleteColumn("DELETED_AT") || !isSoftDeleteColumn("deletedAt") || !isSoftDeleteColumn("delete_at") {
 		t.Fatal("soft delete column was not recognized")
 	}
-	if _, err = goFieldName("2fa_enabled", reservedFieldNames, map[string]string{}); err == nil {
+	if _, err = goFieldName("2fa_enabled", nil, map[string]string{}); err == nil {
 		t.Fatal("expected an invalid Go name")
 	}
 	used = map[string]string{}
