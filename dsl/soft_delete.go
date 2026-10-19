@@ -20,20 +20,6 @@ func joinSoftDeleteInWhere(kind joinType) bool {
 	}
 }
 
-func boundBase(table gooq.Table) *gooq.TableBase {
-	if table == nil {
-		return nil
-	}
-	if base, ok := table.(*gooq.TableBase); ok {
-		return base
-	}
-	binder, ok := table.(interface{ BoundBase() *gooq.TableBase })
-	if !ok {
-		return nil
-	}
-	return binder.BoundBase()
-}
-
 func (b *SelectBuilder) softReferenced(table *gooq.TableBase, column string) bool {
 	if gooq.ReferencesColumn(b.conditions, table, column) {
 		return true
@@ -56,7 +42,7 @@ func (b *SelectBuilder) softDeleteSQL(rc *gooq.RenderContext, table gooq.Table) 
 	if meta == nil {
 		return ""
 	}
-	base := boundBase(table)
+	base := gooq.TableBaseOf(table)
 	if base != nil && b.softReferenced(base, meta.ColumnName) {
 		return ""
 	}
