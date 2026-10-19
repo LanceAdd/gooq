@@ -1,5 +1,7 @@
 package gooq
 
+import "slices"
+
 // Expression 是表达式节点。渲染只返回 SQL，参数经 RenderContext.AddArg 累积。
 type Expression interface {
 	Render(rc *RenderContext) string
@@ -147,14 +149,14 @@ func (rc *RenderContext) SetMainTable(base *TableBase) {
 // SetTenant 放入这次渲染一开始就有的租户值。分片切换不清这个值。
 func (rc *RenderContext) SetTenant(ids []any) {
 	rc.tenantHas = true
-	rc.tenantIDs = append([]any(nil), ids...)
+	rc.tenantIDs = slices.Clone(ids)
 }
 
 // PushTenant 用这一层的显式租户值盖住外层，返回外层的值。
 func (rc *RenderContext) PushTenant(ids []any) TenantState {
 	prev := TenantState{has: rc.tenantHas, ids: rc.tenantIDs}
 	rc.tenantHas = true
-	rc.tenantIDs = append([]any(nil), ids...)
+	rc.tenantIDs = slices.Clone(ids)
 	return prev
 }
 

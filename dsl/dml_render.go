@@ -242,7 +242,7 @@ func joinsBeforeSet(spec gooq.DialectSpec) bool {
 }
 
 func copyArgs(args []any) []any {
-	return append([]any(nil), args...)
+	return slices.Clone(args)
 }
 
 // renderUpdateStatement 按 SET、JOIN、WHERE 收集参数。

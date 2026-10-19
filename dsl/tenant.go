@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/lanceadd/gooq"
@@ -62,14 +63,14 @@ func tenantArgs(ids []any) (bool, []any) {
 	if len(ids) == 0 {
 		return false, nil
 	}
-	return true, append([]any(nil), ids...)
+	return true, slices.Clone(ids)
 }
 
 func copyTenantIDs(ids []any) []any {
 	if ids == nil {
 		return nil
 	}
-	return append([]any(nil), ids...)
+	return slices.Clone(ids)
 }
 
 // seedTenant 把执行路径记在构建器上的 ctx 值放进新建的渲染上下文。
