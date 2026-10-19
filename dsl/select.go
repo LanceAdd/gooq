@@ -84,7 +84,7 @@ type SelectBuilder struct {
 	joins         []*joinClause
 	conditions    []gooq.Expression // 默认 AND。
 	groupBy       []gooq.Expression
-	groupExt      groupExtKind        // GROUP BY 扩展（ROLLUP/CUBE/GROUPING SETS）。
+	groupExt      groupExtKind
 	groupExtSets  [][]gooq.Expression // 扩展分组字段（ROLLUP/CUBE 单组；GROUPING SETS 每组一个列表）。
 	having        []gooq.Expression
 	orderBy       []gooq.Expression

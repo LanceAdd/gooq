@@ -32,7 +32,7 @@ type columnValue struct {
 type DMLBuilder struct {
 	table           gooq.Table
 	kind            dmlKind
-	insertColumns   []string        // Columns 设置的列（当前组）。
+	insertColumns   []string
 	insertRows      [][]columnValue // INSERT 行数据（保序列值对）。
 	batch           int             // INSERT 分批大小（0 不分批）。
 	setValues       []columnValue   // UPDATE SET 列值对（保序）。

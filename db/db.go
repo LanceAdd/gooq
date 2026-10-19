@@ -273,7 +273,6 @@ func (d *DB) Slave() *DB {
 
 // WithRoute 返回使用 route 的视图，底层连接池与原对象共享。
 // 关闭视图不会关闭这些连接池，要关闭原来的 DB。
-// route 已经相同时返回 d 本身。
 func (d *DB) WithRoute(route Route) *DB {
 	if d == nil || d.route == route {
 		return d
