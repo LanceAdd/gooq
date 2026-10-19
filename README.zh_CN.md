@@ -360,7 +360,13 @@ dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectMySQL)   // ...
 dsl.Select(User.Id).From(User).LockInShareMode().ToSql(gooq.DialectMySQL) // ... LOCK IN SHARE MODE
 dsl.Select(User.Id).From(User).LockInShareMode().ToSql(gooq.DialectPgsql) // ... FOR SHARE
 dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectSQLite)  // SQLite 忽略
+dsl.Select(User.Id).From(User).LockForUpdate().SkipLocked().ToSql(gooq.DialectMySQL)
+// ... FOR UPDATE SKIP LOCKED
+dsl.Select(User.Id).From(User).LockForUpdate().NoWait().ToSql(gooq.DialectPgsql)
+// ... FOR UPDATE NOWAIT
 ```
+
+`SkipLocked()` 和 `NoWait()` 必须跟在 `LockForUpdate()` 或 `LockInShareMode()` 后面。后调用的等待策略覆盖先调用的。MySQL 家族、PostgreSQL 和 GaussDB 会写出子句。SQLite 和达梦在 `ToSql` 失败，不会把子句丢掉后继续执行。
 
 ## 写操作
 

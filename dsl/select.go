@@ -102,6 +102,7 @@ type SelectBuilder struct {
 	pageCacheOpt  *CacheOption // count 与各页 data 同 key 同生命周期。
 	buildErr      error        // 构造期错误，ToSql 和执行时返回它。
 	lock          lockMode
+	lockWait      gooq.RowLockWait
 	setOps        []setOpClause
 	ctes          []cteClause
 	recursive     bool     // CTE 递归（WITH RECURSIVE）。
@@ -367,6 +368,20 @@ func (b *SelectBuilder) LockForUpdate() *SelectBuilder {
 
 func (b *SelectBuilder) LockInShareMode() *SelectBuilder {
 	b.lock = lockInShareMode
+	return b
+}
+
+// SkipLocked 让行锁跳过已被锁住的行。必须先调用 LockForUpdate 或 LockInShareMode。
+// 后调用的等待策略覆盖先调用的。方言没有 RenderRowLockWait 时，ToSql 失败。
+func (b *SelectBuilder) SkipLocked() *SelectBuilder {
+	b.lockWait = gooq.RowLockSkipLocked
+	return b
+}
+
+// NoWait 让行锁遇到其他事务持有的锁时立刻失败。必须先调用 LockForUpdate 或 LockInShareMode。
+// 后调用的等待策略覆盖先调用的。方言没有 RenderRowLockWait 时，ToSql 失败。
+func (b *SelectBuilder) NoWait() *SelectBuilder {
+	b.lockWait = gooq.RowLockNoWait
 	return b
 }
 

@@ -26,6 +26,10 @@ func TestDsl_MariaDBAndTiDBMatchMySQL(t *testing.T) {
 			t.AssertNil(err)
 			t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL LOCK IN SHARE MODE")
 
+			sql, _, err = Select(testUser.Id).From(testUser).LockForUpdate().SkipLocked().ToSql(dialect)
+			t.AssertNil(err)
+			t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL FOR UPDATE SKIP LOCKED")
+
 			_, _, err = Update(testUser).Set(testUser.Status, "vip").Returning(testUser.Id).ToSql(dialect)
 			t.AssertNE(err, nil)
 			t.Assert(strings.Contains(err.Error(), "RETURNING is not supported by dialect "+string(dialect)), true)

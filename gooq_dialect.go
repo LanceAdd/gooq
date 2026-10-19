@@ -32,6 +32,29 @@ const (
 	GroupGroupingSets = "GROUPING SETS"
 )
 
+// RowLockWait 是行锁的等待策略。零值表示数据库默认的等待。
+// 方言实现 RenderRowLockWait 才支持。没实现时 ToSql 失败，不把子句丢掉。
+type RowLockWait int
+
+const (
+	// RowLockSkipLocked 跳过已被锁住的行。
+	RowLockSkipLocked RowLockWait = iota + 1
+	// RowLockNoWait 遇到锁立刻失败，不等待。
+	RowLockNoWait
+)
+
+// RowLockWaitSQL 返回等待策略的 SQL 关键字。
+func RowLockWaitSQL(wait RowLockWait) string {
+	switch wait {
+	case RowLockSkipLocked:
+		return "SKIP LOCKED"
+	case RowLockNoWait:
+		return "NOWAIT"
+	default:
+		return ""
+	}
+}
+
 // UpsertClause 是 INSERT 冲突动作。方言决定把它渲染成 INSERT IGNORE、ON DUPLICATE KEY、ON CONFLICT 或 MERGE。
 type UpsertClause struct {
 	// DoNothing 为 true 时冲突不更新。
@@ -143,6 +166,14 @@ var (
 	dialectRegistryMu sync.RWMutex
 	dialectRegistry   = map[Dialect]DialectSpec{}
 )
+
+func renderRowLockWait(dialect Dialect, wait RowLockWait) (string, error) {
+	sqlText := RowLockWaitSQL(wait)
+	if sqlText == "" {
+		return "", fmt.Errorf("gooq: row lock wait %d is not supported by dialect %s", wait, dialect)
+	}
+	return sqlText, nil
+}
 
 // RegisterDialect 注册或替换一种渲染方言。spec 为空或没有名字时 panic。
 func RegisterDialect(spec DialectSpec) {

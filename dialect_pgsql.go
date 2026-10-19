@@ -49,6 +49,11 @@ func (PostgresDialect) CastType(localType LocalType) string {
 
 func (PostgresDialect) ShareLock() string { return "FOR SHARE" }
 
+// RenderRowLockWait 渲染 SKIP LOCKED 或 NOWAIT。GaussDB 嵌入本类型，沿用同一子句。
+func (PostgresDialect) RenderRowLockWait(wait RowLockWait) (string, error) {
+	return renderRowLockWait(DialectPgsql, wait)
+}
+
 func (PostgresDialect) RenderExists(_ *RenderContext, subSQL string) string {
 	return renderSelectExists(subSQL)
 }

@@ -363,7 +363,13 @@ dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectMySQL)   // ...
 dsl.Select(User.Id).From(User).LockInShareMode().ToSql(gooq.DialectMySQL) // ... LOCK IN SHARE MODE
 dsl.Select(User.Id).From(User).LockInShareMode().ToSql(gooq.DialectPgsql) // ... FOR SHARE
 dsl.Select(User.Id).From(User).LockForUpdate().ToSql(gooq.DialectSQLite)  // ignored on SQLite
+dsl.Select(User.Id).From(User).LockForUpdate().SkipLocked().ToSql(gooq.DialectMySQL)
+// ... FOR UPDATE SKIP LOCKED
+dsl.Select(User.Id).From(User).LockForUpdate().NoWait().ToSql(gooq.DialectPgsql)
+// ... FOR UPDATE NOWAIT
 ```
+
+`SkipLocked()` and `NoWait()` must follow `LockForUpdate()` or `LockInShareMode()`. The later wait policy replaces the earlier one. The MySQL family, PostgreSQL, and GaussDB emit the clause. SQLite and Dameng fail in `ToSql` instead of dropping the clause and running the query.
 
 ## DML
 

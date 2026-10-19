@@ -382,6 +382,42 @@ func TestDsl_Select_Lock(t *testing.T) {
 		sql, _, err = Select(testUser.Id).From(testUser).LockForUpdate().ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
 		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL`)
+
+		sql, _, err = Select(testUser.Id).From(testUser).LockForUpdate().SkipLocked().ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL FOR UPDATE SKIP LOCKED")
+
+		sql, _, err = Select(testUser.Id).From(testUser).LockForUpdate().NoWait().ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL FOR UPDATE NOWAIT")
+
+		sql, _, err = Select(testUser.Id).From(testUser).LockInShareMode().SkipLocked().ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`deleted_at` IS NULL LOCK IN SHARE MODE SKIP LOCKED")
+
+		sql, _, err = Select(testUser.Id).From(testUser).LockInShareMode().NoWait().ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL FOR SHARE NOWAIT`)
+
+		sql, _, err = Select(testUser.Id).From(testUser).LockForUpdate().SkipLocked().NoWait().ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL FOR UPDATE NOWAIT`)
+
+		sql, _, err = Select(testUser.Id).From(testUser).LockForUpdate().SkipLocked().ToSql(gooq.DialectGaussDB)
+		t.AssertNil(err)
+		t.Assert(sql, `SELECT "user"."id" FROM "user" WHERE "user"."deleted_at" IS NULL FOR UPDATE SKIP LOCKED`)
+
+		_, _, err = Select(testUser.Id).From(testUser).SkipLocked().ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "SKIP LOCKED requires LockForUpdate or LockInShareMode"), true)
+
+		_, _, err = Select(testUser.Id).From(testUser).LockForUpdate().SkipLocked().ToSql(gooq.DialectSQLite)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "SKIP LOCKED is not supported by dialect sqlite"), true)
+
+		_, _, err = Select(testUser.Id).From(testUser).LockForUpdate().NoWait().ToSql(gooq.DialectDM)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "NOWAIT is not supported by dialect dm"), true)
 	})
 }
 

@@ -267,16 +267,58 @@ func (b *SelectBuilder) renderSelect(rc *gooq.RenderContext) string {
 			sql.WriteString(fmt.Sprintf(" OFFSET %d", b.offset))
 		}
 	}
-	if b.lock != lockNone && (rc.Spec() == nil || !rc.Spec().OmitLock()) {
-		switch b.lock {
-		case lockForUpdate:
-			sql.WriteString(" FOR UPDATE")
-		case lockInShareMode:
-			sql.WriteString(" " + rc.ShareLockKeyword())
-		default:
-		}
-	}
+	b.writeLock(rc, &sql)
 	return sql.String()
+}
+
+// rowLockWaitRenderer 由支持 SKIP LOCKED / NOWAIT 的方言实现。
+// 不放进 DialectSpec：没实现就表示不会这种子句。
+type rowLockWaitRenderer interface {
+	RenderRowLockWait(gooq.RowLockWait) (string, error)
+}
+
+func (b *SelectBuilder) writeLock(rc *gooq.RenderContext, sql *strings.Builder) {
+	if b.lock == lockNone {
+		if b.lockWait != 0 {
+			rc.Fail(fmt.Errorf("gooq: %s requires LockForUpdate or LockInShareMode", gooq.RowLockWaitSQL(b.lockWait)))
+		}
+		return
+	}
+	spec := rc.Spec()
+	omit := spec != nil && spec.OmitLock()
+	if b.lockWait == 0 {
+		if omit {
+			return
+		}
+		sql.WriteString(" " + b.lockKeyword(rc))
+		return
+	}
+	if spec == nil {
+		rc.Fail(fmt.Errorf("gooq: %s requires a registered dialect", gooq.RowLockWaitSQL(b.lockWait)))
+		return
+	}
+	renderer, ok := spec.(rowLockWaitRenderer)
+	if !ok {
+		rc.Fail(fmt.Errorf("gooq: %s is not supported by dialect %s", gooq.RowLockWaitSQL(b.lockWait), rc.Dialect()))
+		return
+	}
+	clause, err := renderer.RenderRowLockWait(b.lockWait)
+	if err != nil {
+		rc.Fail(err)
+		return
+	}
+	if clause == "" {
+		rc.Fail(fmt.Errorf("gooq: %s is not supported by dialect %s", gooq.RowLockWaitSQL(b.lockWait), rc.Dialect()))
+		return
+	}
+	sql.WriteString(" " + b.lockKeyword(rc) + " " + clause)
+}
+
+func (b *SelectBuilder) lockKeyword(rc *gooq.RenderContext) string {
+	if b.lock == lockInShareMode {
+		return rc.ShareLockKeyword()
+	}
+	return "FOR UPDATE"
 }
 
 func (b *SelectBuilder) renderTable(rc *gooq.RenderContext, t gooq.Table) string {

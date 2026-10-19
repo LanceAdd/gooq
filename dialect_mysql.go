@@ -156,6 +156,11 @@ func (MySQLDialect) RollupWith() bool { return true }
 
 func (MySQLDialect) OmitLock() bool { return false }
 
+// RenderRowLockWait 渲染 SKIP LOCKED 或 NOWAIT。MySQL 家族的语句形状相同。
+func (MySQLDialect) RenderRowLockWait(wait RowLockWait) (string, error) {
+	return renderRowLockWait(DialectMySQL, wait)
+}
+
 func (MySQLDialect) RenderDateFormat(fieldSQL, format string) (string, error) {
 	return fmt.Sprintf("DATE_FORMAT(%s, %s)", fieldSQL, quoteLiteralMySQL(format)), nil
 }
