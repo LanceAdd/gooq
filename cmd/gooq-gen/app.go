@@ -56,16 +56,16 @@ func (c appCmd) Index(ctx context.Context, in genInput) (out *genOutput, err err
 	// 配置兜底：命令行未提供的参数从 hack/gooq.yaml 的 gooq.gen.table 节点读取。
 	if g.Cfg().Available(ctx) {
 		if in.Link == "" {
-			if v, err := g.Cfg().Get(ctx, "gooq.gen.table.link"); err == nil && v != nil {
+			if v, err := g.Cfg().Get(ctx, gen.ConfigKeyTableLink); err == nil && v != nil {
 				in.Link = v.String()
 			}
 		}
 		if in.Path == "" {
-			if v, err := g.Cfg().Get(ctx, "gooq.gen.table.path"); err == nil && v != nil {
+			if v, err := g.Cfg().Get(ctx, gen.ConfigKeyTablePath); err == nil && v != nil {
 				in.Path = v.String()
 			}
 		}
-		if v, err := g.Cfg().Get(ctx, "gooq.gen.table.shardPattern"); err == nil && v != nil && !v.IsEmpty() {
+		if v, err := g.Cfg().Get(ctx, gen.ConfigKeyTableShardPattern); err == nil && v != nil && !v.IsEmpty() {
 			mlog.Print(`ignore gooq.gen.table.shardPattern; grouping is hack/gooq.tables.yaml`)
 		}
 	}
@@ -86,7 +86,7 @@ func readTenantConfig(ctx context.Context) (gen.TenantConfig, error) {
 	if !g.Cfg().Available(ctx) {
 		return gen.TenantConfig{}, nil
 	}
-	value, err := g.Cfg().Get(ctx, "gooq.gen.tenant")
+	value, err := g.Cfg().Get(ctx, gen.ConfigKeyTenant)
 	if err != nil || value == nil || value.IsNil() {
 		return gen.TenantConfig{}, err
 	}

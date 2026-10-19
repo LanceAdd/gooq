@@ -12,6 +12,13 @@ import (
 	"github.com/lanceadd/gooq/db"
 )
 
+const (
+	ConfigKeyTableLink         = "gooq.gen.table.link"
+	ConfigKeyTablePath         = "gooq.gen.table.path"
+	ConfigKeyTableShardPattern = "gooq.gen.table.shardPattern"
+	ConfigKeyTenant            = "gooq.gen.tenant"
+)
+
 type Input struct {
 	Link string // 如 mysql:root:pass@tcp(127.0.0.1:3306)/db。
 	Path string
@@ -101,7 +108,7 @@ func Generate(ctx context.Context, in Input) {
 		in.Path = "internal"
 	}
 	if in.Link == "" {
-		mlog.Fatalf(`database link is required, use -l/--link or set "gooq.gen.table.link" in hack/gooq.yaml`)
+		mlog.Fatalf("database link is required, use -l/--link or set %q in hack/gooq.yaml", ConfigKeyTableLink)
 	}
 	if dirRealPath := gfile.RealPath(in.Path); dirRealPath == "" {
 		mlog.Fatalf(`path "%s" does not exist`, in.Path)

@@ -88,7 +88,7 @@ func loadTablesAgainstDB(ctx context.Context, link string) (tablesConfig, []stri
 
 func openDatabase(link string) *db.DB {
 	if link == "" {
-		mlog.Fatalf(`database link is required, use -l/--link or set "gooq.gen.table.link" in hack/gooq.yaml`)
+		mlog.Fatalf("database link is required, use -l/--link or set %q in hack/gooq.yaml", ConfigKeyTableLink)
 	}
 	database, err := db.Open(db.Config{Link: link})
 	if err != nil {
