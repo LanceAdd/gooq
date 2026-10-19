@@ -75,7 +75,7 @@ func InsertFrom(t gooq.Table, sub *SelectBuilder) *DMLBuilder {
 
 func (b *DMLBuilder) Columns(fields ...any) *DMLBuilder {
 	for _, f := range fields {
-		if field, ok := f.(interface{ ColumnName() string }); ok {
+		if field, ok := f.(gooq.ColumnNamer); ok {
 			b.insertColumns = append(b.insertColumns, field.ColumnName())
 		}
 	}
@@ -156,7 +156,7 @@ func (b *DMLBuilder) Batch(size int) *DMLBuilder {
 	return b
 }
 
-func (b *DMLBuilder) Keys(fields ...interface{ ColumnName() string }) *DMLBuilder {
+func (b *DMLBuilder) Keys(fields ...gooq.ColumnNamer) *DMLBuilder {
 	for _, f := range fields {
 		b.updateKeys = append(b.updateKeys, f.ColumnName())
 	}
@@ -224,7 +224,7 @@ func (b *DMLBuilder) Data(data map[string]any) *DMLBuilder {
 	return b
 }
 
-func (b *DMLBuilder) Set(field interface{ ColumnName() string }, v any) *DMLBuilder {
+func (b *DMLBuilder) Set(field gooq.ColumnNamer, v any) *DMLBuilder {
 	b.setValues = append(b.setValues, columnValue{column: field.ColumnName(), value: v})
 	return b
 }
@@ -266,7 +266,7 @@ func (b *DMLBuilder) Unscoped() *DMLBuilder {
 	return b
 }
 
-func (b *DMLBuilder) OnConflictKey(fields ...interface{ ColumnName() string }) *DMLBuilder {
+func (b *DMLBuilder) OnConflictKey(fields ...gooq.ColumnNamer) *DMLBuilder {
 	if b.upsert == nil {
 		b.upsert = &upsertClause{updateMap: make(map[string]any)}
 	}
@@ -284,7 +284,7 @@ func (b *DMLBuilder) DoNothing() *DMLBuilder {
 	return b
 }
 
-func (b *DMLBuilder) DoUpdate(field interface{ ColumnName() string }, v any) *DMLBuilder {
+func (b *DMLBuilder) DoUpdate(field gooq.ColumnNamer, v any) *DMLBuilder {
 	if b.upsert == nil {
 		b.upsert = &upsertClause{updateMap: make(map[string]any)}
 	}

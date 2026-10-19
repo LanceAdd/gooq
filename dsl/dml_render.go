@@ -74,7 +74,7 @@ func (b *DMLBuilder) renderInsertFrom(rc *gooq.RenderContext) (string, []any, er
 	var columns []string
 	if b.selectBuilder != nil && len(b.selectBuilder.fields) > 0 {
 		for _, f := range b.selectBuilder.fields {
-			if field, ok := f.(interface{ ColumnName() string }); ok {
+			if field, ok := f.(gooq.ColumnNamer); ok {
 				columns = append(columns, field.ColumnName())
 			}
 		}

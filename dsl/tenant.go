@@ -292,7 +292,7 @@ func (b *DMLBuilder) rejectTenantInsertFrom(rc *gooq.RenderContext) error {
 	}
 	found := false
 	for _, item := range b.selectBuilder.fields {
-		named, ok := item.(interface{ ColumnName() string })
+		named, ok := item.(gooq.ColumnNamer)
 		if !ok {
 			return fmt.Errorf("gooq: insert into tenant table %q requires every select item to be a named column", b.table.TableName())
 		}

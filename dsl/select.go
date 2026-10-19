@@ -208,7 +208,7 @@ func (b *SelectBuilder) Fields(fields ...any) *SelectBuilder {
 			}
 		case gooq.Expression:
 			b.fields = append(b.fields, v)
-			if c, ok := v.(interface{ ColumnName() string }); ok {
+			if c, ok := v.(gooq.ColumnNamer); ok {
 				b.columns = append(b.columns, c.ColumnName())
 			}
 		default:
@@ -221,7 +221,7 @@ func (b *SelectBuilder) Fields(fields ...any) *SelectBuilder {
 func (b *SelectBuilder) FieldsEx(fields ...any) *SelectBuilder {
 	excluded := make(map[string]bool)
 	for _, f := range fields {
-		if field, ok := f.(interface{ ColumnName() string }); ok {
+		if field, ok := f.(gooq.ColumnNamer); ok {
 			excluded[field.ColumnName()] = true
 		}
 	}
