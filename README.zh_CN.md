@@ -686,7 +686,7 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
     ShardBy(uid).Value(ctx, &name)
 ```
 
-- `TableName` 的第一个参数是 `ShardingTableMeta`。`LogicalName` 是逻辑表名，`ShardNames` 是生成时库里的物理分表名。`ShardNames` 非空时，返回值必须落在清单里，否则渲染期报错（手写表的清单为空，不校验）。返回值是一个未加引号的表名，例如 `user_03`。gooq 负责加引号。schema 留在 `TableMeta` 上，不要写进返回值。id 确定非负时可以直接 `uid % shards`。不要先取绝对值，否则 `-3` 和 `3` 会落在同一片。不要用 `len(ShardNames)` 当除数，列表只是当时存在的表。
+- `TableName` 的第一个参数是 `ShardingTableMeta`。`LogicalName` 是逻辑表名，`ShardNames` 是生成时库里的物理分表名，仅作参考；返回值不要求在清单里。返回值是一个未加引号的表名，例如 `user_03`。gooq 负责加引号。schema 留在 `TableMeta` 上，不要写进返回值。id 确定非负时可以直接 `uid % shards`。不要先取绝对值，否则 `-3` 和 `3` 会落在同一片。不要用 `len(ShardNames)` 当除数，列表只是当时存在的表。
 - 查询上的 `ShardBy` 只作用于这条查询的主表。子查询、CTE、`UNION` 的每一支各自设置，不沿用外层的值。同一条查询里的其他分片表调用 `ShardBy`，返回新表对象；`As` 和 `Clone` 会带上这个值。还挂着规则、又没有 `ShardBy` 或 `Physical` 的表，在 `ToSql` 失败。
 - `role.ShardBy(uid)` 不改原来的 `role`。`ON` 和选择列要用返回的新对象上的字段。`role.UserId` 仍绑在原表上，没有这次的分片值。
 - 子查询里引用外层的分片表列时，外层那张表要用表级 `ShardBy`（`u := table.User.ShardBy(uid)`），子查询里也用新对象上的字段。外层只挂查询级 `ShardBy` 会在渲染时报缺值。
