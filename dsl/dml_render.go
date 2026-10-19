@@ -241,10 +241,6 @@ func joinsBeforeSet(spec gooq.DialectSpec) bool {
 	return ok && order.UpdateJoinsBeforeSet()
 }
 
-func copyArgs(args []any) []any {
-	return slices.Clone(args)
-}
-
 // renderUpdateStatement 按 SET、JOIN、WHERE 收集参数。
 // MySQL 家族的 SQL 把 JOIN 写在 SET 前面，参数在 RETURNING 之前改成同样的顺序。
 // 每段参数单独拷贝。它们来自同一条参数切片，直接拼接会被后续 append 盖掉。
@@ -256,13 +252,13 @@ func (b *DMLBuilder) renderUpdateStatement(rc *gooq.RenderContext, renderSets fu
 	target := renderTableName(rc, b.table)
 	setMark := len(rc.Args())
 	sets := renderSets()
-	setArgs := copyArgs(rc.Args()[setMark:])
+	setArgs := slices.Clone(rc.Args()[setMark:])
 	joinMark := len(rc.Args())
 	joins := b.joinRenders(rc)
-	joinArgs := copyArgs(rc.Args()[joinMark:])
+	joinArgs := slices.Clone(rc.Args()[joinMark:])
 	whereMark := len(rc.Args())
 	where := b.renderWhere(rc)
-	whereArgs := copyArgs(rc.Args()[whereMark:])
+	whereArgs := slices.Clone(rc.Args()[whereMark:])
 	sqlStr, err := spec.RenderUpdate(rc, target, sets, where, joins)
 	if err != nil {
 		return "", nil, err
