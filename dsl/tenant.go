@@ -156,7 +156,7 @@ func tenantPredicate(rc *gooq.RenderContext, table gooq.Table) string {
 	}
 	ids, ok := rc.TenantIDs()
 	if !ok || len(ids) == 0 {
-		rc.Fail(errTenantRequired(table.TableName(), meta.ColumnName))
+		rc.Fail(fmt.Errorf("gooq: tenant value is required for %q.%s", table.TableName(), meta.ColumnName))
 		return ""
 	}
 	for _, id := range ids {
@@ -184,7 +184,7 @@ func (b *DMLBuilder) rejectTenantWrite(rc *gooq.RenderContext, column string, va
 	field := matches[0].field
 	ids, ok := rc.TenantIDs()
 	if !ok || len(ids) == 0 {
-		return errTenantRequired(matches[0].tableName, field.ColumnName)
+		return fmt.Errorf("gooq: tenant value is required for %q.%s", matches[0].tableName, field.ColumnName)
 	}
 	if len(ids) != 1 {
 		return fmt.Errorf("gooq: tenant column %q cannot be set from multiple tenant values", field.ColumnName)
@@ -193,7 +193,7 @@ func (b *DMLBuilder) rejectTenantWrite(rc *gooq.RenderContext, column string, va
 		return fmt.Errorf("gooq: tenant column %q cannot be set to NULL", field.ColumnName)
 	}
 	if _, isExpr := value.(gooq.Expression); isExpr {
-		return errTenantMustBeCurrent(field.ColumnName)
+		return fmt.Errorf("gooq: tenant column %q must be set to the current tenant value", field.ColumnName)
 	}
 	for _, match := range matches {
 		if err := gooq.CheckTenantValue(match.field.LocalType, match.field.ColumnName, ids[0]); err != nil {
@@ -204,7 +204,7 @@ func (b *DMLBuilder) rejectTenantWrite(rc *gooq.RenderContext, column string, va
 		}
 	}
 	if !reflect.DeepEqual(value, ids[0]) {
-		return errTenantMustEqual(field.ColumnName)
+		return fmt.Errorf("gooq: tenant column %q must equal the current tenant value", field.ColumnName)
 	}
 	return nil
 }
@@ -225,7 +225,7 @@ func (b *DMLBuilder) rejectTenantSets(rc *gooq.RenderContext, sets []columnValue
 func (b *DMLBuilder) requireSingleTenant(rc *gooq.RenderContext, field *gooq.FieldMeta) error {
 	ids, ok := rc.TenantIDs()
 	if !ok || len(ids) == 0 {
-		return errTenantRequired(b.table.TableName(), field.ColumnName)
+		return fmt.Errorf("gooq: tenant value is required for %q.%s", b.table.TableName(), field.ColumnName)
 	}
 	if len(ids) != 1 {
 		return fmt.Errorf("gooq: insert into tenant table %q requires a single tenant value", b.table.TableName())
@@ -259,17 +259,19 @@ func (b *DMLBuilder) rejectTenantInsert(rc *gooq.RenderContext) error {
 				return fmt.Errorf("gooq: tenant column %q cannot be NULL", field.ColumnName)
 			}
 			if _, isExpr := cv.value.(gooq.Expression); isExpr {
-				return errTenantMustBeCurrent(field.ColumnName)
+				return fmt.Errorf("gooq: tenant column %q must be set to the current tenant value", field.ColumnName)
 			}
 			if err := gooq.CheckTenantValue(field.LocalType, field.ColumnName, cv.value); err != nil {
 				return err
 			}
 			if !reflect.DeepEqual(cv.value, ids[0]) {
-				return errTenantMustEqual(field.ColumnName)
+				return fmt.Errorf("gooq: tenant column %q must equal the current tenant value", field.ColumnName)
 			}
 		}
 		if !found {
-			return errTenantInsertMissing(b.table.TableName(), field.ColumnName)
+			return fmt.Errorf(
+				"gooq: insert into tenant table %q must set tenant column %q; call UnTenant() to opt out",
+				b.table.TableName(), field.ColumnName)
 		}
 	}
 	return nil
@@ -304,7 +306,9 @@ func (b *DMLBuilder) rejectTenantInsertFrom(rc *gooq.RenderContext) error {
 		found = true
 	}
 	if !found {
-		return errTenantInsertMissing(b.table.TableName(), field.ColumnName)
+		return fmt.Errorf(
+			"gooq: insert into tenant table %q must set tenant column %q; call UnTenant() to opt out",
+			b.table.TableName(), field.ColumnName)
 	}
 	return nil
 }
@@ -400,22 +404,6 @@ func (b *DMLBuilder) repeatedTenantColumn(rc *gooq.RenderContext, seen map[strin
 	}
 	seen[key] = struct{}{}
 	return "", false
-}
-
-func errTenantRequired(tableName, column string) error {
-	return fmt.Errorf("gooq: tenant value is required for %q.%s", tableName, column)
-}
-
-func errTenantMustBeCurrent(column string) error {
-	return fmt.Errorf("gooq: tenant column %q must be set to the current tenant value", column)
-}
-
-func errTenantMustEqual(column string) error {
-	return fmt.Errorf("gooq: tenant column %q must equal the current tenant value", column)
-}
-
-func errTenantInsertMissing(tableName, column string) error {
-	return fmt.Errorf("gooq: insert into tenant table %q must set tenant column %q; call UnTenant() to opt out", tableName, column)
 }
 
 func errTenantColumnRepeated(column string) error {
