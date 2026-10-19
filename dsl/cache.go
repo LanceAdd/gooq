@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,6 +117,10 @@ func (o CacheOption) valid() bool {
 	return o.Duration > 0 || o.Name != ""
 }
 
+func errPageCache() error {
+	return fmt.Errorf("gooq: PageCache only works with RowsAndCount, StructsAndCount, or ColumnAndCount")
+}
+
 const (
 	queryCacheKeyPrefix     = "gooq:query:"
 	compositeCacheKeyPrefix = "gooq:multi-query:"
@@ -201,4 +206,24 @@ func hashQuery(sql string, args []any) string {
 func hashString(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
+}
+
+// isEmptyResult 判断扫描结果是否无行或为零值标量。
+func isEmptyResult(value any) bool {
+	rv := reflect.ValueOf(value)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return false
+	}
+	rv = rv.Elem()
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return rv.Len() == 0
+	case reflect.Bool, reflect.String,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return rv.IsZero()
+	default:
+		return false
+	}
 }

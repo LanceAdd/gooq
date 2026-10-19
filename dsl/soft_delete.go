@@ -6,10 +6,6 @@ import (
 	"github.com/lanceadd/gooq"
 )
 
-func errPageCache() error {
-	return fmt.Errorf("gooq: PageCache only works with RowsAndCount, StructsAndCount, or ColumnAndCount")
-}
-
 // joinSoftDeleteInWhere 为 true 时，软删谓词写进 WHERE。外连接写进该 JOIN 的 ON。
 func joinSoftDeleteInWhere(kind joinType) bool {
 	switch kind {
