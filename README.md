@@ -609,6 +609,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 | dm | `?` | `"` (uppercase) | LIMIT |
 
 - `ToSql` requires a registered `DialectSpec`. An unknown dialect returns an error. Embed `MySQLDialect`, `PostgresDialect`, or `SQLiteDialect` and override the methods that differ, then call `RegisterDialect`.
+- Custom dialects with positional placeholders must keep argument order aligned with SQL text: implement `UpdateJoinsBeforeSet() bool` when `UPDATE` writes `JOIN` before `SET` (the MySQL dialect does). Implement `FoldIdent() bool` when the database treats identifiers case-insensitively; tenant write checks use it. Numbered placeholders (`$n`) need neither.
 - Opening a connection requires a blank import of the matching driver package (`drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/oceanbase`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/dm`, `drivers/sqlite`). The driver registers itself with `db.Register`. `gooq-gen` imports these drivers.
 - MariaDB, TiDB, and OceanBase use the MySQL wire protocol and the MySQL statement shape. MariaDB reads columns from `information_schema`, so a JSON value stored as `longtext` with a `json_valid` check is reported as `json`. On TiDB, `LockInShareMode` returns an error by default. After `tidb_enable_noop_functions` is enabled the statement runs, but it does not take a shared lock. `LockForUpdate` works.
 - GaussDB means openGauss. Quoting, placeholders, row locks, `RETURNING`, deletes, and updates follow PostgreSQL. `DATE_ADD` is interval multiplication, not `make_interval`. Upsert is `ON DUPLICATE KEY UPDATE`, and the inserted value is `VALUES(col)`. `DoNothing` returns an error because GaussDB has no `ON CONFLICT DO NOTHING`. The `database/sql` driver name is `opengauss`.
@@ -632,19 +633,21 @@ gooq:
         dict: ""
 ```
 
-Column matching ignores case and underscores. Allowed values are `string`, `uuid.UUID`, and the integer widths. `int` and `int64` are not the same type.
+Generation-time column matching ignores case and underscores. Runtime tenant-column checks follow the dialect: MySQL family, SQLite, and DM compare case-insensitively; PostgreSQL and GaussDB compare exactly. Allowed values are `string`, `uuid.UUID`, and the integer widths. `int` and `int64` are not the same type.
 
-The value comes from `dsl.WithTenant(ctx, id)` or from `Tenant(id)` on that builder. `ToSql` does not read the context. Execution records the context value on the builder, then renders it into a new `RenderContext`. A statement that touches a tenant table and has no value returns an error. It does not emit `IS NULL`.
+The value comes from `dsl.WithTenant(ctx, id)` or from `Tenant(id)` on that builder. `WithTenant` carries one value per request; `Tenant(ids...)` is per-statement and renders `tenant_col IN (...)`. Writes (`INSERT`, or setting the tenant column in `UPDATE`) require exactly one value, and a slice passed to `WithTenant` is a type error, not multi-tenancy. `ToSql` does not read the context. Execution records the context value on the builder, then renders it into a new `RenderContext`. A statement that touches a tenant table and has no value returns an error. It does not emit `IS NULL`.
 
 `Tenant(id)` applies to that builder and to queries rendered inside it. A nested builder may call `Tenant(other)` or `UnTenant()`. The later call wins: `UnTenant().Tenant(7)` adds the predicate, and `Tenant(7).UnTenant()` does not. `UnTenant()` is the privileged escape for that builder's main table and joins. Nested queries still see the value the outer render placed in the context.
 
 `LEFT JOIN`, `LEFT JOIN LATERAL`, `INNER JOIN`, `INNER JOIN LATERAL`, and `CROSS JOIN LATERAL` keep their current shape. A `RIGHT JOIN` or `FULL JOIN` in a statement that touches any tenant table returns an error. Rewrite that join as `LEFT JOIN`, or call `UnTenant()`.
 
-`INSERT` into a tenant table must set the tenant column to the single current tenant value. The column is not filled in automatically. `INSERT ... SELECT` must list named columns and include the tenant column. `Select().From(src)` and a `Raw` select item fail before SQL is produced. `UnTenant()` skips these checks. An `UPDATE` cannot set the tenant column to another value. `OnConflictKey` is not rewritten to include the tenant column.
+`INSERT` into a tenant table must set the tenant column to the single current tenant value. The column is not filled in automatically. `INSERT ... SELECT` must list named columns and include the tenant column. `Select().From(src)` and a `Raw` select item fail before SQL is produced. `UnTenant()` skips these checks. An `UPDATE` cannot set the tenant column of the target table or of any joined tenant table to another value. For `INSERT ... SELECT`, only the column list is checked; selected values are not compared statically. `OnConflictKey` is not rewritten to include the tenant column. `Unscoped()` only bypasses soft delete; `UnTenant()` only bypasses tenant filtering.
 
 `CacheOption.Name` is the cache key as written. Put the tenant in that name. Without `Name`, the key hashes the SQL and arguments, so different tenants do not share an entry.
 
 Each user `WHERE` and `ON` predicate is parenthesized before a soft-delete or tenant predicate is appended with `AND`.
+
+A sharded table keeps its tenant mark through `Physical()`; call `UnTenant()` for cross-tenant scans or migrations.
 
 ## Sharding
 
@@ -722,13 +725,18 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 ## Testing
 
 ```bash
-go test ./ -count=1                     # core library (rendering assertions)
+go test ./... -count=1                  # core packages: rendering, dsl, db, fn, drivers
 cd cmd/gooq-gen && go test ./...        # gooq-gen end-to-end (sqlite)
-cd test && go test ./...                # integration against a real MySQL
+
+# Live driver suites are behind build tags and read the link from an env var.
+GOOQ_MYSQL_LINK="mysql:root:pass@tcp(127.0.0.1:3306)/test" go test -tags mysql ./drivers/mysql
+GOOQ_PG_LINK="pgsql:postgres:postgres@tcp(127.0.0.1:5432)/test" go test -tags pgsql ./drivers/pgsql
 ```
+
+Tags and env vars: `mysql`/`GOOQ_MYSQL_LINK`, `mariadb`/`GOOQ_MARIADB_LINK`, `tidb`/`GOOQ_TIDB_LINK`, `oceanbase`/`GOOQ_OB_LINK`, `pgsql`/`GOOQ_PG_LINK`, `gaussdb`/`GOOQ_GAUSSDB_LINK`, `dm`/`GOOQ_DM_LINK`.
 
 ## License
 
 MIT
 
-gooq's design grew out of the shortcomings found while developing GoFrame's gdb, combined with ideas from [jOOQ](https://www.jooq.org/). The code descends from the gooq prototype in GoFrame (MIT License) and is now developed independently.
+gooq's design grew out of the shortcomings found while developing GoFrame's gdb, combined with ideas from [jOOQ](https://www.jooq.org/). The code evolved from the TableFields and SQL builder in GoFrame's gdb and is now developed independently.

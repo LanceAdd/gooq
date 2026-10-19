@@ -601,6 +601,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 | dm | `?` | `"`（大写） | LIMIT |
 
 - `ToSql` 要求方言已注册为 `DialectSpec`。未知方言直接返回错误。可嵌入 `MySQLDialect`、`PostgresDialect` 或 `SQLiteDialect`，只覆盖有差异的方法，再调用 `RegisterDialect`。
+- 自定义方言使用位置占位符时，参数顺序必须和 SQL 文本一致：`UPDATE` 的 `JOIN` 写在 `SET` 前面时，实现 `UpdateJoinsBeforeSet() bool`（MySQL 方言已实现）；数据库把大小写不同的标识符当成同一列时，实现 `FoldIdent() bool`，租户写校验会用到。编号占位符（`$n`）两个都不需要。
 - 打开连接需要空白导入对应驱动包（`drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`）。驱动在 `init` 里调用 `db.Register`。`gooq-gen` 会导入这些驱动。
 - MariaDB、TiDB 和 OceanBase 使用 MySQL 协议，语句形状与 MySQL 相同。MariaDB 从 `information_schema` 读列，因此 `longtext` 加上 `json_valid` 检查的 JSON 列会标成 `json`。`LockInShareMode` 在 TiDB 上默认报错；打开 `tidb_enable_noop_functions` 后语句能执行，但不会加共享锁。`LockForUpdate` 正常。
 - GaussDB 指 openGauss。引号、占位符、行锁、`RETURNING`、删除和更新跟随 PostgreSQL。`DATE_ADD` 写成间隔乘法，不用 `make_interval`。冲突更新是 `ON DUPLICATE KEY UPDATE`，本次插入值写成 `VALUES(col)`。GaussDB 没有 `ON CONFLICT DO NOTHING`，`DoNothing` 返回错误。`database/sql` 的驱动名是 `opengauss`。
@@ -624,19 +625,21 @@ gooq:
         dict: ""
 ```
 
-列名比较忽略大小写和下划线。值可以是 `string`、`uuid.UUID` 和各种整数宽度。`int` 和 `int64` 不是同一种类型。
+生成期列名匹配忽略大小写和下划线。运行时的租户列名检查按方言处理：MySQL 家族、SQLite、DM 忽略大小写；PostgreSQL 和 GaussDB 精确比较。值可以是 `string`、`uuid.UUID` 和各种整数宽度。`int` 和 `int64` 不是同一种类型。
 
-租户值来自 `dsl.WithTenant(ctx, id)`，或这条构建器上的 `Tenant(id)`。`ToSql` 不读 ctx。执行时先把 ctx 里的值记到构建器上，再放进这次新建的 `RenderContext`。语句碰到租户表却没有值时返回错误，不生成 `IS NULL`。
+租户值来自 `dsl.WithTenant(ctx, id)`，或这条构建器上的 `Tenant(id)`。`WithTenant` 每个请求只放一个值；`Tenant(ids...)` 只作用于这条语句，渲染成 `tenant_col IN (...)`。写路径（`INSERT`，以及 `UPDATE` 设置租户列）只接受单个值；给 `WithTenant` 传切片不会变成多租户，会按类型报错。`ToSql` 不读 ctx。执行时先把 ctx 里的值记到构建器上，再放进这次新建的 `RenderContext`。语句碰到租户表却没有值时返回错误，不生成 `IS NULL`。
 
 `Tenant(id)` 作用在这个构建器以及它里面渲染的查询上。内层构建器可以再写 `Tenant(other)` 或 `UnTenant()`。后调用的生效：`UnTenant().Tenant(7)` 会加条件，`Tenant(7).UnTenant()` 不加。`UnTenant()` 是这一层主表和 `JOIN` 的特权口子。嵌在里面的查询仍看见外层放进上下文的值。
 
 `LEFT JOIN`、`LEFT JOIN LATERAL`、`INNER JOIN`、`INNER JOIN LATERAL`、`CROSS JOIN LATERAL` 保持原来的形状。一条语句碰到任意租户表，又写出 `RIGHT JOIN` 或 `FULL JOIN`，渲染直接报错。把这条连接改成 `LEFT JOIN`，或调用 `UnTenant()`。
 
-向租户表 `INSERT` 时必须写入租户列，而且值等于当前这一个租户值。库不自动补列。`INSERT ... SELECT` 必须逐项写出具名列，并且包含租户列。`Select().From(src)` 和 `Raw` 选择项在生成 SQL 前失败。`UnTenant()` 跳过这些检查。`UPDATE` 不能把租户列改成另一个值。`OnConflictKey` 不会自动加上租户列。
+向租户表 `INSERT` 时必须写入租户列，而且值等于当前这一个租户值。库不自动补列。`INSERT ... SELECT` 必须逐项写出具名列，并且包含租户列。`Select().From(src)` 和 `Raw` 选择项在生成 SQL 前失败。`UnTenant()` 跳过这些检查。`UPDATE` 不能把目标表或任意 JOIN 进来的租户表的租户列改成另一个值。`INSERT ... SELECT` 只校验列清单，选出的值不做静态比较。`OnConflictKey` 不会自动加上租户列。`Unscoped()` 只跳过软删除，`UnTenant()` 只跳过租户，两者独立。
 
 `CacheOption.Name` 原样作为缓存键。名字里要自己带上租户。没有 `Name` 时，键是 SQL 和参数的哈希，不同租户不会共用一条缓存。
 
 每一段用户 `WHERE` 和 `ON` 会先加括号，再用 `AND` 接上软删除和租户条件。
+
+分片表经过 `Physical()` 仍保留租户标记；跨租户扫描或迁移时显式调用 `UnTenant()`。
 
 ## 分片
 
@@ -714,13 +717,18 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 ## 测试
 
 ```bash
-go test ./ -count=1                     # 主库（渲染断言）
+go test ./... -count=1                  # 主模块：渲染、dsl、db、fn、驱动
 cd cmd/gooq-gen && go test ./...        # gooq-gen 端到端（sqlite）
-cd test && go test ./...                # 集成测试（真实 MySQL，使用 test/generate 产物）
+
+# 真实库套件按 build tag + 环境变量门控
+GOOQ_MYSQL_LINK="mysql:root:pass@tcp(127.0.0.1:3306)/test" go test -tags mysql ./drivers/mysql
+GOOQ_PG_LINK="pgsql:postgres:postgres@tcp(127.0.0.1:5432)/test" go test -tags pgsql ./drivers/pgsql
 ```
+
+tag 和环境变量：`mysql`/`GOOQ_MYSQL_LINK`、`mariadb`/`GOOQ_MARIADB_LINK`、`tidb`/`GOOQ_TIDB_LINK`、`oceanbase`/`GOOQ_OB_LINK`、`pgsql`/`GOOQ_PG_LINK`、`gaussdb`/`GOOQ_GAUSSDB_LINK`、`dm`/`GOOQ_DM_LINK`。
 
 ## License
 
 MIT
 
-gooq 的设计源于 GoFrame gdb 在发展中暴露出的不足，并结合了 [jOOQ](https://www.jooq.org/) 的理念；代码从 GoFrame 中的 gooq 原型（MIT License）演变而来，现已独立发展。
+gooq 的设计源于 GoFrame gdb 在发展中暴露出的不足，并结合了 [jOOQ](https://www.jooq.org/) 的理念；代码从 GoFrame 中 gdb 的TableFields和sql builder演变而来，现已独立发展。
