@@ -131,10 +131,6 @@ func checkTenantJoins(rc *gooq.RenderContext, untenant bool, main gooq.Table, jo
 		blocked, strings.Join(quoted, ", ")))
 }
 
-func parenthesizeSQL(sql string) string {
-	return "(" + sql + ")"
-}
-
 func (b *SelectBuilder) tenantSQL(rc *gooq.RenderContext, table gooq.Table) string {
 	if b.untenant {
 		return ""
