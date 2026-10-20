@@ -616,7 +616,7 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 | dm | `?` | `"`（大写） | LIMIT |
 
 - `ToSql` 要求方言已注册为 `DialectSpec`。未知方言直接返回错误。可嵌入 `MySQLDialect`、`PostgresDialect` 或 `SQLiteDialect`，只覆盖有差异的方法，再调用 `RegisterDialect`。
-- 自定义方言使用位置占位符时，参数顺序必须和 SQL 文本一致：`UPDATE` 的 `JOIN` 写在 `SET` 前面时，实现 `UpdateJoinsBeforeSet() bool`（MySQL 方言已实现）；数据库把大小写不同的标识符当成同一列时，实现 `FoldIdent() bool`，租户写校验会用到。编号占位符（`$n`）两个都不需要。
+- 自定义方言使用位置占位符时，参数顺序必须和 SQL 文本一致：`UPDATE` 的 `JOIN` 写在 `SET` 前面时，实现 `UpdateJoinsBeforeSet() bool`（MySQL 方言已实现）；数据库把大小写不同的标识符当成同一列时，实现 `FoldIdent() bool`，租户写校验会用到。编号占位符（`$n`）两个都不需要。upsert 使用显式冲突目标（`ON CONFLICT` 或 `MERGE`）时，实现 `UpsertConflictTarget() bool` 并返回 true。不实现就默认跳过租户冲突目标检查。
 - 打开连接需要空白导入对应驱动包（`drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`）。驱动在 `init` 里调用 `db.Register`。`gooq-gen` 会导入这些驱动。
 - MariaDB、TiDB 和 OceanBase 使用 MySQL 协议，语句形状与 MySQL 相同。MariaDB 从 `information_schema` 读列，因此 `longtext` 加上 `json_valid` 检查的 JSON 列会标成 `json`。`LockInShareMode` 在 TiDB 上默认报错；打开 `tidb_enable_noop_functions` 后语句能执行，但不会加共享锁。`LockForUpdate` 正常。
 - GaussDB 指 openGauss。引号、占位符、行锁、`RETURNING`、删除和更新跟随 PostgreSQL。`DATE_ADD` 写成间隔乘法，不用 `make_interval`。冲突更新是 `ON DUPLICATE KEY UPDATE`，本次插入值写成 `VALUES(col)`。GaussDB 没有 `ON CONFLICT DO NOTHING`，`DoNothing` 返回错误。`database/sql` 的驱动名是 `opengauss`。

@@ -831,6 +831,16 @@ func TestDsl_Tenant_UnTenantTree(t *testing.T) {
 		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order` WHERE `order`.`tenant_id` = ?))")
 		t.AssertEQ(args, []any{int64(5)})
 
+		ctx := WithTenant(context.Background(), int64(8))
+		bare := Select(orderID).From(order).UnTenant().Tenant()
+		bare.stampTenant(ctx)
+		outer := Select(userID).From(user).Where(userID.InExpr(bare)).UnTenant()
+		outer.stampTenant(ctx)
+		sql, args, err = outer.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order`))")
+		t.Assert(len(args), 0)
+
 		sql, args, err = Select(userID).From(user).With("o", Select(orderID).From(order)).UnTenant().ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
 		t.Assert(sql, "WITH `o` AS (SELECT `order`.`id` FROM `order`) SELECT `user`.`id` FROM `user`")
@@ -857,7 +867,6 @@ func TestDsl_Tenant_UnTenantTree(t *testing.T) {
 		t.AssertNE(err, nil)
 		t.Assert(strings.Contains(err.Error(), "RIGHT JOIN"), true)
 
-		ctx := WithTenant(context.Background(), int64(8))
 		inserted := InsertFrom(user, Select(name).From(user)).UnTenant()
 		inserted.stampTenant(ctx)
 		sql, args, err = inserted.ToSql(gooq.DialectMySQL)
