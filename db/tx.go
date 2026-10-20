@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/lanceadd/gooq"
 )
 
 // Propagation 决定 Transaction 如何加入 ctx 里已有的事务。
@@ -158,9 +160,13 @@ func (t *Tx) Transaction(ctx context.Context, fn func(ctx context.Context, tx *T
 }
 
 // Commit 提交事务。处于嵌套保存点时释放当前保存点，不结束外层事务。
+// 方言没有 RELEASE SAVEPOINT 时保留保存点，由外层提交或回滚释放。
 func (t *Tx) Commit() error {
 	if t.depth > 0 {
 		t.depth--
+		if !supportsReleaseSavepoint(t.dialect) {
+			return nil
+		}
 		_, err := t.sql.ExecContext(t.context(), "RELEASE SAVEPOINT "+savepointName(t.depth))
 		return err
 	}
@@ -236,6 +242,17 @@ func (t *Tx) context() context.Context {
 
 func savepointName(depth int) string {
 	return fmt.Sprintf("gooq_sp_%d", depth)
+}
+
+// releaseSavepointDialect 表示该方言支持 RELEASE SAVEPOINT。
+// 没实现时按支持处理。
+type releaseSavepointDialect interface {
+	ReleaseSavepoint() bool
+}
+
+func supportsReleaseSavepoint(dialect gooq.Dialect) bool {
+	releaser, ok := gooq.LookupDialect(dialect).(releaseSavepointDialect)
+	return !ok || releaser.ReleaseSavepoint()
 }
 
 // rollbackFully 退掉尚未释放的保存点，再回滚外层事务。

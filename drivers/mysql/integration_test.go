@@ -391,7 +391,7 @@ func TestMySQL8Live(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(sqlText, "`u` INNER JOIN `flag` AS `f` ON 1 = 1 SET `status` = ?") {
+		if !strings.Contains(sqlText, "`u` INNER JOIN `flag` AS `f` ON (1 = 1) SET `status` = ?") {
 			t.Fatalf("multi update sql = %s", sqlText)
 		}
 		if _, err = view.Exec(ctx, sqlText, args...); err != nil {
@@ -676,9 +676,13 @@ func TestMySQL8Live(t *testing.T) {
 	})
 
 	t.Run("schema pool", func(t *testing.T) {
-		if _, err = database.Exec(ctx, `CREATE TABLE events (id INT PRIMARY KEY)`); err != nil {
+		table := "gooq_events_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:8]
+		if _, err = database.Exec(ctx, "CREATE TABLE "+table+" (id INT PRIMARY KEY)"); err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() {
+			_, _ = database.Exec(context.Background(), "DROP TABLE IF EXISTS "+table)
+		})
 		otherName := "gooq_it_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 		if _, err = database.Exec(ctx, "CREATE DATABASE `"+otherName+"`"); err != nil {
 			t.Fatal(err)
@@ -691,11 +695,11 @@ func TestMySQL8Live(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = other.Close() })
-		if _, err = other.Exec(ctx, `CREATE TABLE events (id INT PRIMARY KEY)`); err != nil {
+		if _, err = other.Exec(ctx, "CREATE TABLE "+table+" (id INT PRIMARY KEY)"); err != nil {
 			t.Fatal(err)
 		}
 		err = database.Transaction(ctx, func(txctx context.Context, tx *db.Tx) error {
-			if _, err = other.Exec(txctx, `INSERT INTO events(id) VALUES (1)`); err != nil {
+			if _, err = other.Exec(txctx, "INSERT INTO "+table+" (id) VALUES (1)"); err != nil {
 				return err
 			}
 			return errors.New("rollback original")
@@ -704,10 +708,10 @@ func TestMySQL8Live(t *testing.T) {
 			t.Fatal(err)
 		}
 		var original, moved int64
-		if err = database.Value(ctx, &original, `SELECT COUNT(*) FROM events`); err != nil {
+		if err = database.Value(ctx, &original, "SELECT COUNT(*) FROM "+table); err != nil {
 			t.Fatal(err)
 		}
-		if err = other.Value(ctx, &moved, `SELECT COUNT(*) FROM events`); err != nil {
+		if err = other.Value(ctx, &moved, "SELECT COUNT(*) FROM "+table); err != nil {
 			t.Fatal(err)
 		}
 		if original != 0 || moved != 1 {

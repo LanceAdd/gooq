@@ -4,6 +4,8 @@ package dm
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -101,6 +103,75 @@ CREATE TABLE GOOQ_DM_IT (
 	if database.Dialect() != gooq.DialectDM {
 		t.Fatalf("dialect = %s", database.Dialect())
 	}
+
+	const txTable = "GOOQ_DM_TX"
+	_, _ = database.Exec(ctx, "DROP TABLE "+txTable)
+	if _, err = database.Exec(ctx, `
+CREATE TABLE GOOQ_DM_TX (
+  ID BIGINT PRIMARY KEY,
+  NAME VARCHAR(32) NOT NULL
+)`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = database.Exec(context.Background(), "DROP TABLE "+txTable)
+	})
+
+	t.Run("nested commit", func(t *testing.T) {
+		err := database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if _, err := tx.Exec(ctx, `INSERT INTO GOOQ_DM_TX (ID, NAME) VALUES (?, ?)`, 100, "outer"); err != nil {
+				return err
+			}
+			return tx.Transaction(ctx, func(ctx context.Context, inner *db.Tx) error {
+				if inner != tx {
+					return errors.New("nested transaction changed")
+				}
+				_, err := inner.Exec(ctx, `INSERT INTO GOOQ_DM_TX (ID, NAME) VALUES (?, ?)`, 101, "inner")
+				return err
+			})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var n int64
+		if err = database.Value(ctx, &n, `SELECT COUNT(*) FROM GOOQ_DM_TX WHERE ID IN (100, 101)`); err != nil {
+			t.Fatal(err)
+		}
+		if n != 2 {
+			t.Fatalf("nested commit rows = %d", n)
+		}
+	})
+
+	t.Run("nested rollback", func(t *testing.T) {
+		err := database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if _, err := tx.Exec(ctx, `INSERT INTO GOOQ_DM_TX (ID, NAME) VALUES (?, ?)`, 102, "outer"); err != nil {
+				return err
+			}
+			err := tx.Transaction(ctx, func(ctx context.Context, inner *db.Tx) error {
+				if _, err := inner.Exec(ctx, `INSERT INTO GOOQ_DM_TX (ID, NAME) VALUES (?, ?)`, 103, "inner"); err != nil {
+					return err
+				}
+				return errors.New("rollback nested")
+			})
+			if err == nil || err.Error() != "rollback nested" {
+				return fmt.Errorf("nested err = %v", err)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var outer, inner int64
+		if err = database.Value(ctx, &outer, `SELECT COUNT(*) FROM GOOQ_DM_TX WHERE ID = ?`, 102); err != nil {
+			t.Fatal(err)
+		}
+		if err = database.Value(ctx, &inner, `SELECT COUNT(*) FROM GOOQ_DM_TX WHERE ID = ?`, 103); err != nil {
+			t.Fatal(err)
+		}
+		if outer != 1 || inner != 0 {
+			t.Fatalf("outer=%d inner=%d", outer, inner)
+		}
+	})
 }
 
 func textOf(value any) string {

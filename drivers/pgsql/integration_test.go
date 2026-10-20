@@ -4,6 +4,7 @@ package pgsql
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -324,7 +325,7 @@ func TestPostgresLive(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if sqlText != `DELETE FROM "note" AS "u" WHERE "u"."id" = $1` {
+		if sqlText != `DELETE FROM "note" AS "u" WHERE ("u"."id" = $1)` {
 			t.Fatalf("alias delete sql = %s", sqlText)
 		}
 		if _, err = view.Exec(ctx, sqlText, args...); err != nil {
@@ -367,6 +368,59 @@ func TestPostgresLive(t *testing.T) {
 		}
 		if deleted != 2 {
 			t.Fatalf("soft-deleted rows = %d", deleted)
+		}
+	})
+
+	t.Run("transaction", func(t *testing.T) {
+		if _, err = view.Exec(ctx, `CREATE TABLE gooq_it_tx (id int PRIMARY KEY, name text)`); err != nil {
+			t.Fatal(err)
+		}
+
+		if err = view.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if _, err := tx.Exec(ctx, `INSERT INTO gooq_it_tx (id, name) VALUES (1, 'rolled')`); err != nil {
+				return err
+			}
+			return errors.New("abort")
+		}); err == nil {
+			t.Fatal("expected transaction error")
+		}
+		var count int64
+		if err = view.Value(ctx, &count, `SELECT COUNT(*) FROM gooq_it_tx`); err != nil || count != 0 {
+			t.Fatalf("rolled back rows = %d, %v", count, err)
+		}
+
+		if err = view.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if _, err := tx.Exec(ctx, `INSERT INTO gooq_it_tx (id, name) VALUES (4, 'outer')`); err != nil {
+				return err
+			}
+			err := tx.Transaction(ctx, func(ctx context.Context, inner *db.Tx) error {
+				if _, err := inner.Exec(ctx, `INSERT INTO gooq_it_tx (id, name) VALUES (5, 'inner')`); err != nil {
+					return err
+				}
+				return errors.New("nested abort")
+			})
+			if err == nil {
+				t.Fatal("expected nested error")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err = view.Value(ctx, &count, `SELECT COUNT(*) FROM gooq_it_tx`); err != nil || count != 1 {
+			t.Fatalf("rows after savepoint rollback = %d, %v", count, err)
+		}
+
+		if err = view.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if view.TxFromContext(ctx) != tx {
+				return errors.New("ctx lost its transaction")
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO gooq_it_tx (id, name) VALUES (6, 'commit')`)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err = view.Value(ctx, &count, `SELECT COUNT(*) FROM gooq_it_tx`); err != nil || count != 2 {
+			t.Fatalf("committed rows = %d, %v", count, err)
 		}
 	})
 

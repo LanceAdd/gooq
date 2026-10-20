@@ -391,7 +391,7 @@ func TestMariaDBLive(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(sqlText, "`u` INNER JOIN `flag` AS `f` ON 1 = 1 SET `status` = ?") {
+		if !strings.Contains(sqlText, "`u` INNER JOIN `flag` AS `f` ON (1 = 1) SET `status` = ?") {
 			t.Fatalf("multi update sql = %s", sqlText)
 		}
 		if _, err = view.Exec(ctx, sqlText, args...); err != nil {

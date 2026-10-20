@@ -4,6 +4,8 @@ package oceanbase
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -77,4 +79,61 @@ CREATE TABLE gooq_ob_it (
 	if database.Dialect() != gooq.DialectOceanBase {
 		t.Fatalf("dialect = %s", database.Dialect())
 	}
+
+	t.Run("transaction", func(t *testing.T) {
+		table := fmt.Sprintf("gooq_ob_tx_%d_%d", os.Getpid(), time.Now().UnixNano())
+		if _, err := database.Exec(ctx, "CREATE TABLE "+table+" (id BIGINT PRIMARY KEY, name VARCHAR(32) NOT NULL)"); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = database.Exec(context.Background(), "DROP TABLE IF EXISTS "+table)
+		})
+
+		if err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if _, err := tx.Exec(ctx, "INSERT INTO "+table+" (id, name) VALUES (?, ?)", 1, "rolled"); err != nil {
+				return err
+			}
+			return errors.New("abort")
+		}); err == nil {
+			t.Fatal("expected transaction error")
+		}
+		var count int64
+		if err = database.Value(ctx, &count, "SELECT COUNT(*) FROM "+table); err != nil || count != 0 {
+			t.Fatalf("rolled back rows = %d, %v", count, err)
+		}
+
+		if err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if _, err := tx.Exec(ctx, "INSERT INTO "+table+" (id, name) VALUES (?, ?)", 2, "outer"); err != nil {
+				return err
+			}
+			err := tx.Transaction(ctx, func(ctx context.Context, inner *db.Tx) error {
+				if _, err := inner.Exec(ctx, "INSERT INTO "+table+" (id, name) VALUES (?, ?)", 3, "inner"); err != nil {
+					return err
+				}
+				return errors.New("nested abort")
+			})
+			if err == nil {
+				t.Fatal("expected nested error")
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err = database.Value(ctx, &count, "SELECT COUNT(*) FROM "+table); err != nil || count != 1 {
+			t.Fatalf("rows after savepoint rollback = %d, %v", count, err)
+		}
+
+		if err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+			if database.TxFromContext(ctx) != tx {
+				return errors.New("ctx lost its transaction")
+			}
+			_, err := tx.Exec(ctx, "INSERT INTO "+table+" (id, name) VALUES (?, ?)", 4, "commit")
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err = database.Value(ctx, &count, "SELECT COUNT(*) FROM "+table); err != nil || count != 2 {
+			t.Fatalf("committed rows = %d, %v", count, err)
+		}
+	})
 }

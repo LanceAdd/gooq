@@ -82,6 +82,10 @@ func (DMDialect) RenderUpsert(*RenderContext, UpsertClause) (string, error) {
 // UpsertConflictTarget 为 true：MERGE 的 ON 使用调用方给出的冲突列。
 func (DMDialect) UpsertConflictTarget() bool { return true }
 
+// ReleaseSavepoint 为 false：达梦没有 RELEASE SAVEPOINT。
+// 嵌套事务提交时保留保存点，由外层事务结束或同名保存点覆盖。
+func (DMDialect) ReleaseSavepoint() bool { return false }
+
 // RenderExcluded 渲染 MERGE 源表里的本次插入列。
 func (DMDialect) RenderExcluded(rc *RenderContext, column string) string {
 	return "T2." + rc.Quote(column)
