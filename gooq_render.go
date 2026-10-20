@@ -14,23 +14,25 @@ type Subquery interface {
 
 // RenderContext 是一次渲染过程的方言与参数状态。
 type RenderContext struct {
-	dialect       Dialect
-	spec          DialectSpec
-	args          []any
-	argIndex      int
-	err           error
-	queryHasShard bool
-	queryShard    any
-	mainTable     *TableBase
-	shardNames    map[*TableBase]string
-	tenantHas     bool
-	tenantIDs     []any
+	dialect        Dialect
+	spec           DialectSpec
+	args           []any
+	argIndex       int
+	err            error
+	queryHasShard  bool
+	queryShard     any
+	mainTable      *TableBase
+	shardNames     map[*TableBase]string
+	tenantHas      bool
+	tenantDisabled bool
+	tenantIDs      []any
 }
 
-// TenantState 是一层租户值，供子查询覆盖后恢复。
+// TenantState 是一层租户状态：无值、有值，或整棵子树禁用。
 type TenantState struct {
-	has bool
-	ids []any
+	has      bool
+	disabled bool
+	ids      []any
 }
 
 // QueryShardState 是一次查询的分片渲染状态，供子查询进出时保存和恢复。
@@ -147,28 +149,47 @@ func (rc *RenderContext) SetMainTable(base *TableBase) {
 }
 
 // SetTenant 放入这次渲染一开始就有的租户值。分片切换不清这个值。
+// 只记“有值”，不重新打开被 UnTenant 关掉的范围。
 func (rc *RenderContext) SetTenant(ids []any) {
 	rc.tenantHas = true
 	rc.tenantIDs = slices.Clone(ids)
 }
 
-// PushTenant 用这一层的显式租户值盖住外层，返回外层的值。
+// PushTenant 用这一层的显式租户值盖住外层，并重新打开租户过滤。
 func (rc *RenderContext) PushTenant(ids []any) TenantState {
-	prev := TenantState{has: rc.tenantHas, ids: rc.tenantIDs}
+	prev := rc.snapshotTenant()
 	rc.tenantHas = true
+	rc.tenantDisabled = false
 	rc.tenantIDs = slices.Clone(ids)
 	return prev
 }
 
-// PopTenant 恢复 PushTenant 之前的租户值。
+// PushTenantDisabled 关掉这一层以及里面还没自己打开的查询的租户过滤。
+func (rc *RenderContext) PushTenantDisabled() TenantState {
+	prev := rc.snapshotTenant()
+	rc.tenantDisabled = true
+	return prev
+}
+
+func (rc *RenderContext) snapshotTenant() TenantState {
+	return TenantState{has: rc.tenantHas, disabled: rc.tenantDisabled, ids: rc.tenantIDs}
+}
+
+// PopTenant 恢复压栈之前的租户状态。
 func (rc *RenderContext) PopTenant(prev TenantState) {
 	rc.tenantHas = prev.has
+	rc.tenantDisabled = prev.disabled
 	rc.tenantIDs = prev.ids
 }
 
-// TenantIDs 返回这次渲染上下文里的租户值。
+// TenantDisabled 表示这一层的租户过滤已关闭。
+func (rc *RenderContext) TenantDisabled() bool {
+	return rc.tenantDisabled
+}
+
+// TenantIDs 返回这次渲染上下文里的租户值。禁用时不交出外层留下的值。
 func (rc *RenderContext) TenantIDs() ([]any, bool) {
-	if !rc.tenantHas {
+	if rc.tenantDisabled || !rc.tenantHas {
 		return nil, false
 	}
 	return rc.tenantIDs, true

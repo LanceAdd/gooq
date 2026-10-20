@@ -30,7 +30,9 @@ func TenantFromContext(ctx context.Context) (any, bool) {
 
 func (b *SelectBuilder) Tenant(ids ...any) *SelectBuilder {
 	b.untenant = false
-	b.hasTenantIDs, b.tenantIDs = tenantArgs(ids)
+	if len(ids) > 0 {
+		b.hasTenantIDs, b.tenantIDs = true, slices.Clone(ids)
+	}
 	return b
 }
 
@@ -45,7 +47,9 @@ func (b *SelectBuilder) stampTenant(ctx context.Context) {
 
 func (b *DMLBuilder) Tenant(ids ...any) *DMLBuilder {
 	b.untenant = false
-	b.hasTenantIDs, b.tenantIDs = tenantArgs(ids)
+	if len(ids) > 0 {
+		b.hasTenantIDs, b.tenantIDs = true, slices.Clone(ids)
+	}
 	return b
 }
 
@@ -58,13 +62,6 @@ func (b *DMLBuilder) stampTenant(ctx context.Context) {
 	b.ctxTenant, b.hasCtxTenant = TenantFromContext(ctx)
 }
 
-func tenantArgs(ids []any) (bool, []any) {
-	if len(ids) == 0 {
-		return false, nil
-	}
-	return true, slices.Clone(ids)
-}
-
 func copyTenantIDs(ids []any) []any {
 	if ids == nil {
 		return nil
@@ -73,17 +70,22 @@ func copyTenantIDs(ids []any) []any {
 }
 
 // seedTenant 把执行路径记在构建器上的 ctx 值放进新建的渲染上下文。
-// UnTenant 也放，子查询仍能看见这个值。
+// 只记“有值”。这一层的 UnTenant 随后把整棵查询树标成禁用。
 func seedTenant(rc *gooq.RenderContext, hasCtx bool, id any) {
 	if hasCtx {
 		rc.SetTenant([]any{id})
 	}
 }
 
-// bindTenantLayer 在这一层有显式租户值时盖住外层。UnTenant 不改上下文。
+// bindTenantLayer 按这一层的开关盖住外层。
+// UnTenant 禁用整棵子树；有显式值就压入并重新打开；都没有则继承。
 // ctx 只由顶层入口放进渲染上下文，子查询不读构建器上记下的值。
 func bindTenantLayer(rc *gooq.RenderContext, untenant, hasIDs bool, ids []any) func() {
-	if untenant || !hasIDs {
+	if untenant {
+		prev := rc.PushTenantDisabled()
+		return func() { rc.PopTenant(prev) }
+	}
+	if !hasIDs {
 		return func() {}
 	}
 	prev := rc.PushTenant(ids)
@@ -107,8 +109,8 @@ func appendTenantName(names []string, table gooq.Table) []string {
 	return append(names, name)
 }
 
-func checkTenantJoins(rc *gooq.RenderContext, untenant bool, main gooq.Table, joins []*joinClause) {
-	if untenant {
+func checkTenantJoins(rc *gooq.RenderContext, main gooq.Table, joins []*joinClause) {
+	if rc.TenantDisabled() {
 		return
 	}
 	names := appendTenantName(nil, main)
@@ -131,21 +133,10 @@ func checkTenantJoins(rc *gooq.RenderContext, untenant bool, main gooq.Table, jo
 		blocked, strings.Join(quoted, ", ")))
 }
 
-func (b *SelectBuilder) tenantSQL(rc *gooq.RenderContext, table gooq.Table) string {
-	if b.untenant {
-		return ""
-	}
-	return tenantPredicate(rc, table)
-}
-
-func (b *DMLBuilder) tenantSQL(rc *gooq.RenderContext, table gooq.Table) string {
-	if b.untenant {
-		return ""
-	}
-	return tenantPredicate(rc, table)
-}
-
 func tenantPredicate(rc *gooq.RenderContext, table gooq.Table) string {
+	if rc.TenantDisabled() {
+		return ""
+	}
 	if table == nil || table.Meta() == nil {
 		return ""
 	}

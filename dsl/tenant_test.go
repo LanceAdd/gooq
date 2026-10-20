@@ -104,8 +104,8 @@ func TestDsl_Tenant_JoinAndSubquery(t *testing.T) {
 		outer.stampTenant(ctx)
 		sql, args, err = outer.ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order` WHERE `order`.`tenant_id` = ?))")
-		t.AssertEQ(args, []any{int64(8)})
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order`))")
+		t.Assert(len(args), 0)
 	})
 }
 
@@ -413,33 +413,52 @@ func TestDsl_Tenant_CountInheritsContext(t *testing.T) {
 		user, userID, _ := tenantTable("user", gooq.LocalTypeInt64)
 		order, orderID, _ := tenantTable("order", gooq.LocalTypeInt64)
 		ctx := WithTenant(context.Background(), int64(8))
-		grouped := Select(userID).From(user).Where(userID.InExpr(Select(orderID).From(order))).Group(userID).UnTenant()
+		grouped := Select(userID).From(user).Where(userID.InExpr(Select(orderID).From(order))).Group(userID)
 		grouped.stampTenant(ctx)
+		groupedSQL := "SELECT `user`.`id` FROM `user` WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order` WHERE `order`.`tenant_id` = ?)) AND `user`.`tenant_id` = ? GROUP BY `user`.`id`"
+		countSQLText := "SELECT COUNT(*) FROM (" + groupedSQL + ") AS `t`"
 
 		sql, args, err := grouped.ToSql(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(strings.Contains(sql, "`order`.`tenant_id` = ?"), true)
-		t.AssertEQ(args, []any{int64(8)})
+		t.Assert(sql, groupedSQL)
+		t.AssertEQ(args, []any{int64(8), int64(8)})
 
 		countSQL, countArgs, err := grouped.countSQL(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(strings.Contains(countSQL, "`order`.`tenant_id` = ?"), true)
-		t.AssertEQ(countArgs, []any{int64(8)})
+		t.Assert(countSQL, countSQLText)
+		t.AssertEQ(countArgs, []any{int64(8), int64(8)})
 
 		existsSQL, existsArgs, err := grouped.existsSQL(gooq.DialectMySQL)
 		t.AssertNil(err)
-		t.Assert(strings.Contains(existsSQL, "`order`.`tenant_id` = ?"), true)
-		t.AssertEQ(existsArgs, []any{int64(8)})
+		t.Assert(existsSQL, "SELECT EXISTS (SELECT 1 FROM ("+groupedSQL+") AS `t`)")
+		t.AssertEQ(existsArgs, []any{int64(8), int64(8)})
 
 		_, err = grouped.compositeCacheKey(gooq.DialectMySQL, "rows")
 		t.AssertNil(err)
 
+		open := Select(userID).From(user).Where(userID.InExpr(Select(orderID).From(order))).Group(userID).UnTenant()
+		open.stampTenant(ctx)
+		openSQL := "SELECT `user`.`id` FROM `user` WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order`)) GROUP BY `user`.`id`"
+		sql, args, err = open.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, openSQL)
+		t.Assert(len(args), 0)
+		countSQL, countArgs, err = open.countSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(countSQL, "SELECT COUNT(*) FROM ("+openSQL+") AS `t`")
+		t.Assert(len(countArgs), 0)
+		existsSQL, existsArgs, err = open.existsSQL(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(existsSQL, "SELECT EXISTS (SELECT 1 FROM ("+openSQL+") AS `t`)")
+		t.Assert(len(existsArgs), 0)
+
 		inner := Select(orderID).From(order)
 		inner.stampTenant(ctx)
 		outer := Select(userID).From(user).Where(userID.InExpr(inner)).UnTenant()
-		_, _, err = outer.ToSql(gooq.DialectMySQL)
-		t.AssertNE(err, nil)
-		t.Assert(strings.Contains(err.Error(), "tenant value is required"), true)
+		sql, args, err = outer.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order`))")
+		t.Assert(len(args), 0)
 	})
 }
 
@@ -718,7 +737,7 @@ func TestDsl_Tenant_ColumnCase(t *testing.T) {
 			t.Assert(strings.Contains(err.Error(), "must be set to the current tenant value"), true)
 
 			_, _, err = Insert(user).Columns(name, user.Field("tenant_id")).Values("a", int64(7)).
-				OnConflictKey(id).DoUpdate(alias, int64(9)).Tenant(int64(7)).ToSql(dialect)
+				OnConflictKey(user.Field("tenant_id"), id).DoUpdate(alias, int64(9)).Tenant(int64(7)).ToSql(dialect)
 			t.AssertNE(err, nil)
 			t.Assert(strings.Contains(err.Error(), "must equal"), true)
 
@@ -750,12 +769,14 @@ func TestDsl_Tenant_ColumnCase(t *testing.T) {
 		t.Assert(strings.Contains(sql, "ON DUPLICATE KEY UPDATE `TENANT_ID` = ?"), true)
 		t.AssertEQ(args, []any{int64(1), "a", int64(7), int64(7)})
 
-		_, _, err = Insert(user).Columns(id, name, user.Field("tenant_id")).Values(int64(1), "a", int64(7)).
-			OnConflictKey(id).DoUpdate(alias, int64(7)).Tenant(int64(7)).ToSql(gooq.DialectSQLite)
+		sql, _, err = Insert(user).Columns(id, name, user.Field("tenant_id")).Values(int64(1), "a", int64(7)).
+			OnConflictKey(user.Field("tenant_id"), id).DoUpdate(alias, int64(7)).Tenant(int64(7)).ToSql(gooq.DialectSQLite)
 		t.AssertNil(err)
-		_, _, err = Insert(user).Columns(id, name, user.Field("tenant_id")).Values(int64(1), "a", int64(7)).
-			OnConflictKey(id).DoUpdate(alias, int64(7)).Tenant(int64(7)).ToSql(gooq.DialectDM)
+		t.Assert(strings.Contains(sql, `ON CONFLICT ("tenant_id", "id")`), true)
+		sql, _, err = Insert(user).Columns(id, name, user.Field("tenant_id")).Values(int64(1), "a", int64(7)).
+			OnConflictKey(user.Field("tenant_id"), id).DoUpdate(alias, int64(7)).Tenant(int64(7)).ToSql(gooq.DialectDM)
 		t.AssertNil(err)
+		t.Assert(strings.Contains(sql, `T1."TENANT_ID" = T2."TENANT_ID"`), true)
 
 		_, _, err = Update(user).Data(map[string]any{"tenant_id": int64(7), "TENANT_ID": int64(7)}).Tenant(int64(7)).ToSql(gooq.DialectMySQL)
 		t.AssertNE(err, nil)
@@ -794,5 +815,233 @@ func TestDsl_Tenant_ColumnCase(t *testing.T) {
 			t.Assert(strings.Contains(sql, `"TENANT_ID"`), true)
 			t.AssertEQ(args, []any{int64(7), int64(9)})
 		}
+	})
+}
+
+func TestDsl_Tenant_UnTenantTree(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		user, userID, name := tenantTable("user", gooq.LocalTypeInt64)
+		order, orderID, _ := tenantTable("order", gooq.LocalTypeInt64)
+		dict := plainTable("dict")
+		dictID := gooq.NewFieldAt[int64](dict, "id")
+
+		inner := Select(orderID).From(order).Tenant(int64(5))
+		sql, args, err := Select(userID).From(user).Where(userID.InExpr(inner)).UnTenant().ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order` WHERE `order`.`tenant_id` = ?))")
+		t.AssertEQ(args, []any{int64(5)})
+
+		sql, args, err = Select(userID).From(user).With("o", Select(orderID).From(order)).UnTenant().ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "WITH `o` AS (SELECT `order`.`id` FROM `order`) SELECT `user`.`id` FROM `user`")
+		t.Assert(len(args), 0)
+
+		sql, args, err = Select(userID).From(user).Union(Select(orderID).From(order)).UnTenant().ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` UNION SELECT `order`.`id` FROM `order`")
+		t.Assert(len(args), 0)
+
+		sql, args, err = Select(userID).From(user).Tenant(int64(7)).Union(Select(orderID).From(order).UnTenant()).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE `user`.`tenant_id` = ? UNION SELECT `order`.`id` FROM `order`")
+		t.AssertEQ(args, []any{int64(7)})
+
+		blocked := Select(orderID).From(order).RightJoin(dict).On(dictID.EqExpr(orderID))
+		sql, args, err = Select(userID).From(user).Where(userID.InExpr(blocked)).UnTenant().ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "SELECT `user`.`id` FROM `user` WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order` RIGHT JOIN `dict` ON (`dict`.`id` = `order`.`id`)))")
+		t.Assert(len(args), 0)
+
+		reopened := Select(orderID).From(order).RightJoin(dict).On(dictID.EqExpr(orderID)).Tenant(int64(7))
+		_, _, err = Select(userID).From(user).Where(userID.InExpr(reopened)).UnTenant().ToSql(gooq.DialectMySQL)
+		t.AssertNE(err, nil)
+		t.Assert(strings.Contains(err.Error(), "RIGHT JOIN"), true)
+
+		ctx := WithTenant(context.Background(), int64(8))
+		inserted := InsertFrom(user, Select(name).From(user)).UnTenant()
+		inserted.stampTenant(ctx)
+		sql, args, err = inserted.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "INSERT INTO `user` (`name`) SELECT `user`.`name` FROM `user`")
+		t.Assert(len(args), 0)
+
+		sql, args, err = Update(user).Set(name, "a").Where(userID.InExpr(Select(orderID).From(order).Tenant(int64(5)))).UnTenant().ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "UPDATE `user` SET `name` = ? WHERE (`user`.`id` IN (SELECT `order`.`id` FROM `order` WHERE `order`.`tenant_id` = ?))")
+		t.AssertEQ(args, []any{"a", int64(5)})
+	})
+}
+
+func TestDsl_Tenant_ZeroArgRestores(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		user, id, name := tenantTable("user", gooq.LocalTypeInt64)
+		ctx := WithTenant(context.Background(), int64(3))
+		selectSQL := "SELECT `user`.`id` FROM `user` WHERE `user`.`tenant_id` = ?"
+		updateSQL := "UPDATE `user` SET `name` = ? WHERE `user`.`tenant_id` = ?"
+
+		kept := Select(id).From(user).Tenant(int64(7)).Tenant()
+		kept.stampTenant(ctx)
+		sql, args, err := kept.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, selectSQL)
+		t.AssertEQ(args, []any{int64(7)})
+
+		restored := Select(id).From(user).Tenant(int64(7)).UnTenant().Tenant()
+		restored.stampTenant(ctx)
+		sql, args, err = restored.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, selectSQL)
+		t.AssertEQ(args, []any{int64(7)})
+
+		fromCtx := Select(id).From(user).UnTenant().Tenant()
+		fromCtx.stampTenant(ctx)
+		sql, args, err = fromCtx.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, selectSQL)
+		t.AssertEQ(args, []any{int64(3)})
+
+		updated := Update(user).Set(name, "a").Tenant(int64(7)).Tenant()
+		updated.stampTenant(ctx)
+		sql, args, err = updated.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, updateSQL)
+		t.AssertEQ(args, []any{"a", int64(7)})
+
+		updated = Update(user).Set(name, "a").Tenant(int64(7)).UnTenant().Tenant()
+		updated.stampTenant(ctx)
+		sql, args, err = updated.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, updateSQL)
+		t.AssertEQ(args, []any{"a", int64(7)})
+
+		updated = Update(user).Set(name, "a").UnTenant().Tenant()
+		updated.stampTenant(ctx)
+		sql, args, err = updated.ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, updateSQL)
+		t.AssertEQ(args, []any{"a", int64(3)})
+	})
+}
+
+func TestDsl_Tenant_UpsertConflictTarget(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		user, id, name := tenantTable("user", gooq.LocalTypeInt64)
+		tenantCol := user.Field("tenant_id")
+		wantErr := `gooq: upsert into tenant table "user" requires tenant column "tenant_id" in OnConflictKey`
+
+		for _, dialect := range []gooq.Dialect{gooq.DialectPgsql, gooq.DialectSQLite, gooq.DialectDM} {
+			sql, args, err := Insert(user).Columns(tenantCol, name).Values(int64(2), "a").
+				OnConflictKey(name).DoUpdate(name, "Bob").Tenant(int64(2)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(err.Error(), wantErr)
+			t.Assert(sql, "")
+			t.Assert(len(args), 0)
+		}
+
+		sql, args, err := Insert(user).Columns(tenantCol, name).Values(int64(2), "a").
+			OnConflictKey(tenantCol, name).DoUpdate(name, "Bob").Tenant(int64(2)).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("tenant_id", "name") VALUES ($1, $2) ON CONFLICT ("tenant_id", "name") DO UPDATE SET "name" = $3`)
+		t.AssertEQ(args, []any{int64(2), "a", "Bob"})
+
+		sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(2), "a").
+			OnConflictKey(tenantCol, name).DoUpdate(name, "Bob").Tenant(int64(2)).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("tenant_id", "name") VALUES (?, ?) ON CONFLICT ("tenant_id", "name") DO UPDATE SET "name" = ?`)
+		t.AssertEQ(args, []any{int64(2), "a", "Bob"})
+
+		sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(2), "a").
+			OnConflictKey(tenantCol, name).DoUpdate(name, "Bob").Tenant(int64(2)).ToSql(gooq.DialectDM)
+		t.AssertNil(err)
+		t.Assert(sql, `MERGE INTO "USER" T1 USING (SELECT ? AS "TENANT_ID", ? AS "NAME" FROM DUAL) T2 ON (T1."TENANT_ID" = T2."TENANT_ID" AND T1."NAME" = T2."NAME") WHEN NOT MATCHED THEN INSERT("TENANT_ID", "NAME") VALUES (T2."TENANT_ID", T2."NAME") WHEN MATCHED THEN UPDATE SET T1."NAME" = ?`)
+		t.AssertEQ(args, []any{int64(2), "a", "Bob"})
+
+		for _, dialect := range []gooq.Dialect{gooq.DialectPgsql, gooq.DialectSQLite} {
+			sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(7), "a").
+				DoNothing().Tenant(int64(7)).ToSql(dialect)
+			t.AssertNE(err, nil)
+			t.Assert(err.Error(), wantErr)
+			t.Assert(sql, "")
+			t.Assert(len(args), 0)
+		}
+
+		sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(7), "a").
+			OnConflictKey(tenantCol).DoNothing().Tenant(int64(7)).ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("tenant_id", "name") VALUES ($1, $2) ON CONFLICT ("tenant_id") DO NOTHING`)
+		t.AssertEQ(args, []any{int64(7), "a"})
+
+		sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(7), "a").
+			OnConflictKey(tenantCol).DoNothing().Tenant(int64(7)).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("tenant_id", "name") VALUES (?, ?) ON CONFLICT ("tenant_id") DO NOTHING`)
+		t.AssertEQ(args, []any{int64(7), "a"})
+
+		sql, args, err = Insert(user).Columns(id, tenantCol, name).Values(int64(1), int64(7), "a").
+			OnConflictKey(id).DoNothing().Tenant(int64(7)).ToSql(gooq.DialectDM)
+		t.AssertNE(err, nil)
+		t.Assert(err.Error(), wantErr)
+		t.Assert(sql, "")
+		t.Assert(len(args), 0)
+
+		sql, args, err = Insert(user).Columns(id, tenantCol, name).Values(int64(1), int64(7), "a").
+			OnConflictKey(tenantCol, id).DoNothing().Tenant(int64(7)).ToSql(gooq.DialectDM)
+		t.AssertNil(err)
+		t.Assert(sql, `MERGE INTO "USER" T1 USING (SELECT ? AS "ID", ? AS "TENANT_ID", ? AS "NAME" FROM DUAL) T2 ON (T1."TENANT_ID" = T2."TENANT_ID" AND T1."ID" = T2."ID") WHEN NOT MATCHED THEN INSERT("ID", "TENANT_ID", "NAME") VALUES (T2."ID", T2."TENANT_ID", T2."NAME")`)
+		t.AssertEQ(args, []any{int64(1), int64(7), "a"})
+
+		mysqlSQL := "INSERT INTO `user` (`tenant_id`, `name`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `name` = ?"
+		for _, dialect := range []gooq.Dialect{gooq.DialectMySQL, gooq.DialectMariaDB, gooq.DialectTiDB, gooq.DialectOceanBase} {
+			sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(2), "a").
+				OnConflictKey(name).DoUpdate(name, "Bob").Tenant(int64(2)).ToSql(dialect)
+			t.AssertNil(err)
+			t.Assert(sql, mysqlSQL)
+			t.AssertEQ(args, []any{int64(2), "a", "Bob"})
+		}
+
+		sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(7), "a").
+			DoNothing().Tenant(int64(7)).ToSql(gooq.DialectMySQL)
+		t.AssertNil(err)
+		t.Assert(sql, "INSERT IGNORE INTO `user` (`tenant_id`, `name`) VALUES (?, ?)")
+		t.AssertEQ(args, []any{int64(7), "a"})
+
+		sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(2), "a").
+			OnConflictKey(name).DoUpdate(name, "Bob").Tenant(int64(2)).ToSql(gooq.DialectGaussDB)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("tenant_id", "name") VALUES ($1, $2) ON DUPLICATE KEY UPDATE "name" = $3`)
+		t.AssertEQ(args, []any{int64(2), "a", "Bob"})
+
+		dict := plainTable("dict")
+		dictName := gooq.NewFieldAt[string](dict, "name")
+		sql, args, err = Insert(dict).Columns(gooq.NewFieldAt[int64](dict, "id"), dictName).Values(int64(1), "a").
+			OnConflictKey(dictName).DoUpdate(dictName, "b").ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "dict" ("id", "name") VALUES ($1, $2) ON CONFLICT ("name") DO UPDATE SET "name" = $3`)
+		t.AssertEQ(args, []any{int64(1), "a", "b"})
+
+		sql, args, err = Insert(user).Columns(name).Values("a").
+			OnConflictKey(name).DoUpdate(name, "b").UnTenant().ToSql(gooq.DialectPgsql)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("name") VALUES ($1) ON CONFLICT ("name") DO UPDATE SET "name" = $2`)
+		t.AssertEQ(args, []any{"a", "b"})
+
+		sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(2), "a").
+			OnConflictKey(user.Field("TENANT_ID"), name).DoUpdate(name, "Bob").Tenant(int64(2)).ToSql(gooq.DialectSQLite)
+		t.AssertNil(err)
+		t.Assert(sql, `INSERT INTO "user" ("tenant_id", "name") VALUES (?, ?) ON CONFLICT ("TENANT_ID", "name") DO UPDATE SET "name" = ?`)
+		t.AssertEQ(args, []any{int64(2), "a", "Bob"})
+
+		sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(2), "a").
+			OnConflictKey(user.Field("TENANT_ID"), name).DoUpdate(name, "Bob").Tenant(int64(2)).ToSql(gooq.DialectDM)
+		t.AssertNil(err)
+		t.Assert(sql, `MERGE INTO "USER" T1 USING (SELECT ? AS "TENANT_ID", ? AS "NAME" FROM DUAL) T2 ON (T1."TENANT_ID" = T2."TENANT_ID" AND T1."NAME" = T2."NAME") WHEN NOT MATCHED THEN INSERT("TENANT_ID", "NAME") VALUES (T2."TENANT_ID", T2."NAME") WHEN MATCHED THEN UPDATE SET T1."NAME" = ?`)
+		t.AssertEQ(args, []any{int64(2), "a", "Bob"})
+
+		sql, args, err = Insert(user).Columns(tenantCol, name).Values(int64(2), "a").
+			OnConflictKey(user.Field("TENANT_ID"), name).DoUpdate(name, "Bob").Tenant(int64(2)).ToSql(gooq.DialectPgsql)
+		t.AssertNE(err, nil)
+		t.Assert(err.Error(), wantErr)
+		t.Assert(sql, "")
+		t.Assert(len(args), 0)
 	})
 }

@@ -145,8 +145,39 @@ func (b *DMLBuilder) rejectTenantInsertFrom(rc *gooq.RenderContext) error {
 	return nil
 }
 
+// upsertConflictTargetDialect 表示该方言的 upsert 使用显式冲突目标。
+type upsertConflictTargetDialect interface {
+	UpsertConflictTarget() bool
+}
+
 func (b *DMLBuilder) rejectTenantUpsert(rc *gooq.RenderContext) error {
-	if b.upsert == nil || b.upsert.doNothing {
+	if b.upsert == nil || b.untenant {
+		return nil
+	}
+	var field *gooq.FieldMeta
+	if b.table != nil && b.table.Meta() != nil {
+		field = b.table.Meta().TenantField()
+	}
+	if field == nil {
+		return nil
+	}
+	if rc != nil && rc.Spec() != nil {
+		if target, ok := rc.Spec().(upsertConflictTargetDialect); ok && target.UpsertConflictTarget() {
+			found := false
+			for _, col := range b.upsert.conflictCols {
+				if sameColumn(rc, field.ColumnName, col) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf(
+					"gooq: upsert into tenant table %q requires tenant column %q in OnConflictKey",
+					b.table.TableName(), field.ColumnName)
+			}
+		}
+	}
+	if b.upsert.doNothing {
 		return nil
 	}
 	seen := map[string]struct{}{}

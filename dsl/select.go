@@ -92,7 +92,7 @@ type SelectBuilder struct {
 	offset        int
 	distinct      bool
 	unscoped      bool // 绕过软删除自动条件。
-	untenant      bool // 绕过本层主表和 JOIN 的租户条件。
+	untenant      bool // 关掉这一层渲染出去的整棵查询树的租户过滤。
 	tenantIDs     []any
 	hasTenantIDs  bool
 	ctxTenant     any

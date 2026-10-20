@@ -92,6 +92,9 @@ func (SQLiteDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (strin
 	return renderConflict(rc, clause)
 }
 
+// UpsertConflictTarget 为 true：ON CONFLICT 使用调用方给出的冲突列。
+func (SQLiteDialect) UpsertConflictTarget() bool { return true }
+
 func (SQLiteDialect) RenderExcluded(rc *RenderContext, column string) string {
 	return "EXCLUDED." + rc.Quote(column)
 }
@@ -178,5 +181,3 @@ func (SQLiteDialect) RenderGroupConcat(in GroupConcatInput) (string, error) {
 	}
 	return fmt.Sprintf("GROUP_CONCAT(%s, %s)", in.FieldSQL, quoteLiteralStandard(separator)), nil
 }
-
-

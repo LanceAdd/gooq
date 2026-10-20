@@ -41,7 +41,7 @@ type DMLBuilder struct {
 	selectBuilder   *SelectBuilder  // INSERT ... SELECT 数据源。
 	conditions      []gooq.Expression
 	unscoped        bool
-	untenant        bool
+	untenant        bool // 关掉这一层渲染出去的整棵查询树的租户过滤。
 	tenantIDs       []any
 	hasTenantIDs    bool
 	ctxTenant       any

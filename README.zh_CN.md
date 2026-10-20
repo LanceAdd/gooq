@@ -644,11 +644,11 @@ gooq:
 
 租户值来自 `dsl.WithTenant(ctx, id)`，或这条构建器上的 `Tenant(id)`。`WithTenant` 每个请求只放一个值；`Tenant(ids...)` 只作用于这条语句，渲染成 `tenant_col IN (...)`。写路径（`INSERT`，以及 `UPDATE` 设置租户列）只接受单个值；给 `WithTenant` 传切片不会变成多租户，会按类型报错。`ToSql` 不读 ctx。执行时先把 ctx 里的值记到构建器上，再放进这次新建的 `RenderContext`。语句碰到租户表却没有值时返回错误，不生成 `IS NULL`。
 
-`Tenant(id)` 作用在这个构建器以及它里面渲染的查询上。内层构建器可以再写 `Tenant(other)` 或 `UnTenant()`。后调用的生效：`UnTenant().Tenant(7)` 会加条件，`Tenant(7).UnTenant()` 不加。`UnTenant()` 是这一层主表和 `JOIN` 的特权口子。嵌在里面的查询仍看见外层放进上下文的值。
+`Tenant(id)` 作用在这个构建器以及它里面渲染的查询上。内层构建器可以再写 `Tenant(other)` 或 `UnTenant()`。后调用的生效：`UnTenant().Tenant(7)` 会加条件，`Tenant(7).UnTenant()` 不加。不带参数的 `Tenant()` 只重新打开过滤。之前写过的 `Tenant(id)` 还在；没写过就用请求 ctx 里的值。`UnTenant()` 关掉这个构建器渲染出去的整棵查询树：主表、`JOIN`、子查询、CTE 和 `UNION` 分支都不加租户条件，也不因缺值报错。内层要过滤时，自己调用 `Tenant(id)`。
 
 `LEFT JOIN`、`LEFT JOIN LATERAL`、`INNER JOIN`、`INNER JOIN LATERAL`、`CROSS JOIN LATERAL` 保持原来的形状。一条语句碰到任意租户表，又写出 `RIGHT JOIN` 或 `FULL JOIN`，渲染直接报错。把这条连接改成 `LEFT JOIN`，或调用 `UnTenant()`。
 
-向租户表 `INSERT` 时必须写入租户列，而且值等于当前这一个租户值。库不自动补列。`INSERT ... SELECT` 必须逐项写出具名列，并且包含租户列。`Select().From(src)` 和 `Raw` 选择项在生成 SQL 前失败。`UnTenant()` 跳过这些检查。`UPDATE` 不能把目标表或任意 JOIN 进来的租户表的租户列改成另一个值。`INSERT ... SELECT` 只校验列清单，选出的值不做静态比较。`OnConflictKey` 不会自动加上租户列。`Unscoped()` 只跳过软删除，`UnTenant()` 只跳过租户，两者独立。
+向租户表 `INSERT` 时必须写入租户列，而且值等于当前这一个租户值。库不自动补列。`INSERT ... SELECT` 必须逐项写出具名列，并且包含租户列。`Select().From(src)` 和 `Raw` 选择项在生成 SQL 前失败。`UnTenant()` 跳过这些检查。`UPDATE` 和 upsert 的赋值不要写租户列。写了的话，值必须等于当前租户；写成别的值、`NULL` 或表达式都会报错。`INSERT ... SELECT` 只校验列清单，选出的值不做静态比较。库不改写 `OnConflictKey`。PostgreSQL、SQLite 和达梦上，租户表的 `OnConflictKey` 必须包含租户列，`DoUpdate` 和 `DoNothing` 都查。MySQL、MariaDB、TiDB、OceanBase 和 GaussDB 由数据库选择唯一键，租户表的每个唯一键都要包含租户列。`Unscoped()` 只跳过软删除，`UnTenant()` 只跳过租户，两者独立。
 
 `CacheOption.Name` 原样作为缓存键。名字里要自己带上租户。没有 `Name` 时，键是 SQL 和参数的哈希，不同租户不会共用一条缓存。
 

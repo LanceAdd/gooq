@@ -79,6 +79,9 @@ func (DMDialect) RenderUpsert(*RenderContext, UpsertClause) (string, error) {
 	return "", fmt.Errorf("gooq: dialect %s renders upsert as MERGE", DialectDM)
 }
 
+// UpsertConflictTarget 为 true：MERGE 的 ON 使用调用方给出的冲突列。
+func (DMDialect) UpsertConflictTarget() bool { return true }
+
 // RenderExcluded 渲染 MERGE 源表里的本次插入列。
 func (DMDialect) RenderExcluded(rc *RenderContext, column string) string {
 	return "T2." + rc.Quote(column)

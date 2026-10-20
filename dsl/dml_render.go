@@ -15,7 +15,11 @@ func (b *DMLBuilder) installShard(rc *gooq.RenderContext) {
 
 func (b *DMLBuilder) installTenant(rc *gooq.RenderContext) {
 	seedTenant(rc, b.hasCtxTenant, b.ctxTenant)
-	if b.untenant || !b.hasTenantIDs {
+	if b.untenant {
+		rc.PushTenantDisabled()
+		return
+	}
+	if !b.hasTenantIDs {
 		return
 	}
 	rc.PushTenant(b.tenantIDs)
@@ -429,7 +433,7 @@ func (b *DMLBuilder) renderSoftDelete(rc *gooq.RenderContext, softField *gooq.Fi
 }
 
 func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
-	checkTenantJoins(rc, b.untenant, b.table, b.joins)
+	checkTenantJoins(rc, b.table, b.joins)
 	var parts []string
 	for _, c := range b.conditions {
 		condSQL := rc.Render(c)
@@ -437,14 +441,14 @@ func (b *DMLBuilder) renderWhere(rc *gooq.RenderContext) string {
 			parts = append(parts, parenthesizeSQL(condSQL))
 		}
 	}
-	if tenant := b.tenantSQL(rc, b.table); tenant != "" {
+	if tenant := tenantPredicate(rc, b.table); tenant != "" {
 		parts = append(parts, tenant)
 	}
 	for _, j := range b.joins {
 		if !joinSoftDeleteInWhere(j.joinType) {
 			continue
 		}
-		if tenant := b.tenantSQL(rc, j.table); tenant != "" {
+		if tenant := tenantPredicate(rc, j.table); tenant != "" {
 			parts = append(parts, tenant)
 		}
 	}
@@ -493,7 +497,7 @@ func (b *DMLBuilder) renderJoinCond(rc *gooq.RenderContext, j *joinClause) strin
 		}
 	}
 	if !joinSoftDeleteInWhere(j.joinType) {
-		if tenant := b.tenantSQL(rc, j.table); tenant != "" {
+		if tenant := tenantPredicate(rc, j.table); tenant != "" {
 			ons = append(ons, tenant)
 		}
 	}

@@ -12,6 +12,10 @@ type GaussDBDialect struct {
 
 func (GaussDBDialect) Name() Dialect { return DialectGaussDB }
 
+// UpsertConflictTarget 为 false：openGauss 写的是 ON DUPLICATE KEY UPDATE，不读冲突目标。
+// 嵌入的 PostgresDialect 返回 true，这里必须盖住。
+func (GaussDBDialect) UpsertConflictTarget() bool { return false }
+
 // RenderUpsert 渲染 ON DUPLICATE KEY UPDATE。
 // 冲突列不写进 SQL，由主键或唯一键决定。DoNothing 没有对应子句。
 func (GaussDBDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (string, error) {

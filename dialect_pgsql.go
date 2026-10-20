@@ -70,6 +70,9 @@ func (PostgresDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (str
 	return renderConflict(rc, clause)
 }
 
+// UpsertConflictTarget 为 true：ON CONFLICT 使用调用方给出的冲突列。
+func (PostgresDialect) UpsertConflictTarget() bool { return true }
+
 func (PostgresDialect) RenderExcluded(rc *RenderContext, column string) string {
 	return "EXCLUDED." + rc.Quote(column)
 }
