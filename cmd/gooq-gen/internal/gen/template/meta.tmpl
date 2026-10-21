@@ -1,0 +1,22 @@
+// ==========================================================================
+// Code generated and maintained by gooq-gen. DO NOT EDIT.
+// ==========================================================================
+
+package {{.TplPackageName}}
+{{if .TplGooqImport}}
+import (
+{{.TplGooqImport}}
+)
+{{end}}
+var {{.TplTableNameCamelCase}}Meta = &{{.TplGooqRef}}TableMeta{
+	TableName: "{{.TplTableName}}",
+	Schema:    "{{.TplTableSchema}}",
+{{- if .TplShardNames}}
+	ShardNames: []string{
+{{.TplShardNames}}
+	},
+{{- end}}
+	Fields: []{{.TplGooqRef}}FieldMeta{
+{{.TplGooqFieldMetas}}
+	},
+}

@@ -33,7 +33,9 @@ type Input struct {
 const (
 	dirPathTable    = "table"
 	tplFileTable    = "table.tmpl"
+	tplFileMeta     = "meta.tmpl"
 	tplFileSharding = "sharding.tmpl"
+	tplFileRegister = "register.tmpl"
 	tplFileModel    = "model.tmpl"
 	tplFileRecord   = "record.tmpl"
 	hackDirName     = "hack"
@@ -89,12 +91,14 @@ func embeddedTemplate(name string) string {
 	return string(content)
 }
 
-// Init 在当前工作目录创建 hack/gooq.yaml，以及 hack/template 下的 table/model/record 模板；已存在的文件不覆盖。
+// Init 在当前工作目录创建 hack/gooq.yaml，以及 hack/template 下的全部模板；已存在的文件不覆盖。
 func Init() {
 	for _, f := range []struct{ path, content string }{
 		{gfile.Join(hackDirName, configFileName), initConfigContent},
 		{gfile.Join(hackDirName, tplDirName, tplFileTable), embeddedTemplate(tplFileTable)},
+		{gfile.Join(hackDirName, tplDirName, tplFileMeta), embeddedTemplate(tplFileMeta)},
 		{gfile.Join(hackDirName, tplDirName, tplFileSharding), embeddedTemplate(tplFileSharding)},
+		{gfile.Join(hackDirName, tplDirName, tplFileRegister), embeddedTemplate(tplFileRegister)},
 		{gfile.Join(hackDirName, tplDirName, tplFileModel), embeddedTemplate(tplFileModel)},
 		{gfile.Join(hackDirName, tplDirName, tplFileRecord), embeddedTemplate(tplFileRecord)},
 	} {

@@ -56,7 +56,7 @@ gooq:
 | 命令 | 说明 |
 | --- | --- |
 | `gooq-gen` | 在输出目录生成 `table/` 和 `model/`。 |
-| `gooq-gen init` | 生成 `hack/gooq.yaml` 和 `hack/template/{table,sharding,model,record}.tmpl`；已存在的文件不覆盖。 |
+| `gooq-gen init` | 生成 `hack/gooq.yaml` 和 `hack/template/{table,meta,sharding,register,model,record}.tmpl`；已存在的文件不覆盖。 |
 | `gooq-gen tables init` | 生成 `hack/gooq.tables.yaml`，把库里的全部表写进 `single`，`groups: []`；需要已有 `hack` 目录（`gooq-gen init` 会创建），文件已存在时拒绝覆盖。 |
 | `gooq-gen tables check` | 检查 `hack/gooq.tables.yaml` 与数据库是否一致。一致时静默退出 0；否则打印报告并退出非 0。 |
 | `gooq-gen tables diff` | 报告库里新增的表和文件里已不用的表。有差异时退出非 0。 |
@@ -88,7 +88,7 @@ groups:
       - "order_01"
 ```
 
-- `groups[].name` 同时作为生成的类型名、文件名和 `TableMeta.TableName`。
+- `groups[].name` 同时作为生成的类型名、文件名前缀和 `TableMeta.TableName`。
 - 组里第一张表提供列结构；组内每张表都必须与它一致：列名、顺序、类型、可空、主键、自增、唯一。
 - 每张物理表名必须包含所属组名，比较区分大小写。
 - `groups[].name` 不能与 `single` 里的表同名。
@@ -108,7 +108,9 @@ gooq-gen                 # 重新生成
 
 ## 产物
 
-以 `user` 为例，`table/user.go` 包含：
+以 `user` 为例，生成文件按用途拆开。
+
+`table/user.table.go` 包含类型对象和查询辅助方法：
 
 ```go
 type UserTable struct {
@@ -119,11 +121,6 @@ type UserTable struct {
     // ...
 }
 
-var UserMeta = &gooq.TableMeta{
-    TableName: "user",
-    Fields:    []gooq.FieldMeta{ /* ... */ },
-}
-
 func newUserTable(meta *gooq.TableMeta, alias string) *UserTable { /* ... */ }
 
 var User = newUserTable(UserMeta, "")
@@ -132,7 +129,16 @@ func (t *UserTable) As(alias string) *UserTable { /* ... */ }
 func (t *UserTable) Clone() *UserTable          { /* ... */ }
 ```
 
-分片组还会生成：
+`table/user.meta.go` 包含静态元数据：
+
+```go
+var UserMeta = &gooq.TableMeta{
+    TableName: "user",
+    Fields:    []gooq.FieldMeta{ /* ... */ },
+}
+```
+
+分片组还会生成 `table/user.sharding.go`：
 
 ```go
 func RegisterUserSharding(rule gooq.ShardingRule) { /* ... */ }
@@ -143,7 +149,7 @@ func (t *UserTable) ShardBy(value any) *UserTable    { /* ... */ }
 
 `UserMeta.ShardNames` 记录生成时存在的物理分表。`table/gooq_sharding.go` 定义 `RegisterSharding(rule)`，一次给所有分片逻辑表设置同一个规则。
 
-`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`NewUserRecord().SetName("john")` 标记要写入的列，交给 `dsl.Insert(...).ValuesOf`；可空列另外生成 `SetXxxNull`。
+`model/user.model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/user.record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`NewUserRecord().SetName("john")` 标记要写入的列，交给 `dsl.Insert(...).ValuesOf`；可空列另外生成 `SetXxxNull`。
 
 ## 租户
 
@@ -163,7 +169,7 @@ gooq:
 
 ## 模板
 
-运行 `gooq-gen init` 生成 `hack/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl`。生成时优先使用这些文件，缺失时回退内置模板。修改后重新运行即可生效；删除其中一个即回退。`init` 不覆盖已有文件。
+运行 `gooq-gen init` 生成 `hack/template/table.tmpl`、`meta.tmpl`、`sharding.tmpl`、`register.tmpl`、`model.tmpl`、`record.tmpl`。`table.tmpl` 生成 `<逻辑表>.table.go`，`meta.tmpl` 生成 `<逻辑表>.meta.go`，`sharding.tmpl` 给分片表生成 `<逻辑表>.sharding.go`，`register.tmpl` 生成包级 `gooq_sharding.go`。生成时优先使用这些文件，缺失时回退内置模板。修改后重新运行即可生效；删除其中一个即回退。`init` 不覆盖已有文件。
 
 ## 驱动
 

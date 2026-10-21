@@ -3,14 +3,30 @@
 // ==========================================================================
 
 package {{.TplPackageName}}
-
+{{if .TplGooqImport}}
 import (
 {{.TplGooqImport}}
 )
-
-func RegisterSharding(rule {{.TplGooqRef}}ShardingRule) {
+{{end}}
+func Register{{.TplTableNameCamelCase}}Sharding(rule {{.TplGooqRef}}ShardingRule) {
 	if rule == nil {
 		panic("gooq: sharding rule is required")
 	}
-{{.TplAssignments}}
+	{{.TplTableNameCamelCase}}Meta.Sharding = rule
+}
+
+func (t *{{.TplTableNameCamelCase}}Table) Physical(name string) *{{.TplTableNameCamelCase}}Table {
+	if name == "" {
+		panic("gooq: Physical requires a non-empty table name")
+	}
+	meta := *t.Meta()
+	meta.TableName = name
+	meta.Sharding = nil
+	return new{{.TplTableNameCamelCase}}Table(&meta, t.AliasName())
+}
+
+func (t *{{.TplTableNameCamelCase}}Table) ShardBy(value any) *{{.TplTableNameCamelCase}}Table {
+	next := new{{.TplTableNameCamelCase}}Table(t.Meta(), t.AliasName())
+	next.TableBase.SetShard(value)
+	return next
 }

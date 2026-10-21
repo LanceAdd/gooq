@@ -96,49 +96,52 @@ func TestGen_Sqlite(t *testing.T) {
 			Path: genPath,
 		})
 
-		// gooq table 产物。
-		generated := filepath.Join(genPath, "table", "user.go")
-		t.Assert(gfile.Exists(generated), true)
-		content := gfile.GetContents(generated)
+		// gooq table 产物：表对象和元数据分开成文件。
+		tableFile := filepath.Join(genPath, "table", "user.table.go")
+		metaFile := filepath.Join(genPath, "table", "user.meta.go")
+		t.Assert(gfile.Exists(tableFile), true)
+		t.Assert(gfile.Exists(metaFile), true)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "table", "user.go")), false)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "table", "user.sharding.go")), false)
+		tableContent := gfile.GetContents(tableFile)
+		metaContent := gfile.GetContents(metaFile)
 
 		// 类型化表对象骨架。
-		t.Assert(gstr.Contains(content, `type UserTable struct {`), true)
-		t.Assert(gstr.Contains(content, `*gooq.TableBase`), true)
+		t.Assert(gstr.Contains(tableContent, `type UserTable struct {`), true)
+		t.Assert(gstr.Contains(tableContent, `*gooq.TableBase`), true)
 		// 全列由 TableBase.AllFields() 从元数据派生，生成代码不重复维护列名列表。
-		t.Assert(gstr.Contains(content, `ALL_FIELDS`), false)
+		t.Assert(gstr.Contains(tableContent, `ALL_FIELDS`), false)
 
 		// 字段定义（Go 类型映射：sqlite INTEGER → int，datetime → time.Time）。
-		t.Assert(gstr.Contains(content, `gooq.Field[int]`), true)
-		t.Assert(gstr.Contains(content, `gooq.Field[string]`), true)
-		t.Assert(gstr.Contains(content, `gooq.Field[time.Time]`), true)
+		t.Assert(gstr.Contains(tableContent, `gooq.Field[int]`), true)
+		t.Assert(gstr.Contains(tableContent, `gooq.Field[string]`), true)
+		t.Assert(gstr.Contains(tableContent, `gooq.Field[time.Time]`), true)
 
-		// 全局表对象与元数据（软删标记由列名约定识别，与驱动无关）。
-		t.Assert(gstr.Contains(content, `var User = newUserTable(UserMeta, "")`), true)
-		// 没有 hack/gooq.tables.yaml 时不生成任何分片件。
-		t.Assert(gstr.Contains(content, "Sharding"), false)
-		t.Assert(gstr.Contains(content, `gooq.TableMeta{`), true)
-		t.Assert(gstr.Contains(content, `TableName: "user"`), true)
-		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalTypeInt`), true)
-		t.Assert(gstr.Contains(content, `SoftDelete: true`), true)
+		// 全局表对象与 As/Clone；没有分片组时不生成分片文件。
+		t.Assert(gstr.Contains(tableContent, `var User = newUserTable(UserMeta, "")`), true)
+		t.Assert(gstr.Contains(tableContent, "Sharding"), false)
+		t.Assert(gstr.Contains(tableContent, `t.Id = gooq.NewFieldAt[int](t.TableBase, "id")`), true)
+		t.Assert(gstr.Contains(tableContent, `t.Alias = gooq.NewFieldAt[string](t.TableBase, "alias")`), true)
+		t.Assert(gstr.Contains(tableContent, `func (t *UserTable) As(alias string) *UserTable {`), true)
+		t.Assert(gstr.Contains(tableContent, `func (t *UserTable) Clone() *UserTable {`), true)
+		t.Assert(gstr.Contains(tableContent, `Code generated and maintained by gooq-gen. DO NOT EDIT.`), true)
 
-		// NewFieldAt 赋值与 As/Clone。
-		t.Assert(gstr.Contains(content, `t.Id = gooq.NewFieldAt[int](t.TableBase, "id")`), true)
-		t.Assert(gstr.Contains(content, `t.Alias = gooq.NewFieldAt[string](t.TableBase, "alias")`), true)
-		t.Assert(gstr.Contains(content, `func (t *UserTable) As(alias string) *UserTable {`), true)
-		t.Assert(gstr.Contains(content, `func (t *UserTable) Clone() *UserTable {`), true)
-
-		// FieldMeta 含软删列。
-		t.Assert(gstr.Contains(content, `"deleted_at"`), true)
-
-		// 生成的文件头标识。
-		t.Assert(gstr.Contains(content, `Code generated and maintained by gooq-gen. DO NOT EDIT.`), true)
+		// 元数据单独成文件（软删标记由列名约定识别，与驱动无关）。
+		t.Assert(gstr.Contains(metaContent, `var UserMeta = &gooq.TableMeta{`), true)
+		t.Assert(gstr.Contains(metaContent, `TableName: "user"`), true)
+		t.Assert(gstr.Contains(metaContent, `LocalType: gooq.LocalTypeInt`), true)
+		t.Assert(gstr.Contains(metaContent, `SoftDelete: true`), true)
+		t.Assert(gstr.Contains(metaContent, `"deleted_at"`), true)
+		t.Assert(gstr.Contains(metaContent, "ShardNames"), false)
 
 		// 普通模型带 json/orm 标签。写入记录单独成文件，可空列提供 SetXxxNull。
-		modelFile := filepath.Join(genPath, "model", "user_model.go")
-		recordFile := filepath.Join(genPath, "model", "user_record.go")
+		modelFile := filepath.Join(genPath, "model", "user.model.go")
+		recordFile := filepath.Join(genPath, "model", "user.record.go")
 		t.Assert(gfile.Exists(modelFile), true)
 		t.Assert(gfile.Exists(recordFile), true)
 		t.Assert(gfile.Exists(filepath.Join(genPath, "model", "user.go")), false)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "model", "user_model.go")), false)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "model", "user_record.go")), false)
 		modelContent := gfile.GetContents(modelFile)
 		t.Assert(gstr.Contains(modelContent, `type UserModel struct {`), true)
 		t.Assert(gstr.Contains(modelContent, "`json:\"name\" orm:\"name\"`"), true)
@@ -210,29 +213,39 @@ func TestGen_Sharding_Sqlite(t *testing.T) {
 			TablesFile: yaml,
 		})
 
-		generated := filepath.Join(genPath, "table", "user.go")
-		t.Assert(gfile.Exists(generated), true)
+		tableFile := filepath.Join(genPath, "table", "user.table.go")
+		metaFile := filepath.Join(genPath, "table", "user.meta.go")
+		shardingFile := filepath.Join(genPath, "table", "user.sharding.go")
+		t.Assert(gfile.Exists(tableFile), true)
+		t.Assert(gfile.Exists(metaFile), true)
+		t.Assert(gfile.Exists(shardingFile), true)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "table", "user.go")), false)
 		t.Assert(gfile.Exists(filepath.Join(genPath, "table", "user_00.go")), false)
 		t.Assert(gfile.Exists(filepath.Join(genPath, "table", "user_01.go")), false)
-		content := gfile.GetContents(generated)
-		t.Assert(gstr.Contains(content, `func RegisterUserSharding(rule gooq.ShardingRule) {`), true)
-		t.Assert(gstr.Contains(content, `UserMeta.Sharding = rule`), true)
-		t.Assert(gstr.Contains(content, `TableName: "user"`), true)
-		t.Assert(gstr.Contains(content, `ShardNames: []string{`), true)
-		t.Assert(gstr.Contains(content, `"user_00",`), true)
-		t.Assert(gstr.Contains(content, `"user_01",`), true)
-		t.Assert(gstr.Contains(content, "NewShardingSlot"), false)
-		t.Assert(gstr.Contains(content, `func (t *UserTable) Physical(name string) *UserTable {`), true)
-		t.Assert(gstr.Contains(content, `func (t *UserTable) ShardBy(value any) *UserTable {`), true)
+		tableContent := gfile.GetContents(tableFile)
+		metaContent := gfile.GetContents(metaFile)
+		shardingContent := gfile.GetContents(shardingFile)
+
+		t.Assert(gstr.Contains(shardingContent, `func RegisterUserSharding(rule gooq.ShardingRule) {`), true)
+		t.Assert(gstr.Contains(shardingContent, `UserMeta.Sharding = rule`), true)
+		t.Assert(gstr.Contains(shardingContent, `func (t *UserTable) Physical(name string) *UserTable {`), true)
+		t.Assert(gstr.Contains(shardingContent, `func (t *UserTable) ShardBy(value any) *UserTable {`), true)
+		t.Assert(gstr.Contains(shardingContent, `func (t *UserTable) Named(name string) *UserTable {`), false)
+
+		t.Assert(gstr.Contains(metaContent, `TableName: "user"`), true)
+		t.Assert(gstr.Contains(metaContent, `ShardNames: []string{`), true)
+		t.Assert(gstr.Contains(metaContent, `"user_00",`), true)
+		t.Assert(gstr.Contains(metaContent, `"user_01",`), true)
+		t.Assert(gstr.Contains(tableContent, `type UserTable struct {`), true)
+		t.Assert(gstr.Contains(tableContent, "Sharding"), false)
+
 		register := gfile.GetContents(filepath.Join(genPath, "table", "gooq_sharding.go"))
 		t.Assert(gstr.Contains(register, `func RegisterSharding(rule gooq.ShardingRule) {`), true)
 		t.Assert(gstr.Contains(register, `UserMeta.Sharding = rule`), true)
-		t.Assert(gstr.Contains(content, `func (t *UserTable) Named(name string) *UserTable {`), false)
-		t.Assert(gstr.Contains(content, `type UserTable struct {`), true)
 
 		// 模型同样只生成逻辑表。
-		t.Assert(gfile.Exists(filepath.Join(genPath, "model", "user_model.go")), true)
-		t.Assert(gfile.Exists(filepath.Join(genPath, "model", "user_00_model.go")), false)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "model", "user.model.go")), true)
+		t.Assert(gfile.Exists(filepath.Join(genPath, "model", "user_00.model.go")), false)
 	})
 }
 
@@ -276,8 +289,9 @@ func TestGen_ConfigTablesCheckIgnore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run with dynamic shard failed: %v\n%s", err, out)
 		}
-		t.Assert(gfile.Exists(filepath.Join(workDir, "out", "table", "user.go")), true)
-		t.Assert(gfile.Exists(filepath.Join(workDir, "out", "table", "user_2.go")), false)
+		t.Assert(gfile.Exists(filepath.Join(workDir, "out", "table", "user.table.go")), true)
+		t.Assert(gfile.Exists(filepath.Join(workDir, "out", "table", "user_2.table.go")), false)
+		t.Assert(gfile.Exists(filepath.Join(workDir, "out", "table", "user_2.meta.go")), false)
 	})
 }
 
@@ -432,15 +446,15 @@ func TestGenerateSpecialTypes(t *testing.T) {
 			{Name: "span", LocalType: gooq.LocalTypeString},
 			{Name: "email", LocalType: gooq.LocalTypeString, Unique: true},
 		}
-		content, err := generateTableContent(context.Background(), database, tableSpec{Physical: "sample", Logical: "sample"}, "table", columns, tenantSettings{})
+		tableContent, metaContent, _, err := generateTableContents(context.Background(), database, tableSpec{Physical: "sample", Logical: "sample"}, "table", columns, tenantSettings{})
 		t.AssertNil(err)
-		t.Assert(gstr.Contains(content, "gooq.Field[string]"), true)
-		t.Assert(gstr.Contains(content, `LocalType: gooq.LocalTypeDecimal`), true)
-		t.Assert(gstr.Contains(content, "gooq.Field[[]string]"), true)
-		t.Assert(gstr.Contains(content, "gooq.Field[[]uuid.UUID]"), true)
-		t.Assert(gstr.Contains(content, `"github.com/google/uuid"`), true)
-		t.Assert(gstr.Contains(content, "Unique: true"), true)
-		t.Assert(gstr.Contains(content, "gooq.Field[float64]"), false)
+		t.Assert(gstr.Contains(tableContent, "gooq.Field[string]"), true)
+		t.Assert(gstr.Contains(metaContent, `LocalType: gooq.LocalTypeDecimal`), true)
+		t.Assert(gstr.Contains(tableContent, "gooq.Field[[]string]"), true)
+		t.Assert(gstr.Contains(tableContent, "gooq.Field[[]uuid.UUID]"), true)
+		t.Assert(gstr.Contains(tableContent, `"github.com/google/uuid"`), true)
+		t.Assert(gstr.Contains(metaContent, "Unique: true"), true)
+		t.Assert(gstr.Contains(tableContent, "gooq.Field[float64]"), false)
 
 		modelContent, recordContent, err := generateModelContent(context.Background(), "sample", "model", columns)
 		t.AssertNil(err)
@@ -469,6 +483,9 @@ func TestInit(t *testing.T) {
 
 		cfgPath := filepath.Join(tmpDir, "hack", "gooq.yaml")
 		tplPath := filepath.Join(tmpDir, "hack", "template", "table.tmpl")
+		metaPath := filepath.Join(tmpDir, "hack", "template", "meta.tmpl")
+		shardingPath := filepath.Join(tmpDir, "hack", "template", "sharding.tmpl")
+		registerPath := filepath.Join(tmpDir, "hack", "template", "register.tmpl")
 		modelPath := filepath.Join(tmpDir, "hack", "template", "model.tmpl")
 		recordPath := filepath.Join(tmpDir, "hack", "template", "record.tmpl")
 
@@ -479,6 +496,9 @@ func TestInit(t *testing.T) {
 		}
 		t.Assert(gfile.Exists(cfgPath), true)
 		t.Assert(gfile.Exists(tplPath), true)
+		t.Assert(gfile.Exists(metaPath), true)
+		t.Assert(gfile.Exists(shardingPath), true)
+		t.Assert(gfile.Exists(registerPath), true)
 		t.Assert(gfile.Exists(modelPath), true)
 		t.Assert(gfile.Exists(recordPath), true)
 		cfgContent := gfile.GetContents(cfgPath)
@@ -487,6 +507,9 @@ func TestInit(t *testing.T) {
 		t.Assert(gstr.Contains(cfgContent, "path: internal"), true)
 		t.Assert(gstr.Contains(cfgContent, "ignore:"), true)
 		t.Assert(gstr.Contains(gfile.GetContents(tplPath), "TableBase"), true)
+		t.Assert(gstr.Contains(gfile.GetContents(metaPath), "TableMeta"), true)
+		t.Assert(gstr.Contains(gfile.GetContents(shardingPath), "ShardBy"), true)
+		t.Assert(gstr.Contains(gfile.GetContents(registerPath), "RegisterSharding"), true)
 
 		// 二次 init：已存在文件不覆盖。
 		t.AssertNil(gfile.PutContents(cfgPath, "# CUSTOM_CONFIG\n"))
@@ -517,12 +540,6 @@ func TestFieldNames(t *testing.T) {
 	}
 	if _, err = goFieldName("physical", tableConflicts(true), map[string]string{}); err == nil {
 		t.Fatal("sharded table accepted Physical")
-	}
-	if _, err = generatedTableFile("gooq_sharding"); err == nil || !strings.Contains(err.Error(), "gooq_sharding") {
-		t.Fatalf("file err=%v", err)
-	}
-	if fileName, err := generatedTableFile("sharding"); err != nil || fileName != "sharding" {
-		t.Fatalf("sharding file=%s err=%v", fileName, err)
 	}
 	if !isSoftDeleteColumn("DELETED_AT") || !isSoftDeleteColumn("deletedAt") || !isSoftDeleteColumn("delete_at") {
 		t.Fatal("soft delete column was not recognized")
@@ -571,7 +588,7 @@ func TestGen_Config(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run with config failed: %v\n%s", err, out)
 		}
-		generated := filepath.Join(workDir, "out", "table", "user.go")
+		generated := filepath.Join(workDir, "out", "table", "user.table.go")
 		t.Assert(gfile.Exists(generated), true)
 		t.Assert(gstr.Contains(gfile.GetContents(generated), `type UserTable struct {`), true)
 

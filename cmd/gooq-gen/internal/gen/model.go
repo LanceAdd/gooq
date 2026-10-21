@@ -33,8 +33,8 @@ func generateModelSingle(ctx context.Context, database *db.DB, spec tableSpec, d
 	if err != nil {
 		mlog.Fatalf(`generating gooq model content failed for table "%s": %+v`, spec.Logical, err)
 	}
-	writeGenerated(filepath.Join(dirPath, fileName+"_model.go"), modelContent)
-	writeGenerated(filepath.Join(dirPath, fileName+"_record.go"), recordContent)
+	writeGenerated(filepath.Join(dirPath, fileName+".model.go"), modelContent)
+	writeGenerated(filepath.Join(dirPath, fileName+".record.go"), recordContent)
 }
 
 func generateModelContent(ctx context.Context, tableName, dirPath string, columns []db.Column) (string, string, error) {

@@ -32,25 +32,12 @@ func formatFieldName(fieldName string, nameCase FieldNameCase) string {
 	}
 }
 
-func generatedTableFile(logical string) (string, error) {
-	fileName := formatFileName(logical, "")
-	if fileName == "gooq_sharding" {
-		return "", fmt.Errorf("gooq: logical table %q generates file gooq_sharding.go", logical)
-	}
-	return fileName, nil
-}
-
 func formatFileName(fileName, nameCase string) string {
 	if nameCase == "" {
 		nameCase = string(gstr.Snake)
 	}
 	fileName = normalizeNameForCaseConvert(fileName)
-	fileName = gstr.Trim(gstr.CaseConvert(fileName, gstr.CaseTypeMatch(nameCase)), "-_.")
-	if len(fileName) > 5 && fileName[len(fileName)-5:] == "_test" {
-		// 表名含 "_test" 时加后缀，否则生成文件会被当成测试文件。
-		fileName += "_table"
-	}
-	return fileName
+	return gstr.Trim(gstr.CaseConvert(fileName, gstr.CaseTypeMatch(nameCase)), "-_.")
 }
 
 func normalizeNameForCaseConvert(name string) string {

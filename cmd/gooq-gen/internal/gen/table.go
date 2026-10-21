@@ -36,15 +36,19 @@ func generateTableSingle(ctx context.Context, database *db.DB, spec tableSpec, d
 	if err != nil {
 		mlog.Fatalf(`fetching tables fields failed for table "%s": %+v`, spec.Physical, err)
 	}
-	fileName, err := generatedTableFile(spec.Logical)
+	fileName := formatFileName(spec.Logical, "")
+	tableContent, metaContent, shardingContent, err := generateTableContents(ctx, database, spec, dirPathTable, columns, tenantCfg)
 	if err != nil {
 		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, spec.Logical, err)
 	}
-	tableContent, err := generateTableContent(ctx, database, spec, dirPathTable, columns, tenantCfg)
-	if err != nil {
-		mlog.Fatalf(`generating gooq table content failed for table "%s": %+v`, spec.Logical, err)
+	writeGenerated(gfile.Join(dirPathTable, fileName+".table.go"), tableContent)
+	writeGenerated(gfile.Join(dirPathTable, fileName+".meta.go"), metaContent)
+	shardingPath := gfile.Join(dirPathTable, fileName+".sharding.go")
+	if spec.Sharding {
+		writeGenerated(shardingPath, shardingContent)
+	} else if gfile.Exists(shardingPath) {
+		_ = gfile.Remove(shardingPath)
 	}
-	writeGenerated(gfile.Join(dirPathTable, fileName+".go"), tableContent)
 }
 
 func generateShardingRegister(specs []tableSpec, dirPathTable string) {
@@ -79,16 +83,16 @@ func generateShardingRegister(specs []tableSpec, dirPathTable string) {
 		"TplGooqImport":  tplGooqImport,
 		"TplAssignments": strings.Join(assigns, "\n"),
 	})
-	content, err := tplView.ParseContent(context.Background(), getTemplate(tplFileSharding))
+	content, err := tplView.ParseContent(context.Background(), getTemplate(tplFileRegister))
 	if err != nil {
 		mlog.Fatalf("generating sharding register failed: %+v", err)
 	}
 	writeGenerated(path, content)
 }
 
-func generateTableContent(
+func generateTableContents(
 	ctx context.Context, database *db.DB, spec tableSpec, dirPathTable string, columns []db.Column, tenantCfg tenantSettings,
-) (string, error) {
+) (string, string, string, error) {
 	var (
 		fieldsLines []string
 		metaLines   []string
@@ -104,14 +108,14 @@ func generateTableContent(
 	}
 	tenantCol, tenantErr := tenantColumn(spec.Logical, columns, tenantCfg)
 	if tenantErr != nil {
-		return "", tenantErr
+		return "", "", "", tenantErr
 	}
 	usedNames := map[string]string{}
 	for _, field := range columns {
 		fieldName := field.Name
 		camelName, nameErr := goFieldName(fieldName, tableConflicts(spec.Sharding), usedNames)
 		if nameErr != nil {
-			return "", nameErr
+			return "", "", "", nameErr
 		}
 
 		goType := tableFieldTypes(field, &hasStdTime, &hasUUID)
@@ -150,14 +154,12 @@ func generateTableContent(
 			shardLines = append(shardLines, fmt.Sprintf("\t\t%q,", name))
 		}
 	}
-	tplContent := getTemplate(tplFileTable)
 	tplPackageName := filepath.Base(dirPathTable)
 	tplGooqImport := `	"github.com/lanceadd/gooq"`
 	if gooqRef == "" {
 		tplGooqImport = ""
 	}
-	tplView.ClearAssigns()
-	tplView.Assigns(gview.Params{
+	params := gview.Params{
 		"TplPackageName":        tplPackageName,
 		"TplGooqRef":            gooqRef,
 		"TplGooqImport":         tplGooqImport,
@@ -170,8 +172,23 @@ func generateTableContent(
 		"TplGooqFieldMetas":     strings.Join(metaLines, "\n"),
 		"TplGooqFieldAssigns":   strings.Join(assignLines, "\n"),
 		"TplGooqImports":        strings.Join(imports, "\n"),
-	})
-	return tplView.ParseContent(ctx, tplContent)
+	}
+	tableContent, err := renderTemplate(ctx, tplFileTable, params)
+	if err != nil {
+		return "", "", "", err
+	}
+	metaContent, err := renderTemplate(ctx, tplFileMeta, params)
+	if err != nil {
+		return "", "", "", err
+	}
+	var shardingContent string
+	if spec.Sharding {
+		shardingContent, err = renderTemplate(ctx, tplFileSharding, params)
+		if err != nil {
+			return "", "", "", err
+		}
+	}
+	return tableContent, metaContent, shardingContent, nil
 }
 
 func tableFieldTypes(field db.Column, hasStdTime, hasUUID *bool) string {

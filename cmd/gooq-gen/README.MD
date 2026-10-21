@@ -56,7 +56,7 @@ gooq:
 | Command | Description |
 | --- | --- |
 | `gooq-gen` | Generate `table/` and `model/` into the output directory. |
-| `gooq-gen init` | Create `hack/gooq.yaml` and `hack/template/{table,sharding,model,record}.tmpl`. Existing files are never overwritten. |
+| `gooq-gen init` | Create `hack/gooq.yaml` and `hack/template/{table,meta,sharding,register,model,record}.tmpl`. Existing files are never overwritten. |
 | `gooq-gen tables init` | Create `hack/gooq.tables.yaml` with every database table under `single` and `groups: []`. Requires a `hack` directory (`gooq-gen init` creates it) and refuses to overwrite an existing file. |
 | `gooq-gen tables check` | Check that `hack/gooq.tables.yaml` matches the database. Silent and exits 0 when it matches; prints the report and exits non-zero otherwise. |
 | `gooq-gen tables diff` | Report tables added in the database or no longer listed in the file. Exits non-zero when there is a difference. |
@@ -88,7 +88,7 @@ groups:
       - "order_01"
 ```
 
-- `groups[].name` becomes the generated type and file name, and `TableMeta.TableName`.
+- `groups[].name` becomes the generated type name, the file base name, and `TableMeta.TableName`.
 - The first table in a group supplies the column definitions. Every table in the group must match it: column name, order, type, nullability, primary key, auto-increment, and uniqueness.
 - Every physical table name must contain its group name; the check is case-sensitive.
 - `groups[].name` and a `single` table cannot share a name.
@@ -108,7 +108,9 @@ gooq-gen                 # regenerate
 
 ## Generated output
 
-For `user`, `table/user.go` contains:
+For `user`, generation writes separate files.
+
+`table/user.table.go` contains the typed object and its query-time helpers:
 
 ```go
 type UserTable struct {
@@ -119,11 +121,6 @@ type UserTable struct {
     // ...
 }
 
-var UserMeta = &gooq.TableMeta{
-    TableName: "user",
-    Fields:    []gooq.FieldMeta{ /* ... */ },
-}
-
 func newUserTable(meta *gooq.TableMeta, alias string) *UserTable { /* ... */ }
 
 var User = newUserTable(UserMeta, "")
@@ -132,7 +129,16 @@ func (t *UserTable) As(alias string) *UserTable { /* ... */ }
 func (t *UserTable) Clone() *UserTable          { /* ... */ }
 ```
 
-A sharded group additionally generates:
+`table/user.meta.go` contains the static metadata:
+
+```go
+var UserMeta = &gooq.TableMeta{
+    TableName: "user",
+    Fields:    []gooq.FieldMeta{ /* ... */ },
+}
+```
+
+A sharded group also writes `table/user.sharding.go`:
 
 ```go
 func RegisterUserSharding(rule gooq.ShardingRule) { /* ... */ }
@@ -143,7 +149,7 @@ func (t *UserTable) ShardBy(value any) *UserTable    { /* ... */ }
 
 `UserMeta.ShardNames` records the physical tables that existed at generation time. `table/gooq_sharding.go` defines `RegisterSharding(rule)`, which applies one rule to every sharded logical table.
 
-`model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `NewUserRecord().SetName("john")` marks columns for `dsl.Insert(...).ValuesOf`; nullable columns also get `SetXxxNull`.
+`model/user.model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/user.record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `NewUserRecord().SetName("john")` marks columns for `dsl.Insert(...).ValuesOf`; nullable columns also get `SetXxxNull`.
 
 ## Tenant
 
@@ -163,7 +169,7 @@ Tenant column matching ignores case and underscores. Allowed types are `string`,
 
 ## Templates
 
-Run `gooq-gen init` to create `hack/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, and `record.tmpl`. Generation prefers these files and falls back to the embedded template. Edit and re-run to apply; delete one to fall back. `init` never overwrites existing files.
+Run `gooq-gen init` to create `hack/template/table.tmpl`, `meta.tmpl`, `sharding.tmpl`, `register.tmpl`, `model.tmpl`, and `record.tmpl`. `table.tmpl` renders `<logical>.table.go`, `meta.tmpl` renders `<logical>.meta.go`, `sharding.tmpl` renders `<logical>.sharding.go` for sharded tables, and `register.tmpl` renders the package-level `gooq_sharding.go`. Generation prefers these files and falls back to the embedded template. Edit and re-run to apply; delete one to fall back. `init` never overwrites existing files.
 
 ## Drivers
 

@@ -124,12 +124,12 @@ func TestGen_TenantFieldGenerated(t *testing.T) {
 		cfg, err := tenantSettingsFrom(TenantConfig{Column: "tenant_id"})
 		t.AssertNil(err)
 
-		content, err := generateTableContent(context.Background(), database, tableSpec{Physical: "user", Logical: "user"}, "table", columns, cfg)
+		_, metaContent, _, err := generateTableContents(context.Background(), database, tableSpec{Physical: "user", Logical: "user"}, "table", columns, cfg)
 		t.AssertNil(err)
-		t.Assert(gstr.Contains(content, "Tenant: true"), true)
+		t.Assert(gstr.Contains(metaContent, "Tenant: true"), true)
 
 		cfg.tables = map[string]string{"user": ""}
-		disabled, err := generateTableContent(context.Background(), database, tableSpec{Physical: "user", Logical: "user"}, "table", columns, cfg)
+		_, disabled, _, err := generateTableContents(context.Background(), database, tableSpec{Physical: "user", Logical: "user"}, "table", columns, cfg)
 		t.AssertNil(err)
 		t.Assert(gstr.Contains(disabled, "Tenant: true"), false)
 	})
@@ -151,7 +151,7 @@ func TestGenerate_TenantIgnoresCwd(t *testing.T) {
 
 		t.Chdir(root)
 		Generate(context.Background(), Input{Link: "sqlite::@file(" + filepath.ToSlash(dbPath) + ")", Path: outDir})
-		plain := gfile.GetContents(filepath.Join(outDir, "table", "user.go"))
+		plain := gfile.GetContents(filepath.Join(outDir, "table", "user.meta.go"))
 		t.Assert(gstr.Contains(plain, "Tenant: true"), false)
 
 		Generate(context.Background(), Input{
@@ -159,7 +159,7 @@ func TestGenerate_TenantIgnoresCwd(t *testing.T) {
 			Path:   outDir,
 			Tenant: TenantConfig{Column: "tenant_id"},
 		})
-		marked := gfile.GetContents(filepath.Join(outDir, "table", "user.go"))
+		marked := gfile.GetContents(filepath.Join(outDir, "table", "user.meta.go"))
 		t.Assert(gstr.Contains(marked, "Tenant: true"), true)
 	})
 }
