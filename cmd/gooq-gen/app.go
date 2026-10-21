@@ -53,33 +53,46 @@ type genInput struct {
 type genOutput struct{}
 
 func (c appCmd) Index(ctx context.Context, in genInput) (out *genOutput, err error) {
-	// 配置兜底：命令行未提供的参数从 hack/gooq.yaml 的 gooq.gen.table 节点读取。
+	// 配置兜底：命令行未提供的参数从 hack/gooq.yaml 的 gooq.gen 节点读取。
 	if g.Cfg().Available(ctx) {
 		if in.Link == "" {
-			if v, err := g.Cfg().Get(ctx, gen.ConfigKeyTableLink); err == nil && v != nil {
+			if v, err := g.Cfg().Get(ctx, gen.ConfigKeyGenLink); err == nil && v != nil {
 				in.Link = v.String()
 			}
 		}
 		if in.Path == "" {
-			if v, err := g.Cfg().Get(ctx, gen.ConfigKeyTablePath); err == nil && v != nil {
+			if v, err := g.Cfg().Get(ctx, gen.ConfigKeyGenPath); err == nil && v != nil {
 				in.Path = v.String()
 			}
-		}
-		if v, err := g.Cfg().Get(ctx, gen.ConfigKeyTableShardPattern); err == nil && v != nil && !v.IsEmpty() {
-			mlog.Print(`ignore gooq.gen.table.shardPattern; grouping is hack/gooq.tables.yaml`)
 		}
 	}
 	tenant, err := readTenantConfig(ctx)
 	if err != nil {
 		mlog.Fatalf("%+v", err)
 	}
+	check, err := readTablesCheckConfig(ctx)
+	if err != nil {
+		mlog.Fatalf("%+v", err)
+	}
 	gen.Generate(ctx, gen.Input{
-		Link:       in.Link,
-		Path:       in.Path,
-		TablesFile: gen.TablesFilePath(),
-		Tenant:     tenant,
+		Link:        in.Link,
+		Path:        in.Path,
+		TablesFile:  gen.TablesFilePath(),
+		Tenant:      tenant,
+		TablesCheck: check,
 	})
 	return
+}
+
+func readTablesCheckConfig(ctx context.Context) (gen.TablesCheckConfig, error) {
+	if !g.Cfg().Available(ctx) {
+		return gen.TablesCheckConfig{}, nil
+	}
+	value, err := g.Cfg().Get(ctx, gen.ConfigKeyTablesCheck)
+	if err != nil || value == nil || value.IsNil() {
+		return gen.TablesCheckConfig{}, err
+	}
+	return gen.ParseTablesCheckConfig(value.Val())
 }
 
 func readTenantConfig(ctx context.Context) (gen.TenantConfig, error) {
@@ -103,11 +116,15 @@ type tablesOutput struct{}
 
 func (c appCmd) Tables(ctx context.Context, in tablesInput) (out *tablesOutput, err error) {
 	if in.Link == "" && g.Cfg().Available(ctx) {
-		if v, err := g.Cfg().Get(ctx, "gooq.gen.table.link"); err == nil && v != nil {
+		if v, err := g.Cfg().Get(ctx, gen.ConfigKeyGenLink); err == nil && v != nil {
 			in.Link = v.String()
 		}
 	}
-	gen.RunTables(ctx, in.Link, in.Action)
+	check, err := readTablesCheckConfig(ctx)
+	if err != nil {
+		mlog.Fatalf("%+v", err)
+	}
+	gen.RunTables(ctx, in.Link, in.Action, check)
 	return
 }
 

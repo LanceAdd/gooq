@@ -28,7 +28,7 @@ gooq-gen init                                       # 可选：初始化 hack/go
 gooq-gen -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-一次生成所有表的 gooq 类型化表对象（`table/`）和 `model/`；存在 `hack/gooq.tables.yaml` 时，只生成其中列出的分组。每张表生成 `user_model.go`（`UserModel`）和 `user_record.go`（`UserRecord`）。`gooq-gen` 也可不传命令行参数，改为从 `hack/gooq.yaml` 的 `gooq.gen.table` 节点读取配置。详细配置、分片分组和租户设置见下面的 gooq-gen 章节。
+一次生成所有表的 gooq 类型化表对象（`table/`）和 `model/`；存在 `hack/gooq.tables.yaml` 时，只生成其中列出的分组。每张表生成 `user_model.go`（`UserModel`）和 `user_record.go`（`UserRecord`）。`gooq-gen` 也可不传命令行参数，改为从 `hack/gooq.yaml` 的 `gooq.gen` 节点读取配置。详细配置、分片分组和租户设置见下面的 gooq-gen 章节。
 
 ### 2. 手写表对象（或直接用生成产物）
 
@@ -658,7 +658,7 @@ gooq:
 
 ## 分片
 
-分组写在 `hack/gooq.tables.yaml`。`single` 是普通表，`groups` 是分表。没有这份文件时，每张物理表各生成一个对象。`gooq-gen tables init` 把库里的表都写进 `single`。`tables check` 打印重复、缺失和多余的表名。`tables diff` 打印库里新增和配置里已不用的表名。这两条命令都不改文件。
+分组写在 `hack/gooq.tables.yaml`。`single` 是普通表，`groups` 是分表。没有这份文件时，每张物理表各生成一个对象。`gooq-gen tables init` 把库里的表都写进 `single`。`tables check` 打印重复、缺失和多余的表名。`tables diff` 打印库里新增和配置里已不用的表名。这两条命令都不改文件。匹配 `gooq.tables.check.ignore` 的表不进缺失报告，也不出现在 `diff` 的新表里；文件里列出的表仍然必须存在。
 
 ```yaml
 # hack/gooq.tables.yaml
@@ -741,21 +741,24 @@ cd cmd/gooq-gen && go run . -l "sqlite::@file(./test.db)"            # SQLite �
 ```yaml
 gooq:
   gen:
-    table:
-      link: "mysql:root:pass@tcp(127.0.0.1:3306)/db"
-      path: internal
+    link: "mysql:root:pass@tcp(127.0.0.1:3306)/db"
+    path: internal
     tenant:
       column: tenant_id
       tables:
         shop_order: org_id
         dict: ""
+  tables:
+    check:
+      ignore:
+        - "employee_*"
 ```
 
 ### 使用流程
 
 1. 执行一次 `gooq-gen init`，生成 `hack/gooq.yaml` 和模板。
-2. 在 `hack/gooq.yaml` 里填 `gooq.gen.table.link`（需要时再填 `path`），或每次运行用 `-l` / `-p` 传入；命令行参数优先。
-3. 有分表时，先执行一次 `gooq-gen tables init`，再编辑 `hack/gooq.tables.yaml` 的 `groups`。这个文件一旦存在，必须列出库里所有物理表；缺表或多表时生成会失败。
+2. 在 `hack/gooq.yaml` 里填 `gooq.gen.link`（需要时再填 `path`），或每次运行用 `-l` / `-p` 传入；命令行参数优先。
+3. 有分表时，先执行一次 `gooq-gen tables init`，再编辑 `hack/gooq.tables.yaml` 的 `groups`。这个文件一旦存在，必须列出库里所有物理表；缺表或多表时生成会失败。运行时动态创建的分片表可以用 `gooq.tables.check.ignore` 的通配符排除，例如 `employee_*`。
 4. schema 变更后，先跑 `gooq-gen tables diff` 查看新增/删除的表，更新 `hack/gooq.tables.yaml`，再跑 `gooq-gen tables check`。
 5. 执行 `gooq-gen`（或 `gooq-gen -l ... -p ...`）重新生成 `table/` 和 `model/`。
 6. 定制模板写在 `hack/template/`，不要手改生成文件；模板不会被覆盖。
@@ -765,10 +768,10 @@ gooq:
 - `init` 生成 `hack/gooq.yaml`，以及 `hack/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl`；已存在的文件不覆盖。
 - `-d/--debug` 打开调试日志。
 - `-p internal`（默认值）会生成 `internal/table/` 和 `internal/model/`；包名取目录名（`table`、`model`）。只有 `hack/gooq.tables.yaml` 配置了分片组时才生成 `table/gooq_sharding.go`。
-- 配置文件：读取 `hack/gooq.yaml` 的 `gooq.gen.table` 节点；命令行参数优先。`gooq.gen.tenant` 由 CLI 读出后传给生成。见上面的多租户。
+- 配置文件：从 `hack/gooq.yaml` 的 `gooq.gen` 读取 `link` 和 `path`；命令行参数优先。`gooq.gen.tenant` 由 CLI 读出后传给生成。见上面的多租户。`gooq.tables.check.ignore` 是通配符列表；当库里的表不在 `hack/gooq.tables.yaml` 中且匹配时，生成、`tables check` 和 `tables diff` 都会跳过它。
 - 模板：`<hack>/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
-- 分片分组在 `hack/gooq.tables.yaml`，用 `gooq-gen tables init`、`tables check`、`tables diff` 维护：`init` 创建文件，把当前所有表写进 `single`，文件已存在时拒绝覆盖；`check` 报告重复、缺失和多余的表名；`diff` 报告新增和已删除的表。`check` 和 `diff` 不改文件。见上面的分片节。
+- 分片分组在 `hack/gooq.tables.yaml`，用 `gooq-gen tables init`、`tables check`、`tables diff` 维护：`init` 创建文件，把当前所有表写进 `single`，文件已存在时拒绝覆盖；`check` 报告重复、缺失和多余的表名；`diff` 报告新增和已删除的表。`check` 和 `diff` 不改文件。`gooq.tables.check.ignore` 会把匹配的、未列入文件的库表从这些报告里去掉。见上面的分片节。
 - 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名折叠后为 `deletedat` 或 `deleteat`，例如 `deleted_at` / `delete_at`）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与即将生成的字段或方法同名时，生成失败并写出原列名和冲突声明。
 - 内置连接驱动在 `drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。链接前缀分别是 `mysql`、`mariadb`、`tidb`、`oceanbase`、`pgsql`/`postgres`、`gaussdb`、`dm`、`sqlite`。

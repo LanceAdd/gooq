@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	ConfigKeyTableLink         = "gooq.gen.table.link"
-	ConfigKeyTablePath         = "gooq.gen.table.path"
-	ConfigKeyTableShardPattern = "gooq.gen.table.shardPattern"
-	ConfigKeyTenant            = "gooq.gen.tenant"
+	ConfigKeyGenLink     = "gooq.gen.link"
+	ConfigKeyGenPath     = "gooq.gen.path"
+	ConfigKeyTenant      = "gooq.gen.tenant"
+	ConfigKeyTablesCheck = "gooq.tables.check"
 )
 
 type Input struct {
@@ -26,6 +26,8 @@ type Input struct {
 	TablesFile string
 	// Tenant 由 CLI 从 gooq.gen.tenant 读出。零值不识别租户列。
 	Tenant TenantConfig
+	// TablesCheck 由 CLI 从 gooq.tables.check 读出。
+	TablesCheck TablesCheckConfig
 }
 
 const (
@@ -42,16 +44,21 @@ const (
 const initConfigContent = `# gooq-gen configuration; CLI options take priority over this file.
 gooq:
   gen:
-    table:
-      # Database link, same format as the ORM configuration of GoFrame.
-      # link: "mysql:root:pass@tcp(127.0.0.1:3306)/db"
-      path: internal
+    # Database link, same format as the ORM configuration of GoFrame.
+    # link: "mysql:root:pass@tcp(127.0.0.1:3306)/db"
+    path: internal
     # Tenant columns are recognized only when tenant.column is set.
     # tenant:
     #   column: tenant_id
     #   tables:
     #     shop_order: org_id
     #     dict: ""
+  # Dynamic shard tables that are not listed in hack/gooq.tables.yaml are
+  # ignored by generation and "gooq-gen tables check|diff" when they match.
+  # tables:
+  #   check:
+  #     ignore:
+  #       - "employee_*"
 `
 
 // tplView 是模板渲染视图（跨表生成复用）。
@@ -108,7 +115,7 @@ func Generate(ctx context.Context, in Input) {
 		in.Path = "internal"
 	}
 	if in.Link == "" {
-		mlog.Fatalf("database link is required, use -l/--link or set %q in hack/gooq.yaml", ConfigKeyTableLink)
+		mlog.Fatalf("database link is required, use -l/--link or set %q in hack/gooq.yaml", ConfigKeyGenLink)
 	}
 	if dirRealPath := gfile.RealPath(in.Path); dirRealPath == "" {
 		mlog.Fatalf(`path "%s" does not exist`, in.Path)
@@ -127,7 +134,7 @@ func Generate(ctx context.Context, in Input) {
 	if err != nil {
 		mlog.Fatalf("fetching tables failed: %+v", err)
 	}
-	specs := specsForGenerate(in.TablesFile, tableNames)
+	specs := specsForGenerate(in.TablesFile, tableNames, in.TablesCheck)
 	if err = validateShardSchemas(ctx, database, specs); err != nil {
 		mlog.Fatalf("sharding tables validation failed: %+v", err)
 	}
@@ -137,7 +144,7 @@ func Generate(ctx context.Context, in Input) {
 	mlog.Print("done!")
 }
 
-func specsForGenerate(tablesFile string, tableNames []string) []tableSpec {
+func specsForGenerate(tablesFile string, tableNames []string, check TablesCheckConfig) []tableSpec {
 	if tablesFile == "" {
 		specs := make([]tableSpec, 0, len(tableNames))
 		for _, name := range tableNames {
@@ -149,7 +156,7 @@ func specsForGenerate(tablesFile string, tableNames []string) []tableSpec {
 	if err != nil {
 		mlog.Fatalf("%+v", err)
 	}
-	if report := checkTables(cfg, tableNames); !report.empty() {
+	if report := checkTables(cfg, tableNames, check); !report.empty() {
 		mlog.Print(report.String())
 		mlog.Fatalf("tables config check failed")
 	}

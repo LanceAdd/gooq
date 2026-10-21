@@ -20,14 +20,19 @@ gooq-gen -l "sqlite::@file(./test.db)" -p internal
 ```yaml
 gooq:
   gen:
-    table:
-      link: "mysql:root:12345678@tcp(127.0.0.1:3306)/test"
-      path: internal
+    link: "mysql:root:12345678@tcp(127.0.0.1:3306)/test"
+    path: internal
+  tables:
+    check:
+      ignore:
+        - "employee_*"
 ```
 
 ```bash
 gooq-gen
 ```
+
+`gooq.tables.check.ignore` 是通配符列表。库里的表不在 `hack/gooq.tables.yaml` 中且匹配时，生成、`gooq-gen tables check` 和 `gooq-gen tables diff` 都会跳过它。
 
 内置驱动 `mysql`、`pgsql`、`sqlite` 由 `main.go` 导入。其他数据库实现 `db.Driver`，在 `init` 中调用 `db.Register`，再从 `main.go` 空白导入。渲染差异实现 `gooq.DialectSpec` 并调用 `gooq.RegisterDialect`。
 
@@ -36,8 +41,8 @@ gooq-gen
 | 命令 / 参数 | 说明 |
 | --- | --- |
 | `gooq-gen init` | 生成 `hack/gooq.yaml` 与 `hack/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl` 供定制；已存在的文件不覆盖 |
-| `-l, --link` | 数据库连接，与 GoFrame 的 ORM 配置一致（或配置 `gooq.gen.table.link`） |
-| `-p, --path` | 输出目录，默认 `internal`（或配置 `gooq.gen.table.path`） |
+| `-l, --link` | 数据库连接，与 GoFrame 的 ORM 配置一致（或配置 `gooq.gen.link`） |
+| `-p, --path` | 输出目录，默认 `internal`（或配置 `gooq.gen.path`） |
 | `-d, --debug` | 输出内部调试信息 |
 
 默认生成数据库全部表，产物位于输出目录下固定的 `table/` 与 `model/` 子目录。`model/user_model.go` 定义 `UserModel`，`model/user_record.go` 定义 `UserRecord`。

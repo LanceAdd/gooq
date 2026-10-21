@@ -10,14 +10,14 @@ import (
 )
 
 // RunTables 执行 gooq-gen tables init|check|diff。
-func RunTables(ctx context.Context, link, action string) {
+func RunTables(ctx context.Context, link, action string, check TablesCheckConfig) {
 	switch action {
 	case "init":
 		tablesInit(ctx, link)
 	case "check":
-		tablesCheck(ctx, link)
+		tablesCheck(ctx, link, check)
 	case "diff":
-		runTablesDiff(ctx, link)
+		runTablesDiff(ctx, link, check)
 	default:
 		mlog.Fatalf("usage: gooq-gen tables {init|check|diff}")
 	}
@@ -44,9 +44,9 @@ func tablesInit(ctx context.Context, link string) {
 	mlog.Print("generated:", gfile.RealPath(path))
 }
 
-func tablesCheck(ctx context.Context, link string) {
+func tablesCheck(ctx context.Context, link string, check TablesCheckConfig) {
 	cfg, names := loadTablesAgainstDB(ctx, link)
-	report := checkTables(cfg, names)
+	report := checkTables(cfg, names, check)
 	if report.empty() {
 		return
 	}
@@ -54,9 +54,9 @@ func tablesCheck(ctx context.Context, link string) {
 	mlog.Fatalf("tables check failed")
 }
 
-func runTablesDiff(ctx context.Context, link string) {
+func runTablesDiff(ctx context.Context, link string, check TablesCheckConfig) {
 	cfg, names := loadTablesAgainstDB(ctx, link)
-	diff := diffTables(cfg, names)
+	diff := diffTables(cfg, names, check)
 	if diff.empty() {
 		mlog.Print("没有差异")
 		return
@@ -88,7 +88,7 @@ func loadTablesAgainstDB(ctx context.Context, link string) (tablesConfig, []stri
 
 func openDatabase(link string) *db.DB {
 	if link == "" {
-		mlog.Fatalf("database link is required, use -l/--link or set %q in hack/gooq.yaml", ConfigKeyTableLink)
+		mlog.Fatalf("database link is required, use -l/--link or set %q in hack/gooq.yaml", ConfigKeyGenLink)
 	}
 	database, err := db.Open(db.Config{Link: link})
 	if err != nil {

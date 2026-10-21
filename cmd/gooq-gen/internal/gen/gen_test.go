@@ -236,6 +236,51 @@ func TestGen_Sharding_Sqlite(t *testing.T) {
 	})
 }
 
+func TestGen_ConfigTablesCheckIgnore(t *testing.T) {
+	gtest.C(t, func(t *gtest.T) {
+		var (
+			tmpDir  = gfile.Temp("gooq-gen-check-ignore", gtime.TimestampNanoStr())
+			dbPath  = filepath.Join(tmpDir, "gooq_test.db")
+			workDir = filepath.Join(tmpDir, "work")
+			bin     = buildBinary(t)
+		)
+		defer gfile.Remove(tmpDir)
+		t.AssertNil(gfile.Mkdir(workDir))
+		t.AssertNil(gfile.Mkdir(filepath.Join(workDir, "hack")))
+		t.AssertNil(gfile.Mkdir(filepath.Join(workDir, "out")))
+
+		database, err := db.Open(db.Config{Link: "sqlite::@file(" + dbPath + ")"})
+		t.AssertNil(err)
+		for _, ddl := range []string{
+			`CREATE TABLE user_1 (id INTEGER PRIMARY KEY, name TEXT)`,
+			`CREATE TABLE user_2 (id INTEGER PRIMARY KEY, name TEXT)`,
+		} {
+			_, err = database.Exec(context.Background(), ddl)
+			t.AssertNil(err)
+		}
+		t.AssertNil(database.Close())
+
+		cfg := "gooq:\n  gen:\n" +
+			"    link: \"sqlite::@file(" + filepath.ToSlash(dbPath) + ")\"\n" +
+			"    path: out\n" +
+			"  tables:\n    check:\n      ignore:\n        - \"user_*\"\n"
+		t.AssertNil(gfile.PutContents(filepath.Join(workDir, "hack", "gooq.yaml"), cfg))
+		t.AssertNil(gfile.PutContents(
+			filepath.Join(workDir, "hack", "gooq.tables.yaml"),
+			"single: []\ngroups:\n  - name: user\n    table:\n      - user_1\n",
+		))
+
+		cmd := exec.Command(bin)
+		cmd.Dir = workDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("run with dynamic shard failed: %v\n%s", err, out)
+		}
+		t.Assert(gfile.Exists(filepath.Join(workDir, "out", "table", "user.go")), true)
+		t.Assert(gfile.Exists(filepath.Join(workDir, "out", "table", "user_2.go")), false)
+	})
+}
+
 func TestCheckTables(t *testing.T) {
 	cfg := tablesConfig{
 		Single: []string{"role", "user_00"},
@@ -246,7 +291,7 @@ func TestCheckTables(t *testing.T) {
 			{Name: "order", Table: []string{"user_001"}},
 		},
 	}
-	report := checkTables(cfg, []string{"role", "user_00", "user_01", "order_00"})
+	report := checkTables(cfg, []string{"role", "user_00", "user_01", "order_00"}, TablesCheckConfig{})
 	text := report.String()
 	for _, want := range []string{
 		"user_00  在 single，也在 user",
@@ -261,12 +306,83 @@ func TestCheckTables(t *testing.T) {
 			t.Fatalf("missing %q in\n%s", want, text)
 		}
 	}
-	diff := diffTables(cfg, []string{"role", "user_00", "user_01", "order_00"})
+	diff := diffTables(cfg, []string{"role", "user_00", "user_01", "order_00"}, TablesCheckConfig{})
 	if !reflect.DeepEqual(diff.New, []string{"order_00"}) {
 		t.Fatalf("new %v", diff.New)
 	}
 	if !reflect.DeepEqual(diff.Stale, []string{"role_00", "user_001"}) {
 		t.Fatalf("stale %v", diff.Stale)
+	}
+}
+
+func TestTablesCheckIgnore(t *testing.T) {
+	cfg := tablesConfig{
+		Groups: []tableGroup{
+			{Name: "employee", Table: []string{"employee_1", "employee_2"}},
+		},
+	}
+	check := TablesCheckConfig{Ignore: []string{"employee_*"}}
+
+	report := checkTables(cfg, []string{"employee_1", "employee_2", "employee_3"}, check)
+	if !report.empty() {
+		t.Fatalf("dynamic shard should be ignored:\n%s", report.String())
+	}
+
+	report = checkTables(cfg, []string{"employee_1", "employee_2", "employee_3", "order_1"}, check)
+	if !reflect.DeepEqual(report.Missing, []string{"order_1"}) {
+		t.Fatalf("missing %v", report.Missing)
+	}
+
+	// ignore 不能掩盖文件里列出的表不存在。
+	report = checkTables(cfg, []string{"employee_1"}, check)
+	if !reflect.DeepEqual(report.Extra, []string{"employee_2"}) {
+		t.Fatalf("extra %v", report.Extra)
+	}
+
+	diff := diffTables(cfg, []string{"employee_1", "employee_2", "employee_3"}, check)
+	if len(diff.New) != 0 {
+		t.Fatalf("new %v", diff.New)
+	}
+	diff = diffTables(cfg, []string{"employee_1"}, check)
+	if !reflect.DeepEqual(diff.Stale, []string{"employee_2"}) {
+		t.Fatalf("stale %v", diff.Stale)
+	}
+}
+
+func TestParseTablesCheckConfig(t *testing.T) {
+	cfg, err := ParseTablesCheckConfig(map[string]any{
+		"ignore": []any{" employee_* ", "archive_?"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(cfg.Ignore, []string{"employee_*", "archive_?"}) {
+		t.Fatalf("ignore %v", cfg.Ignore)
+	}
+	if !cfg.Ignored("employee_3") || cfg.Ignored("staff_3") {
+		t.Fatalf("match %v", cfg.Ignore)
+	}
+
+	for name, raw := range map[string]any{
+		"not map":       "employee_*",
+		"unknown field": map[string]any{"unknown": true},
+		"not list":      map[string]any{"ignore": "employee_*"},
+		"not string":    map[string]any{"ignore": []any{1}},
+		"empty":         map[string]any{"ignore": []any{" "}},
+		"bad pattern":   map[string]any{"ignore": []any{"["}},
+	} {
+		if _, err := ParseTablesCheckConfig(raw); err == nil {
+			t.Fatalf("%s: expected error", name)
+		}
+	}
+
+	cfg, err = ParseTablesCheckConfig(nil)
+	if err != nil || len(cfg.Ignore) != 0 {
+		t.Fatalf("nil: %v %v", cfg, err)
+	}
+	cfg, err = ParseTablesCheckConfig(map[string]any{})
+	if err != nil || len(cfg.Ignore) != 0 {
+		t.Fatalf("empty map: %v %v", cfg, err)
 	}
 }
 
@@ -368,7 +484,8 @@ func TestInit(t *testing.T) {
 		cfgContent := gfile.GetContents(cfgPath)
 		t.Assert(gstr.Contains(cfgContent, "gooq:"), true)
 		t.Assert(gstr.Contains(cfgContent, "gen:"), true)
-		t.Assert(gstr.Contains(cfgContent, "table:"), true)
+		t.Assert(gstr.Contains(cfgContent, "path: internal"), true)
+		t.Assert(gstr.Contains(cfgContent, "ignore:"), true)
 		t.Assert(gstr.Contains(gfile.GetContents(tplPath), "TableBase"), true)
 
 		// 二次 init：已存在文件不覆盖。
@@ -422,7 +539,7 @@ func TestFieldNames(t *testing.T) {
 	}
 }
 
-// TestGen_Config 验证 hack/gooq.yaml（gooq.gen.table）配置读取与 hack/template 本地模板覆盖：
+// TestGen_Config 验证 hack/gooq.yaml（gooq.gen）配置读取与 hack/template 本地模板覆盖：
 // 无参执行时 link/path 来自配置文件；本地模板优先于内置模板；无配置且无参数时报错退出。
 func TestGen_Config(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
@@ -437,9 +554,9 @@ func TestGen_Config(t *testing.T) {
 		initSqlite(t, dbPath)
 
 		// hack/gooq.yaml（sqlite link 使用正斜杠避免 YAML 转义）+ 输出目录。
-		cfg := "gooq:\n  gen:\n    table:\n" +
-			"      link: \"sqlite::@file(" + filepath.ToSlash(dbPath) + ")\"\n" +
-			"      path: out\n"
+		cfg := "gooq:\n  gen:\n" +
+			"    link: \"sqlite::@file(" + filepath.ToSlash(dbPath) + ")\"\n" +
+			"    path: out\n"
 		t.AssertNil(gfile.PutContents(filepath.Join(workDir, "hack", "gooq.yaml"), cfg))
 		t.AssertNil(gfile.Mkdir(filepath.Join(workDir, "out")))
 

@@ -112,7 +112,7 @@ func writeSection(b *strings.Builder, title string, lines []string) {
 	}
 }
 
-func checkTables(cfg tablesConfig, dbTables []string) tablesReport {
+func checkTables(cfg tablesConfig, dbTables []string, check TablesCheckConfig) tablesReport {
 	var report tablesReport
 	type place struct {
 		name string
@@ -206,7 +206,8 @@ func checkTables(cfg tablesConfig, dbTables []string) tablesReport {
 	inDB := map[string]bool{}
 	for _, name := range dbTables {
 		inDB[name] = true
-		if !inFile[name] {
+		// ignore 只过滤文件里没有的库表；文件里列出的表仍然要真实存在。
+		if !inFile[name] && !check.Ignored(name) {
 			report.Missing = append(report.Missing, name)
 		}
 	}
@@ -256,7 +257,7 @@ func (d tablesDiff) String() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func diffTables(cfg tablesConfig, dbTables []string) tablesDiff {
+func diffTables(cfg tablesConfig, dbTables []string, check TablesCheckConfig) tablesDiff {
 	inFile := map[string]bool{}
 	for _, name := range cfg.Single {
 		if name = strings.TrimSpace(name); name != "" {
@@ -274,7 +275,7 @@ func diffTables(cfg tablesConfig, dbTables []string) tablesDiff {
 	inDB := map[string]bool{}
 	for _, name := range dbTables {
 		inDB[name] = true
-		if !inFile[name] {
+		if !inFile[name] && !check.Ignored(name) {
 			diff.New = append(diff.New, name)
 		}
 	}

@@ -20,14 +20,19 @@ Or via the config file `hack/gooq.yaml` created by `init` (CLI options take prio
 ```yaml
 gooq:
   gen:
-    table:
-      link: "mysql:root:12345678@tcp(127.0.0.1:3306)/test"
-      path: internal
+    link: "mysql:root:12345678@tcp(127.0.0.1:3306)/test"
+    path: internal
+  tables:
+    check:
+      ignore:
+        - "employee_*"
 ```
 
 ```bash
 gooq-gen
 ```
+
+`gooq.tables.check.ignore` lists glob patterns. Matching database tables that are not listed in `hack/gooq.tables.yaml` are skipped by generation, `gooq-gen tables check`, and `gooq-gen tables diff`.
 
 Built-in drivers `mysql`, `pgsql`, and `sqlite` are imported by `main.go`. Another database implements `db.Driver`, calls `db.Register` from `init`, and is blank-imported from `main.go`. Rendering differences implement `gooq.DialectSpec` and `gooq.RegisterDialect`.
 
@@ -36,8 +41,8 @@ Built-in drivers `mysql`, `pgsql`, and `sqlite` are imported by `main.go`. Anoth
 | Command / Option | Description |
 | --- | --- |
 | `gooq-gen init` | create `hack/gooq.yaml` and `hack/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten |
-| `-l, --link` | database link, same as the ORM configuration of GoFrame (or set `gooq.gen.table.link`) |
-| `-p, --path` | output directory, default `internal` (or set `gooq.gen.table.path`) |
+| `-l, --link` | database link, same as the ORM configuration of GoFrame (or set `gooq.gen.link`) |
+| `-p, --path` | output directory, default `internal` (or set `gooq.gen.path`) |
 | `-d, --debug` | show internal detailed debugging information |
 
 All tables of the database are generated into the fixed `table/` and `model/` subdirectories of the output directory. `model/user_model.go` defines `UserModel`. `model/user_record.go` defines `UserRecord`.
