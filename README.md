@@ -109,9 +109,11 @@ gooq-gen init                                       # optional: scaffold hack/go
 gooq-gen -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-Generates typed gooq table objects (`table/`) and `model/` for all tables in one shot, or for the groups listed in `hack/gooq.tables.yaml` when that file exists. Each table produces `user.model.go` (`UserModel`) and `user.record.go` (`UserRecord`). `gooq-gen` can also read `hack/gooq.yaml` under the `gooq.gen` node instead of CLI options. See the gooq-gen section below for configuration, sharding groups, and tenant settings.
+Generates typed gooq table objects (`table/`) and `model/` for all tables in one shot, or for the groups listed in `hack/gooq.tables.yaml` when that file exists. Each logical table produces `table/user.table.go` (type and helpers), `table/user.meta.go` (`TableMeta`), `model/user.model.go` (`UserModel`), and `model/user.record.go` (`UserRecord`). A sharded table also gets `table/user.sharding.go`; `table/gooq_sharding.go` is written when any sharded group exists. `gooq-gen` can also read `hack/gooq.yaml` under the `gooq.gen` node instead of CLI options. See the gooq-gen section below for configuration, sharding groups, and tenant settings.
 
-### 2. Hand-write a table object (or use the generated one)
+### 2. Hand-write a table object
+
+This example is hand-written. Generated output splits the type and metadata into `table/user.table.go` and `table/user.meta.go`; see [gooq-gen](#gooq-gen-codegen-tool) for the generated layout.
 
 ```go
 type UserTable struct {
@@ -932,6 +934,17 @@ gooq:
 
 Regeneration overwrites the generated files of current tables. Files for tables removed from the database or `hack/gooq.tables.yaml` are not deleted; remove them yourself. `table/gooq_sharding.go` is removed automatically when no sharded groups remain. Write the tenant config before generating when it is used.
 
+A non-sharded table generates:
+
+```text
+table/<logical>.table.go    type, fields, constructor, As/Clone
+table/<logical>.meta.go     TableMeta
+model/<logical>.model.go    scan model
+model/<logical>.record.go   write record
+```
+
+A sharded table also gets `table/<logical>.sharding.go` (`RegisterXxxSharding`, `Physical`, `ShardBy`). `table/gooq_sharding.go` exists when at least one sharded group is generated.
+
 - `init` creates `hack/gooq.yaml` and `hack/template/table.tmpl`, `meta.tmpl`, `sharding.tmpl`, `register.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten.
 - `-d/--debug` turns on debug logging.
 - `-p internal` (the default) writes `internal/table/` and `internal/model/`. The package name is the directory base (`table`, `model`). `table/gooq_sharding.go` is generated only when `hack/gooq.tables.yaml` defines sharded groups.
@@ -939,7 +952,6 @@ Regeneration overwrites the generated files of current tables. Files for tables 
 - Templates: `<hack>/template/table.tmpl`, `meta.tmpl`, `sharding.tmpl`, `register.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back). `sharding.tmpl` renders the per-table sharding file; `register.tmpl` renders the package-level `gooq_sharding.go`.
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
 - Shard groups: `hack/gooq.tables.yaml`, maintained with `gooq-gen tables init`, `tables check`, and `tables diff`. See [Sharding](#sharding) for the format and ignore rules.
-- Generated files: `table/<logical>.table.go` (typed object), `table/<logical>.meta.go` (static metadata), `table/<logical>.sharding.go` (sharded tables only), `table/gooq_sharding.go` (package-level registration), `model/<logical>.model.go`, and `model/<logical>.record.go`.
 - `model/<logical>.model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/<logical>.record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (columns folding to `deletedat` or `deleteat`, such as `deleted_at` / `delete_at`), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); a column whose name collides with a generated field or method fails generation and reports the column and the conflicting declaration.
 - Built-in connection drivers live in `drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/oceanbase`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/dm`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses. Link prefixes are `mysql`, `mariadb`, `tidb`, `oceanbase`, `pgsql`/`postgres`, `gaussdb`, `dm`, and `sqlite`.

@@ -109,9 +109,11 @@ gooq-gen init                                       # 可选：初始化 hack/go
 gooq-gen -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p internal
 ```
 
-一次生成所有表的 gooq 类型化表对象（`table/`）和 `model/`；存在 `hack/gooq.tables.yaml` 时，只生成其中列出的分组。每张表生成 `user.model.go`（`UserModel`）和 `user.record.go`（`UserRecord`）。`gooq-gen` 也可不传命令行参数，改为从 `hack/gooq.yaml` 的 `gooq.gen` 节点读取配置。详细配置、分片分组和租户设置见下面的 gooq-gen 章节。
+一次生成所有表的 gooq 类型化表对象（`table/`）和 `model/`；存在 `hack/gooq.tables.yaml` 时，只生成其中列出的分组。每张逻辑表生成 `table/user.table.go`（类型和辅助方法）、`table/user.meta.go`（`TableMeta`）、`model/user.model.go`（`UserModel`）和 `model/user.record.go`（`UserRecord`）。分片表还会生成 `table/user.sharding.go`；存在分片组时生成 `table/gooq_sharding.go`。`gooq-gen` 也可不传命令行参数，改为从 `hack/gooq.yaml` 的 `gooq.gen` 节点读取配置。详细配置、分片分组和租户设置见下面的 gooq-gen 章节。
 
-### 2. 手写表对象（或直接用生成产物）
+### 2. 手写表对象
+
+下面是手写示例。生成产物会把类型和元数据拆到 `table/user.table.go` 和 `table/user.meta.go`，完整布局见 [gooq-gen](#gooq-gen代码生成工具)。
 
 ```go
 type UserTable struct {
@@ -924,6 +926,17 @@ gooq:
 
 重新生成会覆盖当前表的生成文件。库里或 `hack/gooq.tables.yaml` 里已删除的表，旧文件不会自动删除，需要手工清理。没有分片组时 `table/gooq_sharding.go` 会自动删除。使用租户时，先生成配置再运行。
 
+非分片表生成：
+
+```text
+table/<逻辑表>.table.go    类型、字段、构造、As/Clone
+table/<逻辑表>.meta.go     TableMeta
+model/<逻辑表>.model.go    扫描模型
+model/<逻辑表>.record.go   写入记录
+```
+
+分片表额外生成 `table/<逻辑表>.sharding.go`（`RegisterXxxSharding`、`Physical`、`ShardBy`）；存在分片组时才生成 `table/gooq_sharding.go`。
+
 - `init` 生成 `hack/gooq.yaml`，以及 `hack/template/table.tmpl`、`meta.tmpl`、`sharding.tmpl`、`register.tmpl`、`model.tmpl`、`record.tmpl`；已存在的文件不覆盖。
 - `-d/--debug` 打开调试日志。
 - `-p internal`（默认值）会生成 `internal/table/` 和 `internal/model/`；包名取目录名（`table`、`model`）。只有 `hack/gooq.tables.yaml` 配置了分片组时才生成 `table/gooq_sharding.go`。
@@ -931,7 +944,6 @@ gooq:
 - 模板：`<hack>/template/table.tmpl`、`meta.tmpl`、`sharding.tmpl`、`register.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。`sharding.tmpl` 生成单表分片文件；`register.tmpl` 生成包级 `gooq_sharding.go`。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
 - 分片分组在 `hack/gooq.tables.yaml`，用 `gooq-gen tables init`、`tables check`、`tables diff` 维护；文件格式和 ignore 规则见 [分片](#分片)。
-- 生成文件：`table/<逻辑表>.table.go`（类型对象）、`table/<逻辑表>.meta.go`（静态元数据）、`table/<逻辑表>.sharding.go`（仅分片表）、`table/gooq_sharding.go`（包级注册）、`model/<逻辑表>.model.go`、`model/<逻辑表>.record.go`。
 - `model/<逻辑表>.model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/<逻辑表>.record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名折叠后为 `deletedat` 或 `deleteat`，例如 `deleted_at` / `delete_at`）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与即将生成的字段或方法同名时，生成失败并写出原列名和冲突声明。
 - 内置连接驱动在 `drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。链接前缀分别是 `mysql`、`mariadb`、`tidb`、`oceanbase`、`pgsql`/`postgres`、`gaussdb`、`dm`、`sqlite`。
