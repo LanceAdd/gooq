@@ -12,6 +12,87 @@ English | [简体中文](README.zh_CN.md)
 
 All rendered output shown below comes from test assertions — copy-paste friendly.
 
+## Contents
+
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Select](#select)
+  - [Basics](#basics)
+  - [Conditions](#conditions)
+  - [JOINs](#joins)
+  - [Subqueries](#subqueries)
+  - [Grouping & aggregation](#grouping--aggregation)
+  - [Set operations & CTEs](#set-operations--ctes)
+  - [Expressions & functions](#expressions--functions)
+  - [Row locks](#row-locks)
+- [DML](#dml)
+  - [Insert](#insert)
+  - [Update](#update)
+  - [Delete](#delete)
+  - [Upsert & Returning](#upsert--returning)
+- [Execution](#execution)
+- [Configuration and connections](#configuration-and-connections)
+- [Transactions](#transactions)
+- [Caching](#caching)
+- [Dialects](#dialects)
+  - [Custom dialects](#custom-dialects)
+  - [Drivers](#drivers)
+  - [Dialect notes](#dialect-notes)
+- [Multi-tenancy](#multi-tenancy)
+  - [Configuration](#configuration)
+  - [Values](#values)
+  - [Scope](#scope)
+  - [Tenant joins](#tenant-joins)
+  - [Writes](#writes)
+  - [Tenant caching](#tenant-caching)
+  - [Soft delete](#soft-delete)
+- [Sharding](#sharding)
+  - [Grouping](#grouping)
+  - [Rules and ShardBy](#rules-and-shardby)
+  - [Physical and generation](#physical-and-generation)
+  - [Sharded caching](#sharded-caching)
+  - [Conventions](#conventions)
+  - [Creating shard tables](#creating-shard-tables)
+- [gooq-gen (codegen tool)](#gooq-gen-codegen-tool)
+- [Testing](#testing)
+
+## Features
+
+**Query building**
+- Offline rendering: `ToSql(dialect)` produces SQL and arguments without a database connection; execution is a separate layer.
+- Type-safe fields and conditions: `Field[T]` operators, `IN` / `BETWEEN` / `LIKE` / `IS NULL`, expression comparisons, chained `AND` / `OR` / `NOT`, and `EXISTS`.
+- SELECT with joins (including LATERAL), self-joins, derived tables, correlated subqueries, CTEs and recursive CTEs, and `UNION` / `INTERSECT` / `EXCEPT`.
+- Grouping and ordering: `ROLLUP` / `CUBE` / `GROUPING SETS`, `HAVING`, `DISTINCT`, ordering by expression, and `LIMIT` / `OFFSET` / `Page`.
+- Row locks: `FOR UPDATE`, shared locks, `SKIP LOCKED`, and `NOWAIT` where the dialect supports them.
+- Expressions: arithmetic, `CASE`, `CAST`, bound `Raw` fragments, and custom `Expression` nodes.
+- Functions (`fn`): string, math, date, aggregate, window, `FILTER`, `GROUP_CONCAT`, and dialect-aware `DATE_FORMAT`.
+
+**DML**
+- INSERT: positional values, generated records, batch chunks, and `INSERT ... SELECT`.
+- Upsert: `ON DUPLICATE KEY`, `ON CONFLICT`, `MERGE`, `DoNothing`, and `Excluded`.
+- UPDATE: chained `Set`, map `Data`, generated records, expression values, and multi-table joins.
+- DELETE: soft-delete rewrite, `Unscoped()` hard delete, and batch delete by key.
+- `RETURNING` where supported; unsupported combinations fail before SQL is produced.
+
+**Execution and database**
+- Reads: `Rows`, `Structs`, `Row`, `Value`, `Column`, `Count`, `Exists`, and counted page reads.
+- Connection groups, master/slave routing with weights, `DB(name)`, `Master()`, `Slave()`, and `Schema()`.
+- Transactions: context propagation, nested savepoints, seven propagation modes, and explicit `Tx(tx)`.
+- Debug SQL logging, dry run, prepared statements, and OpenTelemetry spans.
+- Result mapping: ordered `Result`, column-keyed `Record`, typed cell helpers (`db.Get` / `db.Value` / `db.Assign`), `orm` tags, and `sql.Scanner` / `time.Time` cells.
+
+**Built-in policies**
+- Soft delete: predicates from `TableMeta`, join-aware placement, and automatic delete rewrite.
+- Row-level multi-tenancy: automatic predicates, context or statement values, scoped `UnTenant()`, and write / conflict-target checks.
+- Sharding: injected `ShardingRule`, table-level or query-level `ShardBy`, `Physical()`, scope isolation, failure on a missing shard value, and dynamic shard creation with `CreateTableLike`.
+- Caching: single-query and counted-page caches, pluggable adapters and codec, and group-aware keys.
+- Validation: construction-time errors, dialect capability checks, and unsupported features fail before execution.
+
+**Dialects and tooling**
+- Eight built-in dialects: MySQL, MariaDB, TiDB, OceanBase, PostgreSQL, GaussDB, Dameng, and SQLite, plus custom `DialectSpec` implementations with optional capability interfaces.
+- Eight built-in drivers and custom `db.Driver` registration.
+- `gooq-gen`: typed tables and models, custom templates, sharding groups, tenant columns, `tables init/check/diff`, and dynamic shard ignore patterns.
+
 ## Quick Start
 
 Requires Go 1.24 or newer. Add the module with:
@@ -513,13 +594,6 @@ err = dsl.Select(User.Name).From(User).Column(ctx, &names)
 _, err = dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john")).Exec(ctx)
 _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
 
-// Transaction puts the tx into ctx. Queries inside the callback join it.
-database, err := db.Instance()
-err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
-    _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
-    return err
-})
-
 // Count is the number of rows after pagination and ordering are removed.
 // DISTINCT, grouping, and set operations are counted through a subquery.
 // Exists reports whether that count is greater than zero: the select list becomes 1, and pagination and ordering are removed.
@@ -533,23 +607,17 @@ row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
     Where(User.Name.Eq("john")).Row(ctx)
 id := db.Get(row, User.Id)      // int64
 name := db.Get(row, User.Name)  // string
-
-// DB("orders") uses that configuration group. Omitting DB uses the default group.
-// LoadConfig reads gooq.database, gooq.defaultGroup, and gooq.logger through gcfg.
-// Runtime reads only a file named gooq, such as gooq.yaml, and does not read config.yaml.
-// database is a list of groups: name is the group, endpoints are its master and slave nodes.
-// A single group may omit name and is stored as default. Every group needs a name when there is more than one.
-// defaultGroup selects the group used when the name is omitted. It must be one of the groups in this file; omitted, it is default.
-// SetDebug logs SQL, SetDryRun skips execution, Prepare prepares a statement,
-// and Schema switches the MySQL database or PostgreSQL search_path.
-// Reads use a slave when the group has one; writes and BEGIN use a master.
-// Master() and Slave() force the pool. A transaction is taken from ctx and joins only the pool that started it.
-// Another registered group, another Open, and a Schema that opened its own pool do not use that transaction and do not fail because it is present.
-// Master, Slave, WithRoute, and a Schema that keeps the shared pool still join.
-// Concurrent requests may share one DB; each transaction lives in its own ctx.
-// Do not hand a transactional ctx or Tx to another request, and do not run one Tx concurrently.
-// dsl Tx(tx) runs that statement on the given connection; otherwise it still joins from ctx.
 ```
+
+Execution binds `DB(name)` or the default configuration group and joins a transaction from ctx. See [Configuration and connections](#configuration-and-connections) and [Transactions](#transactions).
+
+## Configuration and connections
+
+`DB("orders")` selects that configuration group. Omitting `DB` uses the default group. `LoadConfig` reads `gooq.database`, `gooq.defaultGroup`, and `gooq.logger` through gcfg. Runtime reads only a file named `gooq`, such as `gooq.yaml`, and does not read `config.yaml`.
+
+`database` is a list of groups: `name` is the group, `endpoints` are its master and slave nodes. A single group may omit `name` and is stored as `default`. Every group needs a name when there is more than one. `defaultGroup` selects the group used when the name is omitted; it must be one of the groups in this file; omitted, it is `default`.
+
+Reads use a slave when the group has one; writes and `BEGIN` use a master. `Master()` and `Slave()` force the pool. `SetDebug` logs SQL, `SetDryRun` skips execution, `Prepare` prepares a statement, and `Schema` switches the MySQL database or PostgreSQL search_path.
 
 ```yaml
 gooq:
@@ -568,7 +636,23 @@ gooq:
           role: slave
 ```
 
-### Caching
+## Transactions
+
+`Transaction` puts the tx into ctx. Queries inside the callback join it:
+
+```go
+database, err := db.Instance()
+err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+    _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
+    return err
+})
+```
+
+A transaction is taken from ctx and joins only the pool that started it. Another registered group, another `Open`, and a `Schema` that opened its own pool do not use that transaction and do not fail because it is present. `Master`, `Slave`, `WithRoute`, and a `Schema` that keeps the shared pool still join.
+
+Concurrent requests may share one DB; each transaction lives in its own ctx. Do not hand a transactional ctx or `Tx` to another request, and do not run one `Tx` concurrently. `dsl Tx(tx)` runs that statement on the given connection; otherwise it still joins from ctx.
+
+## Caching
 
 ```go
 // Inject a global cache adapter (e.g. a gredis-backed implementation).
@@ -623,18 +707,39 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 | sqlite | `?` | `"` | LIMIT |
 | dm | `?` | `"` (uppercase) | LIMIT |
 
+### Custom dialects
+
 - `ToSql` requires a registered `DialectSpec`. An unknown dialect returns an error. Embed `MySQLDialect`, `PostgresDialect`, or `SQLiteDialect` and override the methods that differ, then call `RegisterDialect`.
-- Custom dialects with positional placeholders must keep argument order aligned with SQL text: implement `UpdateJoinsBeforeSet() bool` when `UPDATE` writes `JOIN` before `SET` (the MySQL dialect does). Implement `FoldIdent() bool` when the database treats identifiers case-insensitively; tenant write checks use it. Numbered placeholders (`$n`) need neither. Implement `UpsertConflictTarget() bool` and return true when upsert uses an explicit conflict target (`ON CONFLICT` or `MERGE`). A dialect that does not implement it skips the tenant conflict-target check. Implement `ReleaseSavepoint() bool` and return false when the database has no `RELEASE SAVEPOINT`; a nested commit then keeps the savepoint and the outer transaction releases it.
+- `DialectSpec` covers statement shape: pagination, row locks, `JOIN` rewrites, upsert, delete, multi-table `UPDATE` (`RenderUpdate`), and existence queries (`RenderExists`). Function SQL such as `DATE_FORMAT`, `GROUP_CONCAT`, `IFNULL`, `CURDATE`, `DATE_ADD`, `DATEDIFF`, `ROUND`, and `MEDIAN` stays on the concrete dialect type. A dialect that does not implement one returns `dialect %q does not support ...` from `ToSql`. SQLite upsert uses `ON CONFLICT`.
+- Custom dialects with positional placeholders must keep argument order aligned with SQL text:
+  - Implement `UpdateJoinsBeforeSet() bool` when `UPDATE` writes `JOIN` before `SET` (the MySQL dialect does).
+  - Implement `FoldIdent() bool` when the database treats identifiers case-insensitively; tenant write checks use it. Numbered placeholders (`$n`) need neither.
+  - Implement `UpsertConflictTarget() bool` and return true when upsert uses an explicit conflict target (`ON CONFLICT` or `MERGE`). A dialect that does not implement it skips the tenant conflict-target check.
+  - Implement `ReleaseSavepoint() bool` and return false when the database has no `RELEASE SAVEPOINT`; a nested commit then keeps the savepoint and the outer transaction releases it.
+- Table, column, and function aliases go through `Quote`. `numeric` / `decimal` generate `string`. PostgreSQL arrays generate a slice of the element type.
+
+### Drivers
+
 - Opening a connection requires a blank import of the matching driver package (`drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/oceanbase`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/dm`, `drivers/sqlite`). The driver registers itself with `db.Register`. `gooq-gen` imports these drivers.
+
+### Dialect notes
+
 - MariaDB, TiDB, and OceanBase use the MySQL wire protocol and the MySQL statement shape. MariaDB reads columns from `information_schema`, so a JSON value stored as `longtext` with a `json_valid` check is reported as `json`. On TiDB, `LockInShareMode` returns an error by default. After `tidb_enable_noop_functions` is enabled the statement runs, but it does not take a shared lock. `LockForUpdate` works.
 - GaussDB means openGauss. Quoting, placeholders, row locks, `RETURNING`, deletes, and updates follow PostgreSQL. `DATE_ADD` is interval multiplication, not `make_interval`. Upsert is `ON DUPLICATE KEY UPDATE`, and the inserted value is `VALUES(col)`. `DoNothing` returns an error because GaussDB has no `ON CONFLICT DO NOTHING`. The `database/sql` driver name is `opengauss`.
-- Dameng (`dm`) quotes identifiers in uppercase so they match names stored from unquoted DDL. Upsert is `MERGE` and needs `OnConflictKey`; the conflict column must be in the insert list. `DoNothing` inserts only when the row is not matched. There is no `RETURNING`. There is no `RELEASE SAVEPOINT`; a nested transaction commit keeps the savepoint, and the outer transaction or a later savepoint with the same name releases it. `Exists` renders `SELECT COUNT(*) FROM (subquery) WHERE ROWNUM = 1`. `GROUP_CONCAT` renders as `LISTAGG`, `DATE_FORMAT` as `TO_CHAR`, `IFNULL` as `NVL`, and `DATE_ADD` as `DATEADD`. `time.Time` is bound as a timestamp string; the zero time becomes `NULL`. An IANA timezone in the config becomes a minute offset, and an offset outside ±12 hours fails. `DELETE` with `JOIN` and `UPDATE` with an outer join return an error. Identity columns are not marked `AutoIncrement`. The `database/sql` driver name is `dm`. Link example: `dm:SYSDBA:SYSDBA001@tcp(127.0.0.1:5236)/SYSDBA`.
+- Dameng (`dm`):
+  - Quotes identifiers in uppercase so they match names stored from unquoted DDL.
+  - Upsert is `MERGE` and needs `OnConflictKey`; the conflict column must be in the insert list. `DoNothing` inserts only when the row is not matched.
+  - There is no `RETURNING` and no `RELEASE SAVEPOINT`; a nested transaction commit keeps the savepoint, and the outer transaction or a later savepoint with the same name releases it.
+  - `Exists` renders `SELECT COUNT(*) FROM (subquery) WHERE ROWNUM = 1`. `GROUP_CONCAT` renders as `LISTAGG`, `DATE_FORMAT` as `TO_CHAR`, `IFNULL` as `NVL`, and `DATE_ADD` as `DATEADD`.
+  - `time.Time` is bound as a timestamp string; the zero time becomes `NULL`. An IANA timezone in the config becomes a minute offset, and an offset outside ±12 hours fails.
+  - `DELETE` with `JOIN` and `UPDATE` with an outer join return an error. Identity columns are not marked `AutoIncrement`.
+  - The `database/sql` driver name is `dm`. Link example: `dm:SYSDBA:SYSDBA001@tcp(127.0.0.1:5236)/SYSDBA`.
 - Schema-qualified tables render `schema.table.column` (alias shadows schema); gooq-gen fills schema for PG only (`current_schema()`).
-- `DialectSpec` covers statement shape: pagination, row locks, `JOIN` rewrites, upsert, delete, multi-table `UPDATE` (`RenderUpdate`), and existence queries (`RenderExists`). Function SQL such as `DATE_FORMAT`, `GROUP_CONCAT`, `IFNULL`, `CURDATE`, `DATE_ADD`, `DATEDIFF`, `ROUND`, and `MEDIAN` stays on the concrete dialect type. A dialect that does not implement one returns `dialect %q does not support ...` from `ToSql`. SQLite upsert uses `ON CONFLICT`.
-- Table, column, and function aliases go through `Quote`. `numeric` / `decimal` generate `string`. PostgreSQL arrays generate a slice of the element type.
 - PostgreSQL 16 can run `STRING_AGG(DISTINCT ...)`, `JSON_ARRAYAGG`, and `ANY_VALUE`.
 
 ## Multi-tenancy
+
+### Configuration
 
 A tenant column is part of `TableMeta`, like a primary key or a soft-delete column. `gooq-gen` marks it only when `hack/gooq.yaml` sets `gooq.gen.tenant.column`. A missing or null `tenant` node leaves generation unchanged. Otherwise the node must be a map with a non-empty `column`; unknown fields are rejected. `tables` overrides that column for one logical table. An empty string turns the mark off for that table.
 
@@ -650,21 +755,39 @@ gooq:
 
 Generation-time column matching ignores case and underscores. Runtime tenant-column checks follow the dialect: MySQL family, SQLite, and DM compare case-insensitively; PostgreSQL and GaussDB compare exactly. Allowed values are `string`, `uuid.UUID`, and the integer widths. `int` and `int64` are not the same type.
 
+### Values
+
 The value comes from `dsl.WithTenant(ctx, id)` or from `Tenant(id)` on that builder. `WithTenant` carries one value per request; `Tenant(ids...)` is per-statement and renders `tenant_col IN (...)`. Writes (`INSERT`, or setting the tenant column in `UPDATE`) require exactly one value, and a slice passed to `WithTenant` is a type error, not multi-tenancy. `ToSql` does not read the context. Execution records the context value on the builder, then renders it into a new `RenderContext`. A statement that touches a tenant table and has no value returns an error. It does not emit `IS NULL`.
+
+### Scope
 
 `Tenant(id)` applies to that builder and to queries rendered inside it. A nested builder may call `Tenant(other)` or `UnTenant()`. The later call wins: `UnTenant().Tenant(7)` adds the predicate, and `Tenant(7).UnTenant()` does not. `Tenant()` with no arguments only turns filtering back on. An earlier `Tenant(id)` stays in place; otherwise the value comes from the request context. `UnTenant()` turns tenant filtering off for every query that builder renders: the main table, joins, subqueries, CTEs, and `UNION` branches. A nested builder turns it back on for its own subtree by calling `Tenant(id)`.
 
+### Tenant joins
+
 `LEFT JOIN`, `LEFT JOIN LATERAL`, `INNER JOIN`, `INNER JOIN LATERAL`, and `CROSS JOIN LATERAL` keep their current shape. A `RIGHT JOIN` or `FULL JOIN` in a statement that touches any tenant table returns an error. Rewrite that join as `LEFT JOIN`, or call `UnTenant()`.
 
-`INSERT` into a tenant table must set the tenant column to the single current tenant value. The column is not filled in automatically. `INSERT ... SELECT` must list named columns and include the tenant column. `Select().From(src)` and a `Raw` select item fail before SQL is produced. `UnTenant()` skips these checks. Do not set the tenant column in `UPDATE` or in an upsert assignment. If it is set, the value must equal the current tenant; another value, `NULL`, or an expression returns an error. For `INSERT ... SELECT`, only the column list is checked; selected values are not compared statically. `OnConflictKey` is not rewritten. On PostgreSQL, SQLite, and Dameng, a tenant table's `OnConflictKey` must include the tenant column for both `DoUpdate` and `DoNothing`. MySQL, MariaDB, TiDB, OceanBase, and GaussDB pick the unique key in the database, so every unique key on a tenant table must include the tenant column. `Unscoped()` only bypasses soft delete; `UnTenant()` only bypasses tenant filtering.
+### Writes
+
+- `INSERT` into a tenant table must set the tenant column to the single current tenant value. The column is not filled in automatically. `INSERT ... SELECT` must list named columns and include the tenant column. `Select().From(src)` and a `Raw` select item fail before SQL is produced. `UnTenant()` skips these checks.
+- Do not set the tenant column in `UPDATE` or in an upsert assignment. If it is set, the value must equal the current tenant; another value, `NULL`, or an expression returns an error.
+- For `INSERT ... SELECT`, only the column list is checked; selected values are not compared statically.
+- `OnConflictKey` is not rewritten. On PostgreSQL, SQLite, and Dameng, a tenant table's `OnConflictKey` must include the tenant column for both `DoUpdate` and `DoNothing`. MySQL, MariaDB, TiDB, OceanBase, and GaussDB pick the unique key in the database, so every unique key on a tenant table must include the tenant column.
+- `Unscoped()` only bypasses soft delete; `UnTenant()` only bypasses tenant filtering.
+
+### Tenant caching
 
 `CacheOption.Name` is the cache key as written. Put the tenant in that name. Without `Name`, the key hashes the SQL and arguments, so different tenants do not share an entry.
+
+### Soft delete
 
 Each user `WHERE` and `ON` predicate is parenthesized before a soft-delete or tenant predicate is appended with `AND`.
 
 A sharded table keeps its tenant mark through `Physical()`; call `UnTenant()` for cross-tenant scans or migrations.
 
 ## Sharding
+
+### Grouping
 
 Shard groups live in `hack/gooq.tables.yaml`. `single` lists ordinary tables. `groups` lists sharded tables. Without that file, each physical table is generated as its own object. `gooq-gen tables init` writes the file with every table under `single`. `tables check` reports duplicate, missing, and extra names. `tables diff` reports tables added or removed in the database. Neither command rewrites the file. Tables matching `gooq.tables.check.ignore` are excluded from the missing report and from `diff` new tables; listed tables are still required to exist.
 
@@ -682,6 +805,8 @@ groups:
 ```
 
 The first table in a group supplies the schema used for generation; every table in the group must match it. `name` is the logical table name, so the example generates `table/order.go` and `table/gooq_sharding.go`. `gooq-gen tables init` only fills `single` and leaves `groups: []` for you to edit.
+
+### Rules and ShardBy
 
 A group generates one logical table, `RegisterXxxSharding`, and a package-level `RegisterSharding`. One call to `RegisterSharding` assigns that rule to every sharded logical table. Use `RegisterXxxSharding` to replace the rule on a table that shards differently. A nil rule panics. Registering again overwrites. The rule is stored on `TableMeta.Sharding`.
 
@@ -729,9 +854,18 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
 - `role.ShardBy(uid)` does not change the original `role`. Use fields from the returned object in `ON` and the select list. `role.UserId` is still bound to the original table and does not carry this value.
 - A correlated subquery that references an outer sharded table's column needs that table to carry a table-level `ShardBy` (`u := table.User.ShardBy(uid)`); use fields from the returned object inside the subquery too. A query-level `ShardBy` on the outer query alone fails at render time.
 - Two sharded tables may carry different values. gooq does not check that they use the same rule. SQL still runs when the values do not belong together.
+
+### Physical and generation
+
 - `Physical("user_05")` clears the rule and uses that table name. An empty name panics.
 - Generation compares column name, order, `LocalType`, nullability, primary key, auto-increment, and uniqueness against the first table in the group. A group with one table skips that check. String length, defaults, and comments are not compared.
+
+### Sharded caching
+
 - Sharded queries can use `Cache` and `PageCache`. Without `Name`, the key is computed after SQL is rendered and includes the physical table name, arguments, result shape, and database group. Different shards do not collide. This fits data that is read often and refreshed by expiry. With `Name`, the key is that string alone. SQL and arguments are not included. The function around the query must put its inputs in the name, for example `user-name:19`. The name does not need to be `user_03`. A fixed `Name: "user-name"` makes different inputs share one entry. Writes do not delete cache entries. With an explicit name, the application deletes that same name.
+
+### Conventions
+
 - These conventions are for the caller. gooq does not reject violations. Do not keep a logical placeholder table in the database. Put the shard key in `WHERE`. Do not use an AutoIncrement primary key; use a business key, or snowflake ids with embedded shard bits. While sharding, do not use cross-shard transactions, cross-database joins, or automatic merge or broadcast. Those statements still run. Cross-shard reads are explicit application loops, one `Physical` per shard. Group multi-row writes by shard first. One `ShardBy` writes one physical table. Rows from other shards in the same write go into that table and do not raise an error. `Batch` only splits rows of that same table.
 
 ### Creating shard tables
@@ -769,7 +903,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 cd cmd/gooq-gen && go run . -l "sqlite::@file(./test.db)"            # SQLite example
 ```
 
-`gooq-gen` searches for a `hack` directory from the current directory upward and uses `hack/gooq.yaml` when found. CLI flags take priority over the file.
+`gooq-gen` searches for a `hack` directory from the current directory upward and uses `hack/gooq.yaml` when found. CLI flags take priority over the file. For the full command and flag reference, template details, and generated-file examples, see [cmd/gooq-gen/README.MD](cmd/gooq-gen/README.MD).
 
 ```yaml
 gooq:
@@ -791,7 +925,7 @@ gooq:
 
 1. Run `gooq-gen init` once to scaffold `hack/gooq.yaml` and the templates.
 2. Fill `gooq.gen.link` (and `path` if needed) in `hack/gooq.yaml`, or pass `-l` / `-p` on each run; CLI flags take priority.
-3. If the schema has sharded tables, run `gooq-gen tables init` once, then edit `groups` in `hack/gooq.tables.yaml`. Once that file exists it must list every physical table; generation fails when a table is missing or extra. Dynamic shard tables created at runtime can be excluded with `gooq.tables.check.ignore` patterns, for example `employee_*`.
+3. If the schema has sharded tables, run `gooq-gen tables init` once, then edit `groups` in `hack/gooq.tables.yaml`. See [Sharding](#sharding) for the file format, checks, and ignore rules.
 4. After a schema change, run `gooq-gen tables diff` to see added/removed tables, update `hack/gooq.tables.yaml`, then run `gooq-gen tables check`.
 5. Run `gooq-gen` (or `gooq-gen -l ... -p ...`) to regenerate `table/` and `model/`.
 6. Customize templates under `hack/template/` instead of editing generated files; templates are never overwritten.
@@ -801,10 +935,10 @@ Regeneration overwrites the generated files of current tables. Files for tables 
 - `init` creates `hack/gooq.yaml` and `hack/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, `record.tmpl` for customization; existing files are never overwritten.
 - `-d/--debug` turns on debug logging.
 - `-p internal` (the default) writes `internal/table/` and `internal/model/`. The package name is the directory base (`table`, `model`). `table/gooq_sharding.go` is generated only when `hack/gooq.tables.yaml` defines sharded groups.
-- Config file: reads `hack/gooq.yaml` under `gooq.gen` for `link` and `path`; CLI options take priority. `gooq.gen.tenant` is read by the CLI and passed into generation. See Multi-tenancy above. `gooq.tables.check.ignore` lists glob patterns; matching database tables that are not listed in `hack/gooq.tables.yaml` are skipped by generation, `tables check`, and `tables diff`.
+- Config file: reads `hack/gooq.yaml` under `gooq.gen` for `link` and `path`; CLI options take priority. `gooq.gen.tenant` is read by the CLI and passed into generation. See Multi-tenancy above. `gooq.tables.check.ignore` lists glob patterns; see [Sharding](#sharding) for which tables it skips.
 - Templates: `<hack>/template/table.tmpl`, `sharding.tmpl`, `model.tmpl`, and `record.tmpl` take precedence over the embedded templates (delete one to fall back).
 - `-l/--link` database link; `-p/--path` output directory (default `internal`).
-- Shard groups are `hack/gooq.tables.yaml`, maintained with `gooq-gen tables init`, `tables check`, and `tables diff`: `init` creates the file with all current tables under `single` and refuses to overwrite an existing file; `check` reports duplicate/missing/extra names; `diff` reports added/removed tables. `check` and `diff` never rewrite the file. `gooq.tables.check.ignore` removes matching unlisted database tables from those reports. See Sharding above.
+- Shard groups: `hack/gooq.tables.yaml`, maintained with `gooq-gen tables init`, `tables check`, and `tables diff`. See [Sharding](#sharding) for the format and ignore rules.
 - Generates typed table objects (`table/`) and `model/`. `model/user_model.go` defines `UserModel`, a plain struct tagged with `json` and `orm` for `db.Result.Structs` and JSON. `model/user_record.go` defines `UserRecord`, whose fields are `gooq.Property[T]`. `model.NewUserRecord().SetName("john")` marks columns for `ValuesOf`. Nullable columns also get `SetXxxNull`. `ToModel()` copies set values into `UserModel`. `NewUserRecordFrom` marks every column from a `UserModel`.
 - Metadata derivation: primary key (`PRI`), auto-increment, soft delete (columns folding to `deletedat` or `deleteat`, such as `deleted_at` / `delete_at`), unique (`UNI`), `LocalType` markers; field naming (`id` → `Id`, matching `gf gen dao` output); a column whose name collides with a generated field or method fails generation and reports the column and the conflicting declaration.
 - Built-in connection drivers live in `drivers/mysql`, `drivers/mariadb`, `drivers/tidb`, `drivers/oceanbase`, `drivers/pgsql`, `drivers/gaussdb`, `drivers/dm`, and `drivers/sqlite`. `gooq-gen` imports them. Library code blank-imports the one it uses. Link prefixes are `mysql`, `mariadb`, `tidb`, `oceanbase`, `pgsql`/`postgres`, `gaussdb`, `dm`, and `sqlite`.

@@ -4,6 +4,8 @@ English | [简体中文](README.zh_CN.MD)
 
 `gooq-gen` is the code generation tool for [gooq](https://github.com/lanceadd/gooq). It connects to a database and generates typed table objects (`table/`) plus scan and write models (`model/`).
 
+Library-side configuration, workflow, sharding groups, and tenant integration are documented in the [root README](../README.md#gooq-gen-codegen-tool).
+
 ## Install
 
 ```bash

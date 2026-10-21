@@ -4,6 +4,8 @@
 
 `gooq-gen` 是 [gooq](https://github.com/lanceadd/gooq) 的代码生成工具。连接数据库后生成类型化表对象（`table/`）和扫描/写入模型（`model/`）。
 
+库侧的配置、工作流、分片分组和租户接入见 [根 README](../README.zh_CN.md#gooq-gen代码生成工具)。
+
 ## 安装
 
 ```bash

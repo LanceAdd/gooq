@@ -12,6 +12,87 @@
 
 下文所有示例的渲染输出均来自测试断言，可直接运行验证。
 
+## 目录
+
+- [功能](#功能)
+- [快速开始](#快速开始)
+- [查询](#查询)
+  - [基础](#基础)
+  - [条件](#条件)
+  - [JOIN](#join)
+  - [子查询](#子查询)
+  - [分组聚合](#分组聚合)
+  - [集合操作与 CTE](#集合操作与-cte)
+  - [表达式与函数](#表达式与函数)
+  - [行锁](#行锁)
+- [写操作](#写操作)
+  - [插入](#插入)
+  - [更新](#更新)
+  - [删除](#删除)
+  - [Upsert 与 Returning](#upsert-与-returning)
+- [执行](#执行)
+- [配置与连接](#配置与连接)
+- [事务](#事务)
+- [缓存](#缓存)
+- [方言](#方言)
+  - [自定义方言](#自定义方言)
+  - [驱动](#驱动)
+  - [方言说明](#方言说明)
+- [多租户](#多租户)
+  - [配置](#配置)
+  - [取值](#取值)
+  - [作用域](#作用域)
+  - [租户表连接](#租户表连接)
+  - [写入](#写入)
+  - [租户缓存](#租户缓存)
+  - [软删除](#软删除)
+- [分片](#分片)
+  - [分组](#分组)
+  - [规则与 ShardBy](#规则与-shardby)
+  - [物理表与生成](#物理表与生成)
+  - [分片缓存](#分片缓存)
+  - [约定](#约定)
+  - [创建分片表](#创建分片表)
+- [gooq-gen（代码生成工具）](#gooq-gen代码生成工具)
+- [测试](#测试)
+
+## 功能
+
+**查询构建**
+- 离线渲染：`ToSql(dialect)` 不连库产出 SQL 和参数；执行是独立一层。
+- 类型化字段与条件：`Field[T]` 运算符、`IN` / `BETWEEN` / `LIKE` / `IS NULL`、表达式比较、`AND` / `OR` / `NOT` 链、`EXISTS`。
+- SELECT：JOIN（含 LATERAL）、自连接、派生表、相关子查询、CTE / 递归 CTE、`UNION` / `INTERSECT` / `EXCEPT`。
+- 分组与排序：`ROLLUP` / `CUBE` / `GROUPING SETS`、`HAVING`、`DISTINCT`、按表达式排序、`LIMIT` / `OFFSET` / `Page`。
+- 行锁：`FOR UPDATE`、共享锁、`SKIP LOCKED`、`NOWAIT`（方言支持时）。
+- 表达式：算术、`CASE`、`CAST`、带参数的 `Raw`、自定义 `Expression` 节点。
+- 函数（`fn`）：字符串、数学、日期、聚合、窗口、`FILTER`、`GROUP_CONCAT`、方言感知的 `DATE_FORMAT`。
+
+**DML**
+- INSERT：位置值、生成记录、分批提交、`INSERT ... SELECT`。
+- Upsert：`ON DUPLICATE KEY`、`ON CONFLICT`、`MERGE`、`DoNothing`、`Excluded`。
+- UPDATE：链式 `Set`、map `Data`、生成记录、表达式值、多表 JOIN。
+- DELETE：软删改写、`Unscoped()` 硬删、按主键批量删除。
+- 支持的方言可用 `RETURNING`；不支持的组合在产出 SQL 前报错。
+
+**执行与数据库**
+- 读取：`Rows`、`Structs`、`Row`、`Value`、`Column`、`Count`、`Exists`、带计数的分页读取。
+- 配置组、主从路由与权重、`DB(name)`、`Master()`、`Slave()`、`Schema()`。
+- 事务：ctx 传播、嵌套保存点、七种传播行为、显式 `Tx(tx)`。
+- 调试 SQL 日志、dry run、预编译语句、OpenTelemetry span。
+- 结果映射：有序 `Result`、按列名索引的 `Record`、类型化单元格（`db.Get` / `db.Value` / `db.Assign`）、`orm` 标签、`sql.Scanner` / `time.Time` 单元格。
+
+**内置策略**
+- 软删除：来自 `TableMeta` 的自动条件、JOIN 感知、删除自动改写。
+- 行级多租户：自动条件、ctx 或语句级值、作用域内 `UnTenant()`、写入与冲突目标检查。
+- 分片：注入 `ShardingRule`、表级或查询级 `ShardBy`、`Physical()`、作用域隔离、缺分片值报错、`CreateTableLike` 动态建分片。
+- 缓存：单查询缓存和分页计数缓存、可插拔适配器与编码、按配置组区分 key。
+- 校验：构建期错误、方言能力检查、不支持的功能在执行前失败。
+
+**方言与工具**
+- 内置 MySQL、MariaDB、TiDB、OceanBase、PostgreSQL、GaussDB、达梦、SQLite 八种方言；支持自定义 `DialectSpec` 和可选能力接口。
+- 内置对应驱动；支持自定义 `db.Driver` 注册。
+- `gooq-gen`：类型化 table/model、自定义模板、分片分组、租户列、`tables init/check/diff`、动态分片忽略规则。
+
 ## 快速开始
 
 需要 Go 1.24 或更高版本。先添加模块：
@@ -510,13 +591,6 @@ err = dsl.Select(User.Name).From(User).Column(ctx, &names)
 _, err = dsl.Insert(User).ValuesOf(model.NewUserRecord().SetName("john")).Exec(ctx)
 _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
 
-// Transaction 把事务放进 ctx，回调里的查询会自动加入。
-database, err := db.Instance()
-err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
-    _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
-    return err
-})
-
 // Count 统计去掉分页和排序后的结果行数。DISTINCT、分组或集合操作套子查询再 COUNT(*)。
 // Exists 判断这批行是否至少有一行：选择列表换成 1，同样去掉分页和排序。
 // 达梦是 SELECT COUNT(*) FROM (SELECT 1 ...) WHERE ROWNUM = 1，其他方言是 SELECT EXISTS (SELECT 1 ...)。
@@ -529,23 +603,17 @@ row, err := dsl.Select(User.Id, User.Name, User.Age).From(User).
     Where(User.Name.Eq("john")).Row(ctx)
 id := db.Get(row, User.Id)      // int64
 name := db.Get(row, User.Name)  // string
-
-// DB("orders") 使用该配置组。不写 DB 时走默认组。
-// LoadConfig 通过 gcfg 读取 gooq.database、gooq.defaultGroup 和 gooq.logger。
-// 运行时只读取名为 gooq 的配置文件，例如 gooq.yaml，不读取 config.yaml。
-// database 是配置组列表：name 是组名，endpoints 是这一组的主从节点。
-// 只有一组时可以不写 name，加载后记成 default。多于一组时每组都要写 name。
-// defaultGroup 选择不写组名时使用的组，必须是本次文件里的组名；不写时是 default。
-// SetDebug 打印 SQL，SetDryRun 跳过执行，Prepare 预处理语句，
-// Schema 切换 MySQL 库名或 PostgreSQL search_path。
-// 组内有从库时读走从库，写和 BEGIN 走主库。Master() / Slave() 强制指定。
-// 事务从 ctx 读取，只加入开启它的连接池。
-// 别的已注册组、另一次 Open、以及 Schema 另开的池都不使用该事务，也不因此失败。
-// 共用池的 Master、Slave、WithRoute 和会话语句为空的 Schema 仍加入。
-// 多个请求可以共用同一个 DB，事务在各自的 ctx 里。
-// 不要把带事务的 ctx 或 Tx 交给另一个请求，也不要让同一个 Tx 并发执行。
-// dsl 的 Tx(tx) 让这一条语句走传入的连接；不调用时仍从 ctx 加入。
 ```
+
+执行时绑定 `DB(name)` 或默认配置组，并加入 ctx 里的事务。见 [配置与连接](#配置与连接) 和 [事务](#事务)。
+
+## 配置与连接
+
+`DB("orders")` 使用该配置组。不写 `DB` 时走默认组。`LoadConfig` 通过 gcfg 读取 `gooq.database`、`gooq.defaultGroup` 和 `gooq.logger`。运行时只读取名为 `gooq` 的配置文件，例如 `gooq.yaml`，不读取 `config.yaml`。
+
+`database` 是配置组列表：`name` 是组名，`endpoints` 是这一组的主从节点。只有一组时可以不写 `name`，加载后记成 `default`。多于一组时每组都要写 `name`。`defaultGroup` 选择不写组名时使用的组，必须是本次文件里的组名；不写时是 `default`。
+
+组内有从库时读走从库，写和 `BEGIN` 走主库。`Master()` / `Slave()` 强制指定。`SetDebug` 打印 SQL，`SetDryRun` 跳过执行，`Prepare` 预处理语句，`Schema` 切换 MySQL 库名或 PostgreSQL search_path。
 
 ```yaml
 gooq:
@@ -564,7 +632,23 @@ gooq:
           role: slave
 ```
 
-### 缓存
+## 事务
+
+`Transaction` 把事务放进 ctx，回调里的查询会自动加入：
+
+```go
+database, err := db.Instance()
+err = database.Transaction(ctx, func(ctx context.Context, tx *db.Tx) error {
+    _, err = dsl.Update(User).Set(User.Status, "vip").Where(User.Id.Eq(1)).Exec(ctx)
+    return err
+})
+```
+
+事务从 ctx 读取，只加入开启它的连接池。别的已注册组、另一次 `Open`、以及 `Schema` 另开的池都不使用该事务，也不因此失败。共用池的 `Master`、`Slave`、`WithRoute` 和会话语句为空的 `Schema` 仍加入。
+
+多个请求可以共用同一个 DB，事务在各自的 ctx 里。不要把带事务的 ctx 或 `Tx` 交给另一个请求，也不要让同一个 `Tx` 并发执行。`dsl Tx(tx)` 让这一条语句走传入的连接；不调用时仍从 ctx 加入。
+
+## 缓存
 
 ```go
 // 全局注入缓存适配器（如 gredis 实现）。
@@ -615,18 +699,39 @@ total, err = dsl.SelectFrom(User).Where(User.Status.Eq("vip")).
 | sqlite | `?` | `"` | LIMIT |
 | dm | `?` | `"`（大写） | LIMIT |
 
+### 自定义方言
+
 - `ToSql` 要求方言已注册为 `DialectSpec`。未知方言直接返回错误。可嵌入 `MySQLDialect`、`PostgresDialect` 或 `SQLiteDialect`，只覆盖有差异的方法，再调用 `RegisterDialect`。
-- 自定义方言使用位置占位符时，参数顺序必须和 SQL 文本一致：`UPDATE` 的 `JOIN` 写在 `SET` 前面时，实现 `UpdateJoinsBeforeSet() bool`（MySQL 方言已实现）；数据库把大小写不同的标识符当成同一列时，实现 `FoldIdent() bool`，租户写校验会用到。编号占位符（`$n`）两个都不需要。upsert 使用显式冲突目标（`ON CONFLICT` 或 `MERGE`）时，实现 `UpsertConflictTarget() bool` 并返回 true。不实现就默认跳过租户冲突目标检查。数据库没有 `RELEASE SAVEPOINT` 时，实现 `ReleaseSavepoint() bool` 并返回 false；嵌套事务提交会保留保存点，由外层事务释放。
+- `DialectSpec` 只约束语句形状：分页、行锁、`JOIN` 改写、upsert、删除、多表 `UPDATE`（`RenderUpdate`）、存在性查询（`RenderExists`）。`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL`、`CURDATE`、`DATE_ADD`、`DATEDIFF`、`ROUND`、`MEDIAN` 留在具体方言类型上。没有实现的方言在 `ToSql` 返回 `dialect %q does not support ...`。SQLite 的 upsert 使用 `ON CONFLICT`。
+- 自定义方言使用位置占位符时，参数顺序必须和 SQL 文本一致：
+  - `UPDATE` 的 `JOIN` 写在 `SET` 前面时，实现 `UpdateJoinsBeforeSet() bool`（MySQL 方言已实现）。
+  - 数据库把大小写不同的标识符当成同一列时，实现 `FoldIdent() bool`，租户写校验会用到。编号占位符（`$n`）两个都不需要。
+  - upsert 使用显式冲突目标（`ON CONFLICT` 或 `MERGE`）时，实现 `UpsertConflictTarget() bool` 并返回 true。不实现就默认跳过租户冲突目标检查。
+  - 数据库没有 `RELEASE SAVEPOINT` 时，实现 `ReleaseSavepoint() bool` 并返回 false；嵌套事务提交会保留保存点，由外层事务释放。
+- 表别名、列别名和函数别名都走 `Quote`。`numeric` / `decimal` 生成 `string`。PostgreSQL 数组按元素类型生成切片。
+
+### 驱动
+
 - 打开连接需要空白导入对应驱动包（`drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`）。驱动在 `init` 里调用 `db.Register`。`gooq-gen` 会导入这些驱动。
+
+### 方言说明
+
 - MariaDB、TiDB 和 OceanBase 使用 MySQL 协议，语句形状与 MySQL 相同。MariaDB 从 `information_schema` 读列，因此 `longtext` 加上 `json_valid` 检查的 JSON 列会标成 `json`。`LockInShareMode` 在 TiDB 上默认报错；打开 `tidb_enable_noop_functions` 后语句能执行，但不会加共享锁。`LockForUpdate` 正常。
 - GaussDB 指 openGauss。引号、占位符、行锁、`RETURNING`、删除和更新跟随 PostgreSQL。`DATE_ADD` 写成间隔乘法，不用 `make_interval`。冲突更新是 `ON DUPLICATE KEY UPDATE`，本次插入值写成 `VALUES(col)`。GaussDB 没有 `ON CONFLICT DO NOTHING`，`DoNothing` 返回错误。`database/sql` 的驱动名是 `opengauss`。
-- 达梦（`dm`）把标识符渲染成大写双引号，对上未加引号建表时折成大写的名字。冲突插入写成 `MERGE`，必须给出 `OnConflictKey`，冲突列还要出现在插入列里。`DoNothing` 只在未匹配时插入。没有 `RETURNING`。没有 `RELEASE SAVEPOINT`；嵌套事务提交时保留保存点，由外层事务结束或同名保存点覆盖。`Exists` 写成 `SELECT COUNT(*) FROM (子查询) WHERE ROWNUM = 1`。`GROUP_CONCAT` 写成 `LISTAGG`，`DATE_FORMAT` 写成 `TO_CHAR`，`IFNULL` 写成 `NVL`，`DATE_ADD` 写成 `DATEADD`。`time.Time` 绑成时间字符串，零值写成 `NULL`。配置里的 IANA 时区换成分钟偏移，超出 ±12 小时会失败。带连接的 `DELETE` 和带外连接的 `UPDATE` 返回错误。自增列不会标成 `AutoIncrement`。`database/sql` 的驱动名是 `dm`。链接示例：`dm:SYSDBA:SYSDBA001@tcp(127.0.0.1:5236)/SYSDBA`。
+- 达梦（`dm`）：
+  - 把标识符渲染成大写双引号，对上未加引号建表时折成大写的名字。
+  - 冲突插入写成 `MERGE`，必须给出 `OnConflictKey`，冲突列还要出现在插入列里。`DoNothing` 只在未匹配时插入。
+  - 没有 `RETURNING`，也没有 `RELEASE SAVEPOINT`；嵌套事务提交时保留保存点，由外层事务结束或同名保存点覆盖。
+  - `Exists` 写成 `SELECT COUNT(*) FROM (子查询) WHERE ROWNUM = 1`。`GROUP_CONCAT` 写成 `LISTAGG`，`DATE_FORMAT` 写成 `TO_CHAR`，`IFNULL` 写成 `NVL`，`DATE_ADD` 写成 `DATEADD`。
+  - `time.Time` 绑成时间字符串，零值写成 `NULL`。配置里的 IANA 时区换成分钟偏移，超出 ±12 小时会失败。
+  - 带连接的 `DELETE` 和带外连接的 `UPDATE` 返回错误。自增列不会标成 `AutoIncrement`。
+  - `database/sql` 的驱动名是 `dm`。链接示例：`dm:SYSDBA:SYSDBA001@tcp(127.0.0.1:5236)/SYSDBA`。
 - 带 schema 的表渲染 `schema.table.column` 三级限定（别名遮蔽 schema）；gooq-gen 仅对 PG 填充 schema（`current_schema()`）。
-- `DialectSpec` 只约束语句形状：分页、行锁、`JOIN` 改写、upsert、删除、多表 `UPDATE`（`RenderUpdate`）、存在性查询（`RenderExists`）。`DATE_FORMAT`、`GROUP_CONCAT`、`IFNULL`、`CURDATE`、`DATE_ADD`、`DATEDIFF`、`ROUND`、`MEDIAN` 留在具体方言类型上。没有实现的方言在 `ToSql` 返回 `dialect %q does not support ...`。SQLite 的 upsert 使用 `ON CONFLICT`。
-- 表别名、列别名和函数别名都走 `Quote`。`numeric` / `decimal` 生成 `string`。PostgreSQL 数组按元素类型生成切片。
 - PostgreSQL 16 起可用 `STRING_AGG(DISTINCT ...)`、`JSON_ARRAYAGG` 和 `ANY_VALUE`。
 
 ## 多租户
+
+### 配置
 
 租户列写在 `TableMeta` 里，和主键、软删列一样。`hack/gooq.yaml` 里 `gooq.gen.tenant.column` 有值时，`gooq-gen` 才给列打上 `Tenant`。没有 `tenant` 节点或节点为 null 时，生成结果不变；节点存在时必须是 map，`column` 必填且不能为空，未知字段会报错。`tables` 给一张逻辑表换列名。空字符串表示这张表不标。
 
@@ -642,21 +747,39 @@ gooq:
 
 生成期列名匹配忽略大小写和下划线。运行时的租户列名检查按方言处理：MySQL 家族、SQLite、DM 忽略大小写；PostgreSQL 和 GaussDB 精确比较。值可以是 `string`、`uuid.UUID` 和各种整数宽度。`int` 和 `int64` 不是同一种类型。
 
+### 取值
+
 租户值来自 `dsl.WithTenant(ctx, id)`，或这条构建器上的 `Tenant(id)`。`WithTenant` 每个请求只放一个值；`Tenant(ids...)` 只作用于这条语句，渲染成 `tenant_col IN (...)`。写路径（`INSERT`，以及 `UPDATE` 设置租户列）只接受单个值；给 `WithTenant` 传切片不会变成多租户，会按类型报错。`ToSql` 不读 ctx。执行时先把 ctx 里的值记到构建器上，再放进这次新建的 `RenderContext`。语句碰到租户表却没有值时返回错误，不生成 `IS NULL`。
+
+### 作用域
 
 `Tenant(id)` 作用在这个构建器以及它里面渲染的查询上。内层构建器可以再写 `Tenant(other)` 或 `UnTenant()`。后调用的生效：`UnTenant().Tenant(7)` 会加条件，`Tenant(7).UnTenant()` 不加。不带参数的 `Tenant()` 只重新打开过滤。之前写过的 `Tenant(id)` 还在；没写过就用请求 ctx 里的值。`UnTenant()` 关掉这个构建器渲染出去的整棵查询树：主表、`JOIN`、子查询、CTE 和 `UNION` 分支都不加租户条件，也不因缺值报错。内层要过滤时，自己调用 `Tenant(id)`。
 
+### 租户表连接
+
 `LEFT JOIN`、`LEFT JOIN LATERAL`、`INNER JOIN`、`INNER JOIN LATERAL`、`CROSS JOIN LATERAL` 保持原来的形状。一条语句碰到任意租户表，又写出 `RIGHT JOIN` 或 `FULL JOIN`，渲染直接报错。把这条连接改成 `LEFT JOIN`，或调用 `UnTenant()`。
 
-向租户表 `INSERT` 时必须写入租户列，而且值等于当前这一个租户值。库不自动补列。`INSERT ... SELECT` 必须逐项写出具名列，并且包含租户列。`Select().From(src)` 和 `Raw` 选择项在生成 SQL 前失败。`UnTenant()` 跳过这些检查。`UPDATE` 和 upsert 的赋值不要写租户列。写了的话，值必须等于当前租户；写成别的值、`NULL` 或表达式都会报错。`INSERT ... SELECT` 只校验列清单，选出的值不做静态比较。库不改写 `OnConflictKey`。PostgreSQL、SQLite 和达梦上，租户表的 `OnConflictKey` 必须包含租户列，`DoUpdate` 和 `DoNothing` 都查。MySQL、MariaDB、TiDB、OceanBase 和 GaussDB 由数据库选择唯一键，租户表的每个唯一键都要包含租户列。`Unscoped()` 只跳过软删除，`UnTenant()` 只跳过租户，两者独立。
+### 写入
+
+- 向租户表 `INSERT` 时必须写入租户列，而且值等于当前这一个租户值。库不自动补列。`INSERT ... SELECT` 必须逐项写出具名列，并且包含租户列。`Select().From(src)` 和 `Raw` 选择项在生成 SQL 前失败。`UnTenant()` 跳过这些检查。
+- `UPDATE` 和 upsert 的赋值不要写租户列。写了的话，值必须等于当前租户；写成别的值、`NULL` 或表达式都会报错。
+- `INSERT ... SELECT` 只校验列清单，选出的值不做静态比较。
+- 库不改写 `OnConflictKey`。PostgreSQL、SQLite 和达梦上，租户表的 `OnConflictKey` 必须包含租户列，`DoUpdate` 和 `DoNothing` 都查。MySQL、MariaDB、TiDB、OceanBase 和 GaussDB 由数据库选择唯一键，租户表的每个唯一键都要包含租户列。
+- `Unscoped()` 只跳过软删除，`UnTenant()` 只跳过租户，两者独立。
+
+### 租户缓存
 
 `CacheOption.Name` 原样作为缓存键。名字里要自己带上租户。没有 `Name` 时，键是 SQL 和参数的哈希，不同租户不会共用一条缓存。
+
+### 软删除
 
 每一段用户 `WHERE` 和 `ON` 会先加括号，再用 `AND` 接上软删除和租户条件。
 
 分片表经过 `Physical()` 仍保留租户标记；跨租户扫描或迁移时显式调用 `UnTenant()`。
 
 ## 分片
+
+### 分组
 
 分组写在 `hack/gooq.tables.yaml`。`single` 是普通表，`groups` 是分表。没有这份文件时，每张物理表各生成一个对象。`gooq-gen tables init` 把库里的表都写进 `single`。`tables check` 打印重复、缺失和多余的表名。`tables diff` 打印库里新增和配置里已不用的表名。这两条命令都不改文件。匹配 `gooq.tables.check.ignore` 的表不进缺失报告，也不出现在 `diff` 的新表里；文件里列出的表仍然必须存在。
 
@@ -674,6 +797,8 @@ groups:
 ```
 
 组里的第一张表提供生成用的 schema，组内所有表都必须和它一致。`name` 是逻辑表名，所以这个示例会生成 `table/order.go` 和 `table/gooq_sharding.go`。`gooq-gen tables init` 只填 `single`，`groups` 保持 `[]`，分组由调用方自己编辑。
+
+### 规则与 ShardBy
 
 一组生成一个逻辑表、`RegisterXxxSharding`，以及包级的 `RegisterSharding`。同一种分片方式调用一次 `RegisterSharding`，它把这个规则赋给所有分片逻辑表。某张表算法不同时，再用 `RegisterXxxSharding` 盖掉。nil 会 panic，再次注册覆盖。规则挂在 `TableMeta.Sharding` 上。
 
@@ -721,9 +846,18 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
 - `role.ShardBy(uid)` 不改原来的 `role`。`ON` 和选择列要用返回的新对象上的字段。`role.UserId` 仍绑在原表上，没有这次的分片值。
 - 子查询里引用外层的分片表列时，外层那张表要用表级 `ShardBy`（`u := table.User.ShardBy(uid)`），子查询里也用新对象上的字段。外层只挂查询级 `ShardBy` 会在渲染时报缺值。
 - 两张分片表可以各自带不同的分片值。库不检查它们是不是同一套规则，值对不上时 SQL 仍能执行。
+
+### 物理表与生成
+
 - `Physical("user_05")` 清空规则并使用这个表名。空名字 panic。
 - 生成时按组里第一张表比对列名、顺序、`LocalType`、可空、主键、自增和唯一。组里只有一张表时跳过。字符串长度、默认值、注释不比对。
+
+### 分片缓存
+
 - 分片查询可以用 `Cache` 和 `PageCache`。没写 `Name` 时，键在 SQL 渲染之后计算，包含物理表名、参数、结果形状和数据库组，不同片不会撞，适合多读、靠过期刷新的数据。写了 `Name` 时键就是这个字符串，SQL 和参数不再参与。包住查询的函数要用输入把名字区分开，例如 `user-name:19`，不必写成 `user_03`。固定的 `Name: "user-name"` 会让不同输入共用一条缓存。写入不会自动删缓存；用显式名字时，由应用删掉同一个名字。
+
+### 约定
+
 - 约定由调用方自己遵守，库不拦截。库里不保留逻辑占位表；片键进 `WHERE`；不用自增主键（用业务键或嵌分片位的雪花 id）。分片场景不要做跨分片事务、跨库 join、自动归并或广播；用了这些，语句仍然能执行。跨分片读是应用层显式循环（逐片 `Physical`）。多行写入先按片分组，一次 `ShardBy` 只写一张物理表；不同片的行放进同一次写入，也会进这一张表，不会报错。`Batch` 只把这张表上的行分批提交。
 
 ### 创建分片表
@@ -761,7 +895,7 @@ cd cmd/gooq-gen && go run . -l "mysql:root:pass@tcp(127.0.0.1:3306)/db" -p inter
 cd cmd/gooq-gen && go run . -l "sqlite::@file(./test.db)"            # SQLite 示例
 ```
 
-`gooq-gen` 从当前目录向上查找 `hack` 目录，找到后使用 `hack/gooq.yaml`。命令行参数优先于文件配置。
+`gooq-gen` 从当前目录向上查找 `hack` 目录，找到后使用 `hack/gooq.yaml`。命令行参数优先于文件配置。完整的命令、参数、模板和产物示例见 [cmd/gooq-gen/README.zh_CN.MD](cmd/gooq-gen/README.zh_CN.MD)。
 
 ```yaml
 gooq:
@@ -783,7 +917,7 @@ gooq:
 
 1. 执行一次 `gooq-gen init`，生成 `hack/gooq.yaml` 和模板。
 2. 在 `hack/gooq.yaml` 里填 `gooq.gen.link`（需要时再填 `path`），或每次运行用 `-l` / `-p` 传入；命令行参数优先。
-3. 有分表时，先执行一次 `gooq-gen tables init`，再编辑 `hack/gooq.tables.yaml` 的 `groups`。这个文件一旦存在，必须列出库里所有物理表；缺表或多表时生成会失败。运行时动态创建的分片表可以用 `gooq.tables.check.ignore` 的通配符排除，例如 `employee_*`。
+3. 有分表时，先执行一次 `gooq-gen tables init`，再编辑 `hack/gooq.tables.yaml` 的 `groups`。文件格式、校验和 ignore 规则见 [分片](#分片)。
 4. schema 变更后，先跑 `gooq-gen tables diff` 查看新增/删除的表，更新 `hack/gooq.tables.yaml`，再跑 `gooq-gen tables check`。
 5. 执行 `gooq-gen`（或 `gooq-gen -l ... -p ...`）重新生成 `table/` 和 `model/`。
 6. 定制模板写在 `hack/template/`，不要手改生成文件；模板不会被覆盖。
@@ -793,10 +927,10 @@ gooq:
 - `init` 生成 `hack/gooq.yaml`，以及 `hack/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl`；已存在的文件不覆盖。
 - `-d/--debug` 打开调试日志。
 - `-p internal`（默认值）会生成 `internal/table/` 和 `internal/model/`；包名取目录名（`table`、`model`）。只有 `hack/gooq.tables.yaml` 配置了分片组时才生成 `table/gooq_sharding.go`。
-- 配置文件：从 `hack/gooq.yaml` 的 `gooq.gen` 读取 `link` 和 `path`；命令行参数优先。`gooq.gen.tenant` 由 CLI 读出后传给生成。见上面的多租户。`gooq.tables.check.ignore` 是通配符列表；当库里的表不在 `hack/gooq.tables.yaml` 中且匹配时，生成、`tables check` 和 `tables diff` 都会跳过它。
+- 配置文件：从 `hack/gooq.yaml` 的 `gooq.gen` 读取 `link` 和 `path`；命令行参数优先。`gooq.gen.tenant` 由 CLI 读出后传给生成。见上面的多租户。`gooq.tables.check.ignore` 是通配符列表，跳过哪些表见 [分片](#分片)。
 - 模板：`<hack>/template/table.tmpl`、`sharding.tmpl`、`model.tmpl`、`record.tmpl` 优先于内置模板（删除其中一个即回退内置）。
 - `-l/--link` 数据库连接；`-p/--path` 输出目录（默认 `internal`）。
-- 分片分组在 `hack/gooq.tables.yaml`，用 `gooq-gen tables init`、`tables check`、`tables diff` 维护：`init` 创建文件，把当前所有表写进 `single`，文件已存在时拒绝覆盖；`check` 报告重复、缺失和多余的表名；`diff` 报告新增和已删除的表。`check` 和 `diff` 不改文件。`gooq.tables.check.ignore` 会把匹配的、未列入文件的库表从这些报告里去掉。见上面的分片节。
+- 分片分组在 `hack/gooq.tables.yaml`，用 `gooq-gen tables init`、`tables check`、`tables diff` 维护；文件格式和 ignore 规则见 [分片](#分片)。
 - 生成类型化表对象（`table/`）和 `model/`。`model/user_model.go` 定义 `UserModel`，是带 `json`、`orm` 标签的普通结构体，给 `db.Result.Structs` 和 JSON 用。`model/user_record.go` 定义 `UserRecord`，字段是 `gooq.Property[T]`。`model.NewUserRecord().SetName("john")` 标记要写入的列，交给 `ValuesOf`。可空列另外生成 `SetXxxNull`。`ToModel()` 把已设置的值抄进 `UserModel`。`NewUserRecordFrom` 把 `UserModel` 的每一列做成全量快照。
 - 元数据推导：主键（`PRI`）、自增（`auto_increment`）、软删（列名折叠后为 `deletedat` 或 `deleteat`，例如 `deleted_at` / `delete_at`）、唯一（`UNI`）、`LocalType` 标记；字段命名（`id` → `Id`，与 `gf gen dao` 产物一致）；与即将生成的字段或方法同名时，生成失败并写出原列名和冲突声明。
 - 内置连接驱动在 `drivers/mysql`、`drivers/mariadb`、`drivers/tidb`、`drivers/oceanbase`、`drivers/pgsql`、`drivers/gaussdb`、`drivers/dm`、`drivers/sqlite`。`gooq-gen` 会导入它们；库代码按需空白导入。链接前缀分别是 `mysql`、`mariadb`、`tidb`、`oceanbase`、`pgsql`/`postgres`、`gaussdb`、`dm`、`sqlite`。
