@@ -61,6 +61,12 @@ func (MySQLDialect) RenderLimit(rc *RenderContext, limit, offset int) string {
 	return renderLimitOffset(rc, limit, offset)
 }
 
+// RenderCreateTableLike 复制表结构。LIKE 同时复制索引和默认值，不复制数据。
+func (MySQLDialect) RenderCreateTableLike(rc *RenderContext, template, target string) (string, error) {
+	return "CREATE TABLE IF NOT EXISTS " + rc.Quote(target) +
+		" LIKE " + rc.Quote(template), nil
+}
+
 func (MySQLDialect) InsertKeyword(doNothing bool) string {
 	if doNothing {
 		return "INSERT IGNORE"

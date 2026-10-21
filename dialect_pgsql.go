@@ -66,6 +66,12 @@ func (PostgresDialect) RenderLimit(rc *RenderContext, limit, offset int) string 
 
 func (PostgresDialect) InsertKeyword(bool) string { return "INSERT" }
 
+// RenderCreateTableLike 复制表结构。INCLUDING ALL 带上默认值、约束和索引。
+func (PostgresDialect) RenderCreateTableLike(rc *RenderContext, template, target string) (string, error) {
+	return "CREATE TABLE IF NOT EXISTS " + rc.Quote(target) +
+		" (LIKE " + rc.Quote(template) + " INCLUDING ALL)", nil
+}
+
 func (PostgresDialect) RenderUpsert(rc *RenderContext, clause UpsertClause) (string, error) {
 	return renderConflict(rc, clause)
 }

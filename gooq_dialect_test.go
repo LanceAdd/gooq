@@ -49,6 +49,46 @@ func TestDialectSpec_BuiltinAndOverride(t *testing.T) {
 	})
 }
 
+func TestRenderCreateTableLike(t *testing.T) {
+	cases := []struct {
+		dialect Dialect
+		want    string
+	}{
+		{DialectMySQL, "CREATE TABLE IF NOT EXISTS `employee_3` LIKE `employee_1`"},
+		{DialectMariaDB, "CREATE TABLE IF NOT EXISTS `employee_3` LIKE `employee_1`"},
+		{DialectTiDB, "CREATE TABLE IF NOT EXISTS `employee_3` LIKE `employee_1`"},
+		{DialectOceanBase, "CREATE TABLE IF NOT EXISTS `employee_3` LIKE `employee_1`"},
+		{DialectPgsql, `CREATE TABLE IF NOT EXISTS "employee_3" (LIKE "employee_1" INCLUDING ALL)`},
+		{DialectGaussDB, `CREATE TABLE IF NOT EXISTS "employee_3" (LIKE "employee_1" INCLUDING ALL)`},
+	}
+	for _, c := range cases {
+		spec, err := DialectSpecOf(c.dialect)
+		if err != nil {
+			t.Fatal(err)
+		}
+		renderer, ok := spec.(TableLikeRenderer)
+		if !ok {
+			t.Fatalf("%s does not implement TableLikeRenderer", c.dialect)
+		}
+		got, err := renderer.RenderCreateTableLike(NewRenderContext(c.dialect), "employee_1", "employee_3")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Fatalf("%s: %s", c.dialect, got)
+		}
+	}
+	for _, d := range []Dialect{DialectSQLite, DialectDM} {
+		spec, err := DialectSpecOf(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := spec.(TableLikeRenderer); ok {
+			t.Fatalf("%s should not support CREATE TABLE LIKE", d)
+		}
+	}
+}
+
 func TestRenderExcluded(t *testing.T) {
 	gtest.C(t, func(t *gtest.T) {
 		cases := []struct {

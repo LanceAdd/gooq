@@ -79,6 +79,62 @@ func TestGaussDBLive(t *testing.T) {
 		}
 	})
 
+	t.Run("create table like", func(t *testing.T) {
+		schema := "gooq_like_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+		if _, err = database.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = database.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+		})
+		view, err := database.Schema(schema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer view.Close()
+
+		template, target := "gooq_like_template", "gooq_like_target"
+		if _, err = view.Exec(ctx, `CREATE TABLE `+template+` (
+			id bigint PRIMARY KEY,
+			name varchar(64) NOT NULL DEFAULT 'x',
+			code varchar(16) UNIQUE)`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = view.Exec(ctx, `INSERT INTO `+template+` (id, name, code) VALUES (1, 'a', 'c')`); err != nil {
+			t.Fatal(err)
+		}
+		if err = view.CreateTableLike(ctx, template, target); err != nil {
+			t.Fatal(err)
+		}
+		if err = view.CreateTableLike(ctx, template, target); err != nil {
+			t.Fatalf("repeat: %v", err)
+		}
+		var count int64
+		if err = view.Value(ctx, &count, "SELECT COUNT(*) FROM "+target); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("clone copied %d rows", count)
+		}
+		if _, err = view.Exec(ctx, `INSERT INTO `+target+` (id) VALUES (2)`); err != nil {
+			t.Fatal(err)
+		}
+		var name string
+		if err = view.Value(ctx, &name, "SELECT name FROM "+target+" WHERE id = 2"); err != nil {
+			t.Fatal(err)
+		}
+		if name != "x" {
+			t.Fatalf("default = %q", name)
+		}
+		columns, err := view.TableFields(ctx, target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(columns) != 3 || !columns[0].Primary || columns[1].Nullable || !columns[2].Unique {
+			t.Fatalf("columns = %+v", columns)
+		}
+	})
+
 	t.Run("crud", func(t *testing.T) {
 		if _, err = database.Exec(ctx, `CREATE TABLE gooq_it_acc (
 			id INT PRIMARY KEY,

@@ -80,6 +80,11 @@ type InsertRenderer interface {
 	RenderInsert(rc *RenderContext, stmt InsertStatement) (string, error)
 }
 
+// TableLikeRenderer 由支持复制表结构的方言实现。没实现表示不支持 CREATE TABLE LIKE。
+type TableLikeRenderer interface {
+	RenderCreateTableLike(rc *RenderContext, template, target string) (string, error)
+}
+
 // GroupConcatInput 是字符串聚合在各方言上的渲染输入。
 type GroupConcatInput struct {
 	// FieldSQL 是已经渲染好的聚合表达式。

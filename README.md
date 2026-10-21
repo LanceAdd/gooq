@@ -734,6 +734,31 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
 - Sharded queries can use `Cache` and `PageCache`. Without `Name`, the key is computed after SQL is rendered and includes the physical table name, arguments, result shape, and database group. Different shards do not collide. This fits data that is read often and refreshed by expiry. With `Name`, the key is that string alone. SQL and arguments are not included. The function around the query must put its inputs in the name, for example `user-name:19`. The name does not need to be `user_03`. A fixed `Name: "user-name"` makes different inputs share one entry. Writes do not delete cache entries. With an explicit name, the application deletes that same name.
 - These conventions are for the caller. gooq does not reject violations. Do not keep a logical placeholder table in the database. Put the shard key in `WHERE`. Do not use an AutoIncrement primary key; use a business key, or snowflake ids with embedded shard bits. While sharding, do not use cross-shard transactions, cross-database joins, or automatic merge or broadcast. Those statements still run. Cross-shard reads are explicit application loops, one `Physical` per shard. Group multi-row writes by shard first. One `ShardBy` writes one physical table. Rows from other shards in the same write go into that table and do not raise an error. `Batch` only splits rows of that same table.
 
+### Creating shard tables
+
+`db.DB.CreateTableLike` creates a new physical shard by cloning an existing one:
+
+```go
+name, err := EmployeeMeta.Sharding.TableName(gooq.ShardingTableMeta{
+    LogicalName: EmployeeMeta.TableName,
+    ShardNames:  EmployeeMeta.ShardNames,
+}, companyID)
+if err != nil {
+    return err
+}
+err = database.CreateTableLike(ctx, "employee_1", name)
+```
+
+- MySQL family: `CREATE TABLE IF NOT EXISTS `employee_3` LIKE `employee_1``.
+- PostgreSQL and GaussDB: `CREATE TABLE IF NOT EXISTS "employee_3" (LIKE "employee_1" INCLUDING ALL)`.
+- Indexes, defaults, and constraints are copied. Rows are not.
+- `IF NOT EXISTS` makes repeat calls safe. An existing target table is left untouched, and its structure is not compared with the template.
+- SQLite and Dameng return a `does not support CREATE TABLE LIKE` error before any SQL is sent.
+
+Pass unquoted names for both arguments; the dialect quotes them. Compute the target with the same `ShardingRule` the queries use. The method uses the `db.DB` instance's dialect and executes through `Exec`, so an open transaction in ctx is used.
+
+Both tables must be in the same schema. The method does not read `TableMeta.Schema`; for non-default schemas, call it on a `Schema(name)` view. Grant DDL permissions to a dedicated connection or config group, not the everyday read/write pool. MySQL-family DDL commits implicitly, so it cannot be atomic with application writes. New shards clone the template's current schema; existing shards must be migrated separately. Queries never create tables; call this explicitly before the first read or write of a new shard. Concurrent creation on PostgreSQL can still return a catalog uniqueness error; retry it.
+
 ## gooq-gen (codegen tool)
 
 ```bash

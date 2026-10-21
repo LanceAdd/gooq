@@ -726,6 +726,31 @@ err = dsl.Select(table.User.Name, r.Name).From(table.User).
 - 分片查询可以用 `Cache` 和 `PageCache`。没写 `Name` 时，键在 SQL 渲染之后计算，包含物理表名、参数、结果形状和数据库组，不同片不会撞，适合多读、靠过期刷新的数据。写了 `Name` 时键就是这个字符串，SQL 和参数不再参与。包住查询的函数要用输入把名字区分开，例如 `user-name:19`，不必写成 `user_03`。固定的 `Name: "user-name"` 会让不同输入共用一条缓存。写入不会自动删缓存；用显式名字时，由应用删掉同一个名字。
 - 约定由调用方自己遵守，库不拦截。库里不保留逻辑占位表；片键进 `WHERE`；不用自增主键（用业务键或嵌分片位的雪花 id）。分片场景不要做跨分片事务、跨库 join、自动归并或广播；用了这些，语句仍然能执行。跨分片读是应用层显式循环（逐片 `Physical`）。多行写入先按片分组，一次 `ShardBy` 只写一张物理表；不同片的行放进同一次写入，也会进这一张表，不会报错。`Batch` 只把这张表上的行分批提交。
 
+### 创建分片表
+
+`db.DB.CreateTableLike` 用一张现成分片克隆出新的物理分片：
+
+```go
+name, err := EmployeeMeta.Sharding.TableName(gooq.ShardingTableMeta{
+    LogicalName: EmployeeMeta.TableName,
+    ShardNames:  EmployeeMeta.ShardNames,
+}, companyID)
+if err != nil {
+    return err
+}
+err = database.CreateTableLike(ctx, "employee_1", name)
+```
+
+- MySQL 家族：`CREATE TABLE IF NOT EXISTS `employee_3` LIKE `employee_1``。
+- PostgreSQL 和 GaussDB：`CREATE TABLE IF NOT EXISTS "employee_3" (LIKE "employee_1" INCLUDING ALL)`。
+- 复制索引、默认值和约束，不复制数据。
+- `IF NOT EXISTS` 让重复调用安全；目标表已存在时保持原样，也不会与模板比对结构。
+- SQLite 和达梦在发 SQL 之前返回 `does not support CREATE TABLE LIKE` 错误。
+
+两个参数都传未加引号的表名，方言负责加引号；目标名用查询路径同一套 `ShardingRule` 算出来。方法使用 `db.DB` 实例的方言并通过 `Exec` 执行，因此会加入 ctx 里已打开的事务。
+
+两张表必须在同一个 schema。方法不读 `TableMeta.Schema`；非默认 schema 要在 `Schema(name)` 视图上调用。DDL 权限给独立的高权限连接或配置组，不要授予日常读写池。MySQL 家族的 DDL 会隐式提交，不能和应用写入放在一个原子事务里。新分片克隆模板表当前结构，已有分片要单独迁移。查询不会自动建表；新分片的第一次读写之前必须显式调用本方法。PostgreSQL 并发建同名表仍可能报系统目录唯一键冲突，重试即可。
+
 ## gooq-gen（代码生成工具）
 
 ```bash
