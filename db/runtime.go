@@ -8,7 +8,6 @@ import (
 
 	"github.com/gogf/gf/v2/net/gtrace"
 	"github.com/gogf/gf/v2/os/glog"
-	"github.com/gogf/gf/v2/util/gconv"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -68,27 +67,71 @@ func (d *DB) logSQL(ctx context.Context, query string, args []any, cost time.Dur
 	}
 	line := fmt.Sprintf("[%d ms] [%s] %s", cost.Milliseconds(), d.group, formatSQL(query, args))
 	if err != nil {
-		logger.Error(ctx, line+"\nError: "+err.Error())
+		logger.Error(ctx, line+"\n  error: "+strings.ReplaceAll(err.Error(), "\n", "\n    "))
 		return
 	}
 	logger.Debug(ctx, line)
 }
 
+const maxArgLength = 2000
+
 func formatSQL(query string, args []any) string {
-	if len(args) == 0 || !strings.Contains(query, "?") {
+	if len(args) == 0 {
 		return query
 	}
 	var builder strings.Builder
-	argIndex := 0
-	for i := 0; i < len(query); i++ {
-		if query[i] == '?' && argIndex < len(args) {
-			builder.WriteString(gconv.String(args[argIndex]))
-			argIndex++
-			continue
-		}
-		builder.WriteByte(query[i])
+	builder.WriteString(query)
+	fmt.Fprintf(&builder, "\n  args (%d):", len(args))
+	for i, arg := range args {
+		fmt.Fprintf(&builder, "\n    %d: %s", i+1, formatArg(arg))
 	}
 	return builder.String()
+}
+
+func formatArg(arg any) string {
+	switch value := arg.(type) {
+	case nil:
+		return "NULL"
+	case string:
+		return formatStringArg(value)
+	case time.Time:
+		return value.Format(time.RFC3339Nano)
+	case []byte:
+		return formatBytesArg(value)
+	default:
+		return formatDefaultArg(value)
+	}
+}
+
+func formatStringArg(value string) string {
+	runes := []rune(value)
+	if len(runes) > maxArgLength {
+		return fmt.Sprintf("%q (truncated)", string(runes[:maxArgLength]))
+	}
+	return fmt.Sprintf("%q", value)
+}
+
+func formatBytesArg(value []byte) string {
+	length := len(value)
+	if length > maxArgLength {
+		value = value[:maxArgLength]
+	}
+	text := fmt.Sprintf("<%d bytes> 0x%x", length, value)
+	if length > maxArgLength {
+		text += " (truncated)"
+	}
+	return text
+}
+
+func formatDefaultArg(value any) string {
+	text := fmt.Sprintf("%v", value)
+	text = strings.ReplaceAll(text, "\n", "\\n")
+	text = strings.ReplaceAll(text, "\r", "\\r")
+	runes := []rune(text)
+	if len(runes) > maxArgLength {
+		text = string(runes[:maxArgLength]) + " (truncated)"
+	}
+	return text
 }
 
 func (d *DB) startSpan(ctx context.Context, query string) (context.Context, trace.Span) {
