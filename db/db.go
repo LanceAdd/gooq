@@ -67,18 +67,19 @@ type txScope struct{ _ byte }
 
 // DB 是一组共用同一方言的主库和从库连接池。
 type DB struct {
-	group   string
-	scope   *txScope
-	masters []node
-	slaves  []node
-	route   Route
-	schema  string
-	shared  bool
-	dialect gooq.Dialect
-	driver  Driver
-	debug   *gtype.Bool
-	dryRun  *gtype.Bool
-	logger  *glog.Logger
+	group     string
+	scope     *txScope
+	masters   []node
+	slaves    []node
+	route     Route
+	schema    string
+	shared    bool
+	dialect   gooq.Dialect
+	driver    Driver
+	debug     *gtype.Bool
+	dryRun    *gtype.Bool
+	sqlFormat *gtype.String
+	logger    *glog.Logger
 }
 
 // Tx 是在主库连接上开启的事务。
@@ -148,6 +149,7 @@ func openGroup(group string, configs []Config) (*DB, error) {
 	}
 	database.debug = gtype.NewBool(false)
 	database.dryRun = gtype.NewBool(false)
+	database.sqlFormat = gtype.NewString(string(SQLFormatArgs))
 	database.logger = glog.New()
 	for _, cfg := range configs {
 		if cfg.Debug {

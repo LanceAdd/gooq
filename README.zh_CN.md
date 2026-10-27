@@ -617,6 +617,14 @@ name := db.Get(row, User.Name)  // string
 
 组内有从库时读走从库，写和 `BEGIN` 走主库。`Master()` / `Slave()` 强制指定。`SetDebug` 打印 SQL，`SetDryRun` 跳过执行，`Prepare` 预处理语句，`Schema` 切换 MySQL 库名或 PostgreSQL search_path。
 
+`SetSQLFormat` 选择 debug 日志里的参数展示方式。`args` 是默认值：SQL 原样输出，下面按编号列参数。`inline` 把参数写回 SQL。inline 只用于阅读：不保证可以直接执行，参数值会写进日志，字符串字面量或原始 SQL 里的占位符不会被识别。需要可执行的 SQL 用 `ToSql`。配置文件里对应 `gooq.logger.sqlFormat`。
+
+```yaml
+gooq:
+  logger:
+    sqlFormat: inline
+```
+
 ```yaml
 gooq:
   defaultGroup: orders

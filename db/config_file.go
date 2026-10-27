@@ -21,6 +21,7 @@ const runtimeConfigFileName = "gooq"
 
 var (
 	configLoaded       = gtype.NewBool(false)
+	loggerSQLFormat    = gtype.NewString(string(SQLFormatArgs))
 	groupLoggerConfigs = gmap.NewKVMap[string, map[string]any](true)
 )
 
@@ -32,9 +33,10 @@ type fileConfig struct {
 	Database     []databaseGroup `json:"database"`
 }
 
-// loggerConfig 只校验文件里的 level。其余 logger 字段原样交给 glog.SetConfigWithMap。
+// loggerConfig 解析 level 和 sqlFormat。其余 logger 字段原样交给 glog.SetConfigWithMap。
 type loggerConfig struct {
-	Level string `json:"level" v:"in:all,dev,develop,prod,product,debu,debug,info,noti,notice,warn,warning,erro,error,crit,critical"`
+	Level     string `json:"level" v:"in:all,dev,develop,prod,product,debu,debug,info,noti,notice,warn,warning,erro,error,crit,critical"`
+	SQLFormat string `json:"sqlFormat"`
 }
 
 // databaseGroup 是一个配置组。Name 是 Instance 使用的组名。
@@ -98,7 +100,7 @@ func (e endpointConfig) toConfig() Config {
 // 这次加载会盖过更早的 SetDefaultGroup。
 // 不传配置时只读取名为 gooq 的配置文件，不读取应用的 config 文件。
 // 已经注册的组保持不变，只补写 logger。
-// gooq.logger 配置本次从文件载入的每一组的 SQL 日志器。
+// gooq.logger 配置本次从文件载入的每一组的 SQL 日志器和 debug SQL 展示方式。
 // 节点上的 debug 会在该组打开后打开 SQL 日志。
 func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 	if ctx == nil {
@@ -135,6 +137,15 @@ func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 		return fmt.Errorf("gooq: %w", err)
 	}
 	loggerCfg := loggerMap(value)
+	loggerPresent := loggerCfg != nil
+	if loggerPresent {
+		format, formatErr := parseSQLFormat(file.Logger.SQLFormat)
+		if formatErr != nil {
+			return formatErr
+		}
+		loggerSQLFormat.Set(string(format))
+		removeLoggerSQLFormat(loggerCfg)
+	}
 	if len(loggerCfg) > 0 {
 		if err = glog.New().SetConfigWithMap(loggerCfg); err != nil {
 			return err
@@ -157,18 +168,24 @@ func LoadConfig(ctx context.Context, source ...*gcfg.Config) error {
 			nodes[i] = endpoint.toConfig()
 		}
 		if groupConfigs.Contains(group.Name) {
-			if len(loggerCfg) == 0 {
+			if !loggerPresent {
 				continue
 			}
 			groupMu.Lock()
-			groupLoggerConfigs.Set(group.Name, loggerCfg)
+			if len(loggerCfg) > 0 {
+				groupLoggerConfigs.Set(group.Name, loggerCfg)
+			}
 			database := groupInstances.Get(group.Name)
 			groupMu.Unlock()
-			if database != nil {
+			if database == nil {
+				continue
+			}
+			if len(loggerCfg) > 0 {
 				if err = applyGroupLogger(database); err != nil {
 					return err
 				}
 			}
+			database.SetSQLFormat(SQLFormat(loggerSQLFormat.Val()))
 			continue
 		}
 		if err = SetConfig(group.Name, nodes...); err != nil {
@@ -249,6 +266,26 @@ func loggerMap(value *gvar.Var) map[string]any {
 		return nil
 	}
 	return gconv.Map(raw)
+}
+
+func parseSQLFormat(value string) (SQLFormat, error) {
+	switch format := SQLFormat(strings.ToLower(strings.TrimSpace(value))); format {
+	case "", SQLFormatArgs:
+		return SQLFormatArgs, nil
+	case SQLFormatInline:
+		return SQLFormatInline, nil
+	default:
+		return "", fmt.Errorf("gooq: logger.sqlFormat %q is not args or inline", value)
+	}
+}
+
+// removeLoggerSQLFormat 防止 sqlFormat 进入 glog 配置。
+func removeLoggerSQLFormat(cfg map[string]any) {
+	for key := range cfg {
+		if strings.EqualFold(key, "sqlFormat") {
+			delete(cfg, key)
+		}
+	}
 }
 
 // runtimeConfig 是运行时配置。文件名固定为 gooq，由 gcfg 按扩展名搜索。

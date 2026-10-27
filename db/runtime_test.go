@@ -103,6 +103,53 @@ func TestLoadConfigLoggerAndDebug(t *testing.T) {
 	}
 }
 
+func TestLoadConfigSQLFormat(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "inline.db")
+	link := "sqlite::@file(" + filepath.ToSlash(path) + ")"
+	content := "gooq:\n  logger:\n    level: all\n    stdout: false\n    sqlFormat: inline\n  database:\n    - name: inlinegroup\n      endpoints:\n        - link: '" + link + "'\n          debug: true\n"
+	adapter, err := gcfg.NewAdapterContent(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(adapter)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := RemoveConfig("inlinegroup"); err != nil {
+			t.Error(err)
+		}
+		loggerSQLFormat.Set(string(SQLFormatArgs))
+	})
+	database, err := Instance("inlinegroup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	database.Logger().SetWriter(&buf)
+	if _, err = database.Exec(ctx, `CREATE TABLE item (id INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = database.Exec(ctx, `INSERT INTO item(id) VALUES (?)`, 1); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, `INSERT INTO item(id) VALUES (1)`) {
+		t.Fatalf("inline log %q", got)
+	}
+	if strings.Contains(got, "args (1):") {
+		t.Fatalf("inline log still lists args %q", got)
+	}
+
+	bad, err := gcfg.NewAdapterContent("gooq:\n  logger:\n    sqlFormat: values\n  database:\n    - name: badformat\n      endpoints:\n        - link: '" + link + "'\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = LoadConfig(ctx, gcfg.NewWithAdapter(bad)); err == nil || !strings.Contains(err.Error(), "logger.sqlFormat") {
+		t.Fatalf("invalid sqlFormat err = %v", err)
+	}
+}
+
 func isolateRuntimeConfig(t *testing.T, dir string) {
 	t.Helper()
 	cfg := gcfg.Instance(runtimeConfigFileName)

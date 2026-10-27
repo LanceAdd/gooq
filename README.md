@@ -621,6 +621,14 @@ Execution binds `DB(name)` or the default configuration group and joins a transa
 
 Reads use a slave when the group has one; writes and `BEGIN` use a master. `Master()` and `Slave()` force the pool. `SetDebug` logs SQL, `SetDryRun` skips execution, `Prepare` prepares a statement, and `Schema` switches the MySQL database or PostgreSQL search_path.
 
+`SetSQLFormat` chooses how debug logs render arguments. `args` is the default: the SQL is printed unchanged with a numbered argument list below it. `inline` writes the arguments back into the SQL. Inline output is for reading only: it is not guaranteed to run, values are written to the log, and placeholders inside string literals or raw SQL are not parsed. Use `ToSql` when you need executable SQL. The same choice is available under `gooq.logger.sqlFormat`.
+
+```yaml
+gooq:
+  logger:
+    sqlFormat: inline
+```
+
 ```yaml
 gooq:
   defaultGroup: orders

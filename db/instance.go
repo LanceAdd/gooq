@@ -131,6 +131,7 @@ func Instance(name ...string) (*DB, error) {
 		}
 		return nil, err
 	}
+	database.SetSQLFormat(SQLFormat(loggerSQLFormat.Val()))
 	groupInstances.Set(group, database)
 	return database, nil
 }
